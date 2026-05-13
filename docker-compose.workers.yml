@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: craftmen_db
+      POSTGRES_USER: craftmen_user
+      POSTGRES_PASSWORD: craftmen_password
+      POSTGRES_DB: craftmen_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  celery-email:
+    build: .
+    command: celery -A app.core.celery_app worker -Q email --loglevel=info --concurrency=4 --without-gossip --optimization=fair
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+
+  celery-cleanup:
+    build: .
+    command: celery -A app.core.celery_app worker -Q cleanup --loglevel=info --concurrency=2 --without-gossip --optimization=fair
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+
+  celery-beat:
+    build: .
+    command: celery -A app.core.celery_app beat --loglevel=info --schedule=/app/celerybeat-schedule
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+
+volumes:
+  redis_data:
+  postgres_data:

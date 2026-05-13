@@ -1,0 +1,72 @@
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from sqlalchemy.orm import Session
+from typing import Any
+
+from app.core.database import get_db
+from app.core.rate_limiter import check_password_reset_rate_limit
+from app.schemas.auth import PasswordResetConfirm, MessageResponse
+from app.services.auth import AuthService
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password_with_otp(
+    *,
+    db: Session = Depends(get_db),
+    reset_data: PasswordResetConfirm,
+    request: Request
+) -> Any:
+    """
+    Reset password using OTP verification
+    """
+    
+    # Check rate limit
+    check_password_reset_rate_limit(request)
+    
+    auth_service = AuthService(db)
+    
+    # Verify OTP for password reset
+    from app.models.user import OTP
+    otp = db.query(OTP).filter(
+        OTP.email == reset_data.token,  # Using token field as email for simplicity
+        OTP.otp_code == reset_data.otp,
+        OTP.otp_type == "password_reset",
+        OTP.is_used == False,
+        OTP.expires_at > db.query(OTP).first().created_at if db.query(OTP).first() else None
+    ).first()
+    
+    if not otp:
+        logger.warning("Invalid or expired password reset OTP")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code"
+        )
+    
+    # Get user
+    user = auth_service.user_repo.get_user_by_email(otp.email)
+    if not user:
+        logger.warning(f"Password reset for non-existent user: {otp.email}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User not found"
+        )
+    
+    # Mark OTP as used
+    otp.is_used = True
+    db.commit()
+    
+    # Update password
+    from app.core.security import get_password_hash
+    user.hashed_password = get_password_hash(reset_data.new_password)
+    db.commit()
+    
+    # Revoke all tokens for security
+    revoked_count = auth_service.token_repo.revoke_all_user_tokens(user.id)
+    
+    logger.info(f"Password reset completed for user: {user.email}, revoked {revoked_count} tokens")
+    
+    return MessageResponse(message="Password reset successfully")
