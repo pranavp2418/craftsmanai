@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     SOCKETIO_CORS_ALLOWED_ORIGINS: List[str] = ["*"]
     SOCKETIO_REDIS_ADAPTER: bool = False
 
+    # Server-Sent Events
+    SSE_HEARTBEAT_INTERVAL: float = 25.0  # seconds
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/app.log"
