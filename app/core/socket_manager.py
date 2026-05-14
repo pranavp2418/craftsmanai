@@ -22,6 +22,7 @@ from socketio import AsyncServer, AsyncRedisManager
 
 from app.core.config import settings
 from app.core.jwt import decode_access_token
+from app.core.realtime_state import SessionData, realtime_state
 
 logger = logging.getLogger(__name__)
 
@@ -164,27 +165,44 @@ async def connect(sid: str, environ: dict, auth: dict) -> bool:
     username = user_info["username"]
     email = user_info["email"]
 
-    # Store user info on the session for later lookups
-    await sio.save_session(sid, {
+    connected_at = datetime.now(UTC).isoformat()
+    session_payload = {
         "user_id": user_id,
         "username": username,
         "email": email,
-        "connected_at": datetime.now(UTC).isoformat(),
-    })
+        "connected_at": connected_at,
+    }
 
-    # Auto-join user's personal notification room
-    await sio.enter_room(sid, f"user:{user_id}")
-    # Auto-join general notifications room
-    await sio.enter_room(sid, "notifications")
-    # Auto-join chat rooms for the user (the client may subscribe to more later)
+    # Store user info on the socket.io session for quick lookups within handlers
+    await sio.save_session(sid, session_payload)
 
-    # Broadcast presence to everyone who watches "user_updates"
-    await sio.emit("user_status", {
-        "user_id": user_id,
-        "status": "online",
-        "username": username,
-        "last_seen": datetime.now(UTC).isoformat(),
-    }, room="user_updates")
+    # Determine default and previously remembered rooms to restore subscriptions
+    default_rooms = {f"user:{user_id}", "notifications"}
+    remembered_rooms = set(await realtime_state.list_user_rooms(user_id))
+    rooms_to_join = sorted(default_rooms | remembered_rooms)
+
+    for room in rooms_to_join:
+        await sio.enter_room(sid, room)
+
+    # Persist session/room state in Redis (or in-memory fallback)
+    session_model = SessionData(
+        sid=sid,
+        user_id=user_id,
+        username=username,
+        email=email,
+        connected_at=connected_at,
+    )
+    is_first_connection, _ = await realtime_state.register_session(session_model, rooms_to_join)
+
+    # Broadcast presence to everyone who watches "user_updates" only when the user
+    # becomes online (first active socket).
+    if is_first_connection:
+        await sio.emit("user_status", {
+            "user_id": user_id,
+            "status": "online",
+            "username": username,
+            "last_seen": connected_at,
+        }, room="user_updates")
 
     logger.info("Socket.IO connect  sid=%s  user=%s", sid, user_id)
 
@@ -194,7 +212,7 @@ async def connect(sid: str, environ: dict, auth: dict) -> bool:
         "user_id": user_id,
         "email": email,
         "username": username,
-        "connected_at": datetime.now(UTC).isoformat(),
+        "connected_at": connected_at,
     }, to=sid)
 
     return True
@@ -206,13 +224,24 @@ async def disconnect(sid: str) -> None:
     session = await sio.get_session(sid)
     user_id = session.get("user_id") if session else None
 
-    if user_id:
+    stored_session, remaining = await realtime_state.remove_session(sid)
+    if not user_id and stored_session:
+        user_id = stored_session.user_id
+
+    if user_id and remaining == 0:
         await sio.emit("user_status", {
             "user_id": user_id,
             "status": "offline",
             "last_seen": datetime.now(UTC).isoformat(),
         }, room="user_updates")
         logger.info("Socket.IO disconnect  sid=%s  user=%s", sid, user_id)
+    elif user_id:
+        logger.info(
+            "Socket.IO disconnect sid=%s user=%s (other sockets still online=%d)",
+            sid,
+            user_id,
+            remaining,
+        )
     else:
         logger.info("Socket.IO disconnect  sid=%s  (no session)", sid)
 

@@ -10,6 +10,7 @@ from datetime import datetime, UTC
 import logging
 
 from app.core.socket_manager import sio, emit_to_room, get_sio
+from app.core.realtime_state import realtime_state
 from app.schemas.websocket import (
     ChatMessageData,
     SendChatMessageRequest,
@@ -43,9 +44,18 @@ async def subscribe(sid: str, room: str) -> dict:
         }, to=sid)
         return {"success": False, "error": "Reserved room"}
 
+    session = await _get_session_or_error(sid)
+    if not session:
+        return {"success": False, "error": "Session not found"}
+
     await sio.enter_room(sid, room)
     logger.info("sid=%s subscribed to room=%s", sid, room)
     await sio.emit("room_subscribed", {"room": room}, to=sid)
+
+    user_id = session.get("user_id")
+    if user_id:
+        await realtime_state.add_rooms(user_id, [room])
+
     return {"success": True, "room": room}
 
 
@@ -71,9 +81,18 @@ async def unsubscribe(sid: str, room: str) -> dict:
         }, to=sid)
         return {"success": False, "error": "Reserved room"}
 
+    session = await _get_session_or_error(sid)
+    if not session:
+        return {"success": False, "error": "Session not found"}
+
     await sio.leave_room(sid, room)
     logger.info("sid=%s unsubscribed from room=%s", sid, room)
     await sio.emit("room_unsubscribed", {"room": room}, to=sid)
+
+    user_id = session.get("user_id")
+    if user_id:
+        await realtime_state.remove_rooms(user_id, [room])
+
     return {"success": True, "room": room}
 
 
@@ -308,6 +327,10 @@ async def join_chat_room(sid: str, data: dict) -> dict:
     # Notify existing members
     username = session.get("username", "Unknown")
 
+    user_id = session.get("user_id")
+    if user_id:
+        await realtime_state.add_rooms(user_id, [chat_room])
+
     await sio.emit("room_update", {
         "room_id": chat_room,
         "type": "user_joined",
@@ -338,6 +361,9 @@ async def leave_chat_room(sid: str, data: dict) -> dict:
     await sio.leave_room(sid, chat_room)
 
     username = session.get("username", "Unknown")
+    user_id = session.get("user_id")
+    if user_id:
+        await realtime_state.remove_rooms(user_id, [chat_room])
 
     await sio.emit("room_update", {
         "room_id": chat_room,
