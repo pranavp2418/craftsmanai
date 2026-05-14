@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 
+import socketio
+
 from .api.v2.router import api_router
 from .core.config import settings
 from .core.middleware import (
@@ -10,8 +12,14 @@ from .core.middleware import (
     IPBasedRateLimitMiddleware,
     SecurityHeadersMiddleware,
     RequestLoggingMiddleware,
-    HealthCheckMiddleware
+    HealthCheckMiddleware,
 )
+from .core.socket_manager import sio
+
+# ---------------------------------------------------------------------------
+# Import WebSocket event handlers so the @sio.event decorators register them
+# ---------------------------------------------------------------------------
+from .core import websocket_events  # noqa: F401
 
 # Configure logging
 logging.basicConfig(
@@ -19,11 +27,12 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.FileHandler(settings.LOG_FILE),
-        logging.StreamHandler()
-    ]
+        logging.StreamHandler(),
+    ],
 )
 
 logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -33,22 +42,26 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Craftmen Backend shutting down...")
 
-app = FastAPI(
+
+# ------------------------------------------------------------------
+# Build the inner FastAPI application (REST routes)
+# ------------------------------------------------------------------
+fastapi_app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Backend API for Craftmen application",
     version="2.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Add middleware in correct order
-app.add_middleware(HealthCheckMiddleware)
-app.add_middleware(RequestLoggingMiddleware)
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(IPBasedRateLimitMiddleware)
-app.add_middleware(GlobalRateLimitMiddleware)
+fastapi_app.add_middleware(HealthCheckMiddleware)
+fastapi_app.add_middleware(RequestLoggingMiddleware)
+fastapi_app.add_middleware(SecurityHeadersMiddleware)
+fastapi_app.add_middleware(IPBasedRateLimitMiddleware)
+fastapi_app.add_middleware(GlobalRateLimitMiddleware)
 
 # CORS middleware
-app.add_middleware(
+fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
     allow_credentials=True,
@@ -56,5 +69,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routes
-app.include_router(api_router, prefix="/api/v2")
+# Register REST API routes
+fastapi_app.include_router(api_router, prefix="/api/v2")
+
+# ------------------------------------------------------------------
+# Wrap everything: Socket.IO as outer app, FastAPI as fallback
+# This ensures Socket.IO handles /socket.io/ directly without going
+# through FastAPI's middleware chain (which breaks WebSocket protocol).
+# ------------------------------------------------------------------
+app = socketio.ASGIApp(
+    socketio_server=sio,
+    other_asgi_app=fastapi_app,
+    socketio_path=settings.SOCKETIO_PATH.lstrip("/"),
+)
+
+# Export both for different use cases:
+# - fastapi_app: For REST API routes, dependency injection, tests
+# - app: For ASGI server startup (includes Socket.IO wrapper)
+__all__ = ["fastapi_app", "app"]

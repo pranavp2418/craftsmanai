@@ -1,23 +1,63 @@
-from datetime import datetime
-import jwt
+"""
+JWT utility functions for token creation and validation.
+
+Uses python-jose (matching app/core/security.py) for JWT operations.
+"""
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Tuple
+from jose import JWTError, jwt
 from app.core.config import settings
 
-def create_access_token(user_id: int) -> tuple[str, str, datetime]:
-    payload = {
-        "user_id": user_id,
-        "exp": datetime.utcnow() + datetime.timedelta(hours=24),
-    }
-    token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-    jti = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]).get("jti")
-    expires_at = payload["exp"]
-    return token, jti, expires_at  # Ensure tuple return
 
-def create_refresh_token(user_id: int) -> tuple[str, str, datetime]:
+def create_access_token(user_id: int) -> Tuple[str, str, datetime]:
+    """Create a JWT access token with standard claims (sub, email, username)."""
+    now = datetime.now(timezone.utc)
+    token_id = f"jti_{user_id}_{int(now.timestamp())}"
     payload = {
-        "user_id": user_id,
-        "exp": datetime.utcnow() + datetime.timedelta(hours=7),
+        "sub": str(user_id),
+        "iat": now,
+        "exp": now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+        "jti": token_id,
+        "type": "access",
     }
     token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-    jti = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]).get("jti")
     expires_at = payload["exp"]
-    return token, jti, expires_at  # Ensure tuple return
+    return token, token_id, expires_at
+
+
+def create_refresh_token(user_id: int) -> Tuple[str, str, datetime]:
+    """Create a JWT refresh token."""
+    now = datetime.now(timezone.utc)
+    token_id = f"jti_ref_{user_id}_{int(now.timestamp())}"
+    payload = {
+        "sub": str(user_id),
+        "iat": now,
+        "exp": now + timedelta(days=settings.REFRESH_TOKEN_DAYS),
+        "jti": token_id,
+        "type": "refresh",
+    }
+    token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    expires_at = payload["exp"]
+    return token, token_id, expires_at
+
+
+def decode_access_token(token: str) -> Optional[dict]:
+    """
+    Decode and validate a JWT access token.
+
+    Args:
+        token: The JWT string.
+
+    Returns:
+        The decoded payload dict if valid, None otherwise.
+    """
+    try:
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+            options={"verify_exp": True},
+        )
+        return payload
+    except JWTError:
+        return None

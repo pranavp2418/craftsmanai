@@ -57,7 +57,7 @@ def db_session(db) -> Generator[Session, None, None]:
 @pytest.fixture
 def client(db) -> Generator[TestClient, None, None]:
     """Create test client using the real database from .env"""
-    from app.main import app
+    from app.main import fastapi_app as app
     
     # Override database dependency
     app.dependency_overrides[get_db] = override_get_db

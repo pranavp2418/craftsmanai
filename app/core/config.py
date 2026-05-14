@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # CORS
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
 
+    # Socket.IO
+    SOCKETIO_PATH: str = "/socket.io"
+    SOCKETIO_CORS_ALLOWED_ORIGINS: List[str] = ["*"]
+    SOCKETIO_REDIS_ADAPTER: bool = False
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/app.log"
