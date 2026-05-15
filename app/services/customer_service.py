@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.party import Customer
+from app.models.customer import Customer
 from app.repositories.customer import CustomerRepository
 
 

@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.party import Manufacturer
+from app.models.manufacturer import Manufacturer
 
 
 class ManufacturerRepository:

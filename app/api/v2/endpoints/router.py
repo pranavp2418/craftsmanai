@@ -7,6 +7,11 @@ from .websocket import router as websocket_router
 from .sse import router as sse_router
 from .design import router as design_router
 from .design_variant import router as design_variant_router
+from .customer import router as customer_router
+from .manufacturer import router as manufacturer_router
+from .order import router as order_router
+from .quotes import router as quotes_router
+from .public import router as public_router
 
 api_router = APIRouter()
 
@@ -17,3 +22,8 @@ api_router.include_router(websocket_router, prefix="/endpoints", tags=["websocke
 api_router.include_router(sse_router, prefix="/endpoints", tags=["sse"])
 api_router.include_router(design_router)
 api_router.include_router(design_variant_router)
+api_router.include_router(customer_router)
+api_router.include_router(manufacturer_router)
+api_router.include_router(order_router)
+api_router.include_router(quotes_router)
+api_router.include_router(public_router)

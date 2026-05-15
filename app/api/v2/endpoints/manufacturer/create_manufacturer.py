@@ -7,7 +7,7 @@ from app.models.user import User
 
 router = APIRouter()
 
-@router.post("", response_model=ManufacturerResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=ManufacturerResponse, status_code=status.HTTP_201_CREATED)
 def create_manufacturer(
     request: ManufacturerCreateRequest,
     db: Session = Depends(get_db),

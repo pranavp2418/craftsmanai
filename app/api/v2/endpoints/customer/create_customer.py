@@ -7,7 +7,7 @@ from app.models.user import User
 
 router = APIRouter()
 
-@router.post("", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED)
 def create_customer(
     request: CustomerCreateRequest,
     db: Session = Depends(get_db),

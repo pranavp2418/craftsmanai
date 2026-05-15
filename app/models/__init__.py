@@ -11,7 +11,8 @@ from .design import (
     DesignStatus,
     DesignShareStatus,
 )
-from .party import Customer, Manufacturer
+from .customer import Customer
+from .manufacturer import Manufacturer
 from .order import (
     Order,
     ManufacturerQuote,

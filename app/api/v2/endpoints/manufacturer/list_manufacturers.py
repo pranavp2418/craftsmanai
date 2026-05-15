@@ -7,7 +7,7 @@ from app.models.user import User
 
 router = APIRouter()
 
-@router.get("", response_model=ManufacturerListResponse)
+@router.get("/", response_model=ManufacturerListResponse)
 def list_manufacturers(
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),

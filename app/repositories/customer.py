@@ -3,7 +3,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from app.models.party import Customer
+from app.models.customer import Customer
 
 
 class CustomerRepository:

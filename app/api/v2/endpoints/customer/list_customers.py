@@ -7,7 +7,7 @@ from app.models.user import User
 
 router = APIRouter()
 
-@router.get("", response_model=CustomerListResponse)
+@router.get("/", response_model=CustomerListResponse)
 def list_customers(
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),

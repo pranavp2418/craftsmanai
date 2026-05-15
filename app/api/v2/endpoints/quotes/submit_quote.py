@@ -7,7 +7,7 @@ from app.models.user import User
 
 router = APIRouter()
 
-@router.post("", response_model=ManufacturerQuoteResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=ManufacturerQuoteResponse, status_code=status.HTTP_201_CREATED)
 def submit_quote(
     request: ManufacturerQuoteSubmitRequest,
     db: Session = Depends(get_db),
