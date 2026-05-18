@@ -344,7 +344,8 @@ class AuthService:
         self.db.commit()
         
         # Mark email as verified
-        if not user.is_verified:
+        is_new_verification = not user.is_verified
+        if is_new_verification:
             user.is_verified = True
             self.db.commit()
         
@@ -380,6 +381,7 @@ class AuthService:
             "username": user.username,
             "is_superuser": user.is_superuser,
             "is_verified": user.is_verified,
+            "is_newly_verified": is_new_verification,
             "notification_message": "Welcome to craftsman.ai! Your account has been verified successfully.",
             "profile_image_url": None
         }

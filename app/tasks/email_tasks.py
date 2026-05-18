@@ -37,6 +37,7 @@ def send_signup_otp_email(self, to: str, otp: str, user_name: str):
         )
         
         logger.info(f"✅ {task_name} completed successfully for {to}")
+        return True
         
     except Exception as exc:
         logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
@@ -71,6 +72,7 @@ def send_password_reset_email(self, to: str, otp: str, user_name: str):
         )
         
         logger.info(f"✅ {task_name} completed successfully for {to}")
+        return True
         
     except Exception as exc:
         logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
@@ -103,6 +105,7 @@ def send_welcome_email(self, to: str, user_name: str):
         )
         
         logger.info(f"✅ {task_name} completed successfully for {to}")
+        return True
         
     except Exception as exc:
         logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")

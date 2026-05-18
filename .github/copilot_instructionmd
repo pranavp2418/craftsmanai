@@ -1,0 +1,91 @@
+S1. Secrets & Environment Variables
+NEVER hardcode any of the following in source code, config files, comments, or output:
+Database connection strings (DATABASE_URL)
+API keys: Stripe, Razorpay, Anthropic, Resend, Twilio, AWS, or any third-party service
+JWT secrets (JWT_SECRET), webhook signing secrets
+Any password, private key, access token, OAuth client secret, or .pem file
+URLs with embedded credentials (e.g., postgres://user:pass@host)
+Always reference secrets via environment variables: process.env.VAR or os.environ["VAR"]
+When generating .env examples, use placeholder values only — never real-looking keys
+New env vars must be added to .env.example with a descriptive comment
+# .env.example — safe to commit (placeholders only)
+DATABASE_URL=postgresql://user:password@localhost:5432/mydb
+JWT_SECRET=your-secret-key-minimum-32-characters
+STRIPE_SECRET_KEY=sk_test_placeholder
+RESEND_API_KEY=re_placeholder
+S2. Git Safety
+NEVER generate code that commits these to git: - .env files (any environment) - node_modules/, __pycache__/, .venv/, vendor/ - Build artifacts: .next/, dist/, build/ - Database dumps or seed files with real data - SSL certificates, private keys, .pem files - IDE secrets (.idea/, .vscode/settings.json with tokens)
+
+Always include a proper .gitignore when scaffolding projects. Always commit lock files (package-lock.json, poetry.lock).
+
+Branch rules: - NEVER commit directly to main or develop. All work goes through feature branches. - Branch format: feature/FON-[ticket]-[description], fix/FON-[ticket]-[description] - Commit format: type(scope): description — e.g., feat(auth): add JWT refresh rotation
+
+S3. Authentication Fundamentals
+Access tokens stored in memory only (React state / Zustand / variable). Refresh tokens in HttpOnly, Secure, SameSite=Strict cookies.
+NEVER store tokens in localStorage or sessionStorage — vulnerable to XSS.
+NEVER place JWT secrets or any secret key in frontend code.
+Every API route must verify the JWT and check authorisation before any business logic.
+The tenantId and user role must come from the verified JWT — never from the request body.
+S4. Password Security
+NEVER store passwords in plain text. Use bcrypt (cost factor 10+) or Argon2.
+NEVER send passwords back in API responses — not even hashed.
+NEVER compare plain-text passwords. Always compare hashes.
+Implement account lockout or rate limiting after repeated failed login attempts.
+S5. Logging — What to NEVER Log
+NEVER log any of the following: - Passwords (plain-text or hashed) - JWT tokens (access or refresh) - Card numbers, CVV, or payment details - Full request bodies containing PII - API keys, AWS credentials, database connection strings - Session tokens or cookies
+
+NEVER use console.log in production code. Use the structured logger: - Node.js → Pino - Python → loguru
+
+Log the action, relevant IDs, and outcome — not the sensitive payload.
+
+S6. Error Handling
+NEVER expose stack traces, file paths, database schemas, or library versions to the client in production.
+Return generic error messages with machine-readable error codes:
+{ "success": false, "error": { "code": "INTERNAL_ERROR", "message": "Something went wrong" } }
+NEVER swallow errors silently (empty catch blocks). Always log and handle.
+When a security check fails or throws, deny access by default — never fail open.
+// ❌ WRONG — fails open
+let isAuthorised = true;
+try { isAuthorised = await checkPermission(user, resource); } catch { }
+
+// ✅ Correct — fails closed
+let isAuthorised = false;
+try { isAuthorised = await checkPermission(user, resource); } catch (error) {
+  logger.error({ error, userId: user.id }, "Permission check failed");
+}
+S7. Payment Security
+Card numbers, CVV, and expiry dates must NEVER pass through the server.
+Always use Razorpay Checkout or Stripe Elements — hosted UI only.
+The webhook is the authoritative payment confirmation — not the client-side callback.
+Always verify webhook signatures before processing.
+Use idempotency keys to prevent duplicate charges.
+All payment amounts must be validated server-side. Never trust the price from the client.
+S8. Environment Separation
+NEVER use live Stripe/Razorpay keys in development or staging.
+NEVER import real production data without anonymising it.
+Dev/staging must NEVER send real emails, push notifications, or SMS to real users.
+Always include a dev/staging suppression guard in notification code.
+S9. Dependency & Supply Chain Security
+Always commit lock files (package-lock.json, poetry.lock) to git.
+NEVER use * or broad version ranges in package.json or requirements.txt.
+Run npm audit / pip audit regularly. Fix critical and high vulnerabilities before merging.
+NEVER install packages from untrusted sources. Verify names carefully — typosquatting is real.
+Review postinstall scripts of new dependencies before adding them.
+S10. GDPR & Data Privacy
+Any data that identifies an EU/UK user is personal data: name, email, IP, device ID, phone.
+Code must support right to erasure — delete or anonymise all personal data for a user.
+Data minimisation — only store what is needed. Never store PII in logs or analytics.
+Cookie consent must be implemented before setting non-essential cookies.
+S11. AI-Specific Security
+NEVER pass raw user input directly into AI/LLM prompts without sanitisation.
+Separate system instructions from user content using proper message roles.
+NEVER trust AI-generated output as safe — validate before inserting into DB, rendering in HTML, or executing.
+AI API keys (Anthropic, OpenAI) follow the same secret rules. Proxy all AI calls through your backend — NEVER expose AI keys to frontend.
+S12. Code Quality (Security-Adjacent)
+NEVER use var in JS/TS. Use const by default, let only when reassignment is needed.
+NEVER use any in TypeScript. Use unknown and narrow with type guards.
+NEVER use @ts-ignore. Fix the type error.
+Always use === (strict equality), never ==.
+Always use optional chaining (?.) on nullable values.
+Always handle async errors with try/catch.
+NEVER leave console.log, uncommented TODO without ticket numbers, or commented-out code.
