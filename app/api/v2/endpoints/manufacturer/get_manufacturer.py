@@ -14,4 +14,7 @@ def get_manufacturer(
     current_user: User = Depends(get_current_user)
 ):
     service = ManufacturerService(db)
-    return service.get_manufacturer(manufacturer_id, current_user.id)
+    manufacturer = service.get_manufacturer(manufacturer_id)
+    if not manufacturer:
+        raise HTTPException(status_code=404, detail="Manufacturer not found")
+    return manufacturer

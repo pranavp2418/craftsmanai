@@ -15,4 +15,15 @@ def update_customer(
     current_user: User = Depends(get_current_user)
 ):
     service = CustomerService(db)
-    return service.update_customer(customer_id, current_user.id, request)
+    customer = service.get_customer(customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return service.update_customer(
+        customer,
+        name=request.name,
+        email=request.email,
+        phone=request.phone,
+        company_name=request.company_name,
+        address=request.address,
+        is_active=request.is_active,
+    )

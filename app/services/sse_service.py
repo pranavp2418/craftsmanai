@@ -1,4 +1,8 @@
-"""High-level helpers for publishing Server-Sent Events (SSE)."""
+"""High-level helpers for publishing Server-Sent Events (SSE).
+
+All publish calls go through Redis pub/sub via ``sse_manager.publish()``,
+which works seamlessly from *any* process (Celery worker, FastAPI, etc.).
+"""
 
 from typing import Any, Optional
 
@@ -8,7 +12,7 @@ from app.core.sse_manager import sse_manager
 class SSEService:
     """Facade around :mod:`app.core.sse_manager` for reuse across the app."""
 
-    async def publish(
+    def publish(
         self,
         channel: str,
         *,
@@ -18,9 +22,12 @@ class SSEService:
         retry: Optional[int] = None,
         comment: Optional[str] = None,
     ) -> int:
-        """Push an event onto ``channel`` and return subscriber count."""
+        """Push an event onto ``channel`` via Redis pub/sub.
 
-        return await sse_manager.publish(
+        This is a **synchronous** method – it works from Celery tasks,
+        background threads, and async request handlers alike.
+        """
+        return sse_manager.publish(
             channel,
             data=data,
             event=event,

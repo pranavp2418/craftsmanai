@@ -1,7 +1,9 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import asyncio
 from contextlib import asynccontextmanager
 import logging
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 import socketio
 
@@ -15,6 +17,7 @@ from .core.middleware import (
     HealthCheckMiddleware,
 )
 from .core.socket_manager import sio
+from .core.sse_manager import sse_manager
 
 # ---------------------------------------------------------------------------
 # Import WebSocket event handlers so the @sio.event decorators register them
@@ -38,9 +41,24 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Craftmen Backend starting up...")
+
+    # Start the Redis SSE background listener – it subscribes to all ``sse:*``
+    # Redis channels and forwards events to local subscriber queues so they
+    # reach connected SSE clients.  This works whether the event was published
+    # from the FastAPI process itself or from a Celery worker.
+    sse_listener_task = asyncio.create_task(sse_manager.start_listener())
+    logger.info("SSE Redis listener started.")
+
     yield
+
     # Shutdown
     logger.info("Craftmen Backend shutting down...")
+    sse_listener_task.cancel()
+    try:
+        await sse_listener_task
+    except asyncio.CancelledError:
+        logger.info("SSE Redis listener cancelled.")
+    logger.info("SSE Redis listener stopped.")
 
 
 # ------------------------------------------------------------------

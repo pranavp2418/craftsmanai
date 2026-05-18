@@ -14,4 +14,12 @@ def create_manufacturer(
     current_user: User = Depends(get_current_user)
 ):
     service = ManufacturerService(db)
-    return service.create_manufacturer(current_user.id, request)
+    return service.create_manufacturer(
+        created_by_user_id=current_user.id,
+        name=request.name,
+        company_name=request.company_name,
+        email=request.email,
+        phone=request.phone,
+        address=request.address,
+        location=request.location,
+    )

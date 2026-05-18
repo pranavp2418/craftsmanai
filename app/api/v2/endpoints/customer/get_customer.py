@@ -14,4 +14,7 @@ def get_customer(
     current_user: User = Depends(get_current_user)
 ):
     service = CustomerService(db)
-    return service.get_customer(customer_id, current_user.id)
+    customer = service.get_customer(customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return customer

@@ -1,29 +1,38 @@
-"""Server-Sent Events (SSE) manager.
+"""
+Redis-backed Server-Sent Events (SSE) manager.
 
-This module provides a lightweight publish/subscribe mechanism that allows
-async producers (Celery tasks, background jobs, request handlers, etc.) to
-push updates to connected SSE clients.  It mirrors the role played by
-``socket_manager`` for Socket.IO but keeps the implementation dependency free
-by relying solely on asyncio primitives.
+All ``publish()`` calls go through Redis pub/sub on channel ``sse:<channel>``,
+which guarantees cross-process delivery (Celery workers, API servers, etc.)
+The in-memory subscriber queues exist only on the consumer side (the FastAPI
+process that owns the SSE endpoint).
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any, AsyncIterator, Dict, List, Optional
+
+import redis.asyncio as redis_asyncio
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Internal helpers – same as before
+# ---------------------------------------------------------------------------
 
 
 def _encode_data(data: Any) -> str:
-    """Serialise payloads destined for the SSE ``data`` field."""
-
     if data is None:
         return "null"
     if isinstance(data, (str, bytes)):
         return data.decode("utf-8") if isinstance(data, bytes) else data
     try:
         return json.dumps(data, ensure_ascii=False)
-    except (TypeError, ValueError):  # Fallback to str() if not JSON serialisable
+    except (TypeError, ValueError):
         return str(data)
 
 
@@ -35,47 +44,108 @@ def _format_sse(
     retry: Optional[int] = None,
     comment: Optional[str] = None,
 ) -> str:
-    """Format a message according to the SSE protocol."""
-
     lines: List[str] = []
-
     if comment:
         for line in comment.splitlines() or [comment]:
             lines.append(f": {line}")
-
     if event_id:
         lines.append(f"id: {event_id}")
     if event:
         lines.append(f"event: {event}")
     if retry is not None:
         lines.append(f"retry: {retry}")
-
-    # Each line in the payload must be prefixed with ``data: ``
     for line in data.splitlines() or [""]:
         lines.append(f"data: {line}")
-
     return "\n".join(lines) + "\n\n"
 
 
+# ---------------------------------------------------------------------------
+# Redis channel helpers
+# ---------------------------------------------------------------------------
+
+_REDIS_CHANNEL_PREFIX = "sse:"
+
+
+def _redis_channel(channel: str) -> str:
+    return f"{_REDIS_CHANNEL_PREFIX}{channel}"
+
+
+# ---------------------------------------------------------------------------
+# Synchronous Redis client (for publish calls from any process)
+# ---------------------------------------------------------------------------
+
+_sync_redis: Any = None
+
+
+def _get_sync_redis() -> Any:
+    """Return a lazily-created synchronous Redis client."""
+    global _sync_redis
+    if _sync_redis is None:
+        import redis as _sync_redis_module
+
+        _sync_redis = _sync_redis_module.from_url(
+            settings.REDIS_URL, decode_responses=True
+        )
+    return _sync_redis
+
+
+# ---------------------------------------------------------------------------
+# Async Redis client (for the background listener)
+# ---------------------------------------------------------------------------
+
+_async_redis: Optional[redis_asyncio.Redis] = None
+
+
+async def _get_async_redis() -> Optional[redis_asyncio.Redis]:
+    global _async_redis
+    if _async_redis is None:
+        try:
+            _async_redis = redis_asyncio.from_url(
+                settings.REDIS_URL, decode_responses=True
+            )
+            await _async_redis.ping()
+        except Exception as exc:
+            logger.warning("Redis unavailable for SSE: %s", exc)
+            _async_redis = None  # type: ignore[assignment]
+    return _async_redis
+
+
+# ---------------------------------------------------------------------------
+# SSEManager
+# ---------------------------------------------------------------------------
+
+
 class SSEManager:
-    """Keep track of SSE subscribers and dispatch events to them."""
+    """Pub/sub SSE manager backed by Redis for cross-process delivery.
+
+    *Any* process (FastAPI, Celery worker, etc.) can call ``publish()`` – it
+    always writes to a Redis pub/sub channel.
+
+    Only the process that owns the SSE endpoint (FastAPI) runs the background
+    ``_listener`` task that subscribes to ``sse:*`` Redis channels and forwards
+    incoming events to the local in-memory subscriber queues.
+    """
 
     def __init__(self) -> None:
+        # Local subscriber queues: channel -> [Queue[str]]
         self._channels: Dict[str, List[asyncio.Queue[str]]] = {}
         self._lock = asyncio.Lock()
 
-    async def subscribe(self, channel: str) -> asyncio.Queue[str]:
-        """Register a new subscriber for a channel and return its queue."""
+    # -- Public API ----------------------------------------------------------
 
+    async def subscribe(self, channel: str) -> asyncio.Queue[str]:
+        """Register a new subscriber for *channel* and return its queue."""
         queue: asyncio.Queue[str] = asyncio.Queue()
         async with self._lock:
             subscribers = self._channels.setdefault(channel, [])
             subscribers.append(queue)
+            logger.info(
+                "SSE subscriber added to '%s' – total: %d", channel, len(subscribers)
+            )
         return queue
 
     async def unsubscribe(self, channel: str, queue: asyncio.Queue[str]) -> None:
-        """Remove a subscriber queue from the channel."""
-
+        """Remove a subscriber queue from *channel*."""
         async with self._lock:
             subscribers = self._channels.get(channel)
             if not subscribers:
@@ -87,7 +157,7 @@ class SSEManager:
             if not subscribers:
                 self._channels.pop(channel, None)
 
-    async def publish(
+    def publish(
         self,
         channel: str,
         *,
@@ -97,28 +167,30 @@ class SSEManager:
         retry: Optional[int] = None,
         comment: Optional[str] = None,
     ) -> int:
-        """Broadcast an event to all current subscribers of ``channel``.
+        """Publish an event to *channel* via Redis pub/sub.
 
-        Returns the number of subscribers that the event was queued for.
+        This is a **synchronous** method so it works seamlessly from Celery
+        tasks without ``asyncio.run()`` wrappers.
+
+        Returns ``0`` – the local subscriber count is only meaningful in the
+        process that owns the SSE endpoint.
         """
-
-        message = _format_sse(
-            data=_encode_data(data),
-            event=event,
-            event_id=event_id,
-            retry=retry,
-            comment=comment,
+        payload = json.dumps(
+            {
+                "data": data,
+                "event": event,
+                "event_id": event_id,
+                "retry": retry,
+                "comment": comment,
+            },
+            ensure_ascii=False,
         )
-
-        async with self._lock:
-            subscribers = list(self._channels.get(channel, []))
-
-        for queue in subscribers:
-            # ``put_nowait`` keeps publication non-blocking; the queue is
-            # unbounded so this will not raise ``QueueFull``.
-            queue.put_nowait(message)
-
-        return len(subscribers)
+        try:
+            r = _get_sync_redis()
+            r.publish(_redis_channel(channel), payload)
+        except Exception as exc:
+            logger.exception("Failed to publish SSE event to Redis: %s", exc)
+        return 0
 
     async def listen(
         self,
@@ -126,31 +198,108 @@ class SSEManager:
         *,
         heartbeat: Optional[float] = None,
     ) -> AsyncIterator[str]:
-        """Yield events for a channel as an async generator.
+        """Yield events for *channel* as an async generator.
 
-        ``heartbeat`` can be used to periodically emit SSE comments so that
-        idle connections remain open through proxies that enforce timeouts.
+        The caller must be in the same process as the background Redis listener
+        (typically the FastAPI process).
         """
-
         queue = await self.subscribe(channel)
-
         try:
             while True:
                 if heartbeat and heartbeat > 0:
                     try:
-                        message = await asyncio.wait_for(queue.get(), timeout=heartbeat)
+                        message = await asyncio.wait_for(
+                            queue.get(), timeout=heartbeat
+                        )
                     except asyncio.TimeoutError:
-                        # SSE comments (lines that start with ``:``) act as keep-alive pings.
                         yield ": keep-alive\n\n"
                         continue
                 else:
                     message = await queue.get()
-
                 yield message
         except asyncio.CancelledError:
             raise
         finally:
             await self.unsubscribe(channel, queue)
+
+    # -- Background Redis listener -------------------------------------------
+
+    async def start_listener(self) -> None:
+        """Subscribe to all ``sse:*`` Redis channels and forward events to
+        local subscriber queues.
+
+        Intended to be started once as a background asyncio task during FastAPI
+        startup (via the ``lifespan`` context manager).
+        """
+        redis_client = await _get_async_redis()
+        if redis_client is None:
+            logger.warning(
+                "SSE Redis listener not started – cross-process events "
+                "will NOT be delivered to SSE clients."
+            )
+            return
+
+        pubsub = redis_client.pubsub()
+        await pubsub.psubscribe(f"{_REDIS_CHANNEL_PREFIX}*")
+
+        logger.info("SSE Redis listener started on sse:* channels")
+
+        try:
+            async for message in pubsub.listen():
+                await self._on_redis_message(message)
+        except asyncio.CancelledError:
+            logger.info("SSE Redis listener cancelled.")
+            raise
+        except Exception as exc:
+            logger.exception("SSE Redis listener error: %s", exc)
+        finally:
+            await pubsub.punsubscribe(f"{_REDIS_CHANNEL_PREFIX}*")
+            await pubsub.close()
+
+    async def _on_redis_message(self, message: dict[str, Any]) -> None:
+        """Deserialise a Redis pub/sub message and push it to local queues.
+
+        When using ``psubscribe`` (pattern-based subscription), Redis delivers
+        messages with ``type`` = ``"pmessage"``, while exact ``subscribe``
+        delivers with ``type`` = ``"message"``.  We accept both.
+        """
+        msg_type: str = message.get("type", "")
+        if msg_type not in ("message", "pmessage"):
+            return
+
+        # For ``pmessage`` the actual channel is in ``channel`` (same key);
+        # for ``message`` it is also in ``channel``.
+        channel: str = message.get("channel", "")
+        payload_raw: str = message.get("data", "")
+
+        if not channel.startswith(_REDIS_CHANNEL_PREFIX):
+            return
+        actual_channel = channel[len(_REDIS_CHANNEL_PREFIX) :]
+
+        try:
+            payload = json.loads(payload_raw)
+        except (TypeError, ValueError):
+            logger.warning("Ignoring unparseable SSE payload on %s", channel)
+            return
+
+        sse_message = _format_sse(
+            data=_encode_data(payload.get("data")),
+            event=payload.get("event"),
+            event_id=payload.get("event_id"),
+            retry=payload.get("retry"),
+            comment=payload.get("comment"),
+        )
+
+        async with self._lock:
+            queues = list(self._channels.get(actual_channel, []))
+
+        logger.info(
+            "SSE Redis listener received event for channel='%s', forwarding to %d local subscriber(s)",
+            actual_channel, len(queues),
+        )
+
+        for q in queues:
+            q.put_nowait(sse_message)
 
 
 sse_manager = SSEManager()

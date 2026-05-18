@@ -15,4 +15,16 @@ def update_manufacturer(
     current_user: User = Depends(get_current_user)
 ):
     service = ManufacturerService(db)
-    return service.update_manufacturer(manufacturer_id, current_user.id, request)
+    manufacturer = service.get_manufacturer(manufacturer_id)
+    if not manufacturer:
+        raise HTTPException(status_code=404, detail="Manufacturer not found")
+    return service.update_manufacturer(
+        manufacturer,
+        name=request.name,
+        company_name=request.company_name,
+        email=request.email,
+        phone=request.phone,
+        address=request.address,
+        location=request.location,
+        is_active=request.is_active,
+    )

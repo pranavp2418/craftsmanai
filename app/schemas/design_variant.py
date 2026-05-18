@@ -20,6 +20,20 @@ class DesignVariantAnglesRequest(BaseModel):
     angles: Dict[str, str] = Field(..., description="Mapping of angle names to image URLs")
 
 
+class DesignVariantMetalGenerationRequest(BaseModel):
+    """Request to generate metal variant images via background AI task.
+
+    Accepts a list of metals (e.g. ``["gold", "silver", "rose_gold"]``).
+    The images are generated asynchronously and the variant's
+    ``metal_variations_json`` is updated once complete.
+    """
+
+    metals: List[str] = Field(
+        ...,
+        description="List of metal types to generate (e.g. gold, silver, rose_gold, platinum, white_gold)",
+    )
+
+
 class DesignVariantMetalsRequest(BaseModel):
     metal_variations: Dict[str, str] = Field(..., description="Mapping of metal names to image URLs")
 

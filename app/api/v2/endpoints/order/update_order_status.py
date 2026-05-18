@@ -15,4 +15,11 @@ def update_order_status(
     current_user: User = Depends(get_current_user)
 ):
     service = OrderService(db)
-    return service.update_order_status(order_id, current_user.id, request)
+    order = service.get_order(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return service.update_status(
+        order,
+        status=request.status,
+        message=request.message,
+    )

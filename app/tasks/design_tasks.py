@@ -15,8 +15,8 @@ from app.services.ai_workflow_service import AIGenerationWorkflowService
 from app.services.design_variant_service import DesignVariantService
 from app.services.openai_service import openai_service
 from app.services.storage_service import _validate_image_bytes, upload_image_to_supabase
-from app.services.sse_service import sse_service
 from app.tasks.base import create_task
+from app.core.sse_manager import sse_manager
 
 logger = logging.getLogger(__name__)
 
@@ -48,13 +48,21 @@ def _resolve_reference_image_url(design: Design) -> str:
 
 
 def _publish_sse(channel: str, data: dict, event: str = "design.generated") -> None:
-    loop = asyncio.new_event_loop()
+    """Publish an SSE event via Redis pub/sub (production-ready, cross-process).
+
+    ``sse_manager.publish()`` is synchronous – it writes directly to a Redis
+    pub/sub channel.  The Redis SSE listener running inside the FastAPI process
+    picks up the message and delivers it to local subscriber queues.
+    No ``asyncio.run()`` wrapper needed.
+    """
     try:
-        loop.run_until_complete(
-            sse_service.publish(channel, data=data, event=event)
+        sse_manager.publish(channel, data=data, event=event)
+        logger.info(
+            "SSE event published on channel='%s', event='%s'",
+            channel, event,
         )
-    finally:
-        loop.close()
+    except Exception as exc:
+        logger.exception("Failed to publish SSE event: %s", exc)
 
 
 @create_task(name="generate_design_base_image", max_retries=3)
