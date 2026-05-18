@@ -35,7 +35,7 @@ async def reset_password_with_otp(
     from app.models.otp import OTP
     otp = db.query(OTP).filter(
         OTP.email == reset_data.email,
-        OTP.otp_code == reset_data.otp,
+        OTP.otp_code == reset_data.token,
         OTP.otp_type == "password_reset",
         OTP.is_used == False,
         OTP.expires_at > datetime.utcnow()
