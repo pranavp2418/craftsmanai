@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/reset-password", response_model=MessageResponse)
+@router.post("/verify-password-reset", response_model=MessageResponse)
 async def reset_password_with_otp(
     *,
     db: Session = Depends(get_db),

@@ -106,7 +106,7 @@ class TestFullAuthFlow:
         assert reset_otp_record is not None
 
         reset_response = client.post(
-            "/api/v2/auth/reset-password",
+            "/api/v2/auth/verify-password-reset",
             json={
                 "email": user_data["email"],
                 "otp": reset_otp_record.otp_code,

@@ -56,12 +56,9 @@ class TestOTPVerification:
             "new_password": "NewPassword123!"
         }
         
-        response = client.post("/api/v2/auth/reset-password", json=reset_confirm_data)
+        response = client.post("/api/v2/auth/verify-password-reset", json=reset_confirm_data)
         assert response.status_code == 200
-        assert response.json()["message"] in (
-            "Password reset successfully",
-            "Password reset successfully"
-        )
+        assert response.json()["message"] == "Password reset successfully"
 
     def test_otp_expiration(self, client: TestClient, test_user_data: dict):
         """Test OTP expiration handling"""
