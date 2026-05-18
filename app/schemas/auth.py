@@ -99,7 +99,7 @@ class PasswordResetRequest(BaseModel):
 
 class PasswordResetConfirm(BaseModel):
     email: EmailStr
-    otp: str
+    token: str
     new_password: str = Field(..., min_length=8)
     
     @field_validator('new_password')
