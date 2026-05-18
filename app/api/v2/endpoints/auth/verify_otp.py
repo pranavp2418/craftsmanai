@@ -45,6 +45,17 @@ async def verify_otp(
     
     logger.info(f"OTP verification successful for {otp_data.email}")
     
+    # Send welcome email in background (non-blocking) if newly verified
+    try:
+        from app.tasks.email_tasks import send_welcome_email
+        send_welcome_email.delay(
+            to=result["email"],
+            user_name=result["username"] or result["email"]
+        )
+        logger.info(f"Welcome email queued for {result['email']}")
+    except Exception as e:
+        logger.warning(f"Failed to queue welcome email for {result['email']}: {str(e)}")
+    
     return LoginResponse(
         access_token=result["access_token"],
         token_type=result.get("token_type", "bearer"),
