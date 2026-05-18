@@ -16,6 +16,11 @@ from .cleanup_tasks import (
     cleanup_expired_tokens
 )
 
+# Design generation tasks
+from .design_tasks import (
+    generate_design_base_image,
+)
+
 # Analytics tasks (future)
 # from .analytics_tasks import (
 #     track_user_activity,
@@ -31,6 +36,9 @@ __all__ = [
     # Cleanup tasks
     "cleanup_expired_otps",
     "cleanup_expired_tokens",
+
+    # Design tasks
+    "generate_design_base_image",
     
     # Analytics tasks (future)
     # "track_user_activity",

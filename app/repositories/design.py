@@ -27,6 +27,7 @@ class DesignRepository:
         jewellery_type: Optional[str] = None,
         user_prompt: Optional[str] = None,
         input_image_url: Optional[str] = None,
+        input_image_urls: Optional[list[str]] = None,
         status: DesignStatus = DesignStatus.DRAFT,
     ) -> Design:
         design = Design(
@@ -37,6 +38,7 @@ class DesignRepository:
             jewellery_type=jewellery_type,
             user_prompt=user_prompt,
             input_image_url=input_image_url,
+            input_image_urls=input_image_urls,
             status=status,
         )
         self.db.add(design)

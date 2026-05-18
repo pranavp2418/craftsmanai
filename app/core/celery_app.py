@@ -6,7 +6,7 @@ celery_app = Celery(
     "craftmen_backend",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=[]
+    include=["app.tasks"]
 )
 
 # Configure Celery

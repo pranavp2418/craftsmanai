@@ -13,6 +13,7 @@ class User(Base):
     full_name = Column(String(255))
     whatsapp_number = Column(String(20))
     hashed_password = Column(String(255), nullable=False)
+    business_name = Column(String(255), nullable=True, doc="Business name for design code generation (e.g., 'Jack John' -> 'jj')")
     design_prefix = Column(String(10), nullable=True, doc="Prefix used for generating design codes")
     
     # Status fields

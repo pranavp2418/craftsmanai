@@ -17,6 +17,7 @@ CELERY_ROUTES = {
     'app.tasks.cleanup_tasks.cleanup_expired_otps': {'queue': 'cleanup'},
     'app.tasks.cleanup_tasks.cleanup_expired_tokens': {'queue': 'cleanup'},
     'app.tasks.cleanup_tasks.cleanup_blacklisted_tokens': {'queue': 'cleanup'},
+    'app.tasks.design_tasks.generate_design_base_image': {'queue': 'design'},
     
     # Analytics tasks (future) go to analytics queue
     # 'app.tasks.analytics_tasks.track_user_activity': {'queue': 'analytics'},
@@ -27,6 +28,7 @@ CELERY_TASK_PRIORITIES = {
     'email': 8,      # High priority - user-facing
     'cleanup': 3,    # Low priority - maintenance
     'analytics': 5,    # Medium priority - reporting
+    'design': 6,     # Design generation jobs
 }
 
 # Task time limits in seconds

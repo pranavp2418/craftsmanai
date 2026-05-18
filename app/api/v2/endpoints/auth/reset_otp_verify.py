@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from typing import Any
@@ -30,13 +32,13 @@ async def reset_password_with_otp(
     auth_service = AuthService(db)
     
     # Verify OTP for password reset
-    from app.models.user import OTP
+    from app.models.otp import OTP
     otp = db.query(OTP).filter(
-        OTP.email == reset_data.token,  # Using token field as email for simplicity
+        OTP.email == reset_data.email,
         OTP.otp_code == reset_data.otp,
         OTP.otp_type == "password_reset",
         OTP.is_used == False,
-        OTP.expires_at > db.query(OTP).first().created_at if db.query(OTP).first() else None
+        OTP.expires_at > datetime.utcnow()
     ).first()
     
     if not otp:

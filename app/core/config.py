@@ -62,6 +62,15 @@ class Settings(BaseSettings):
     # Server-Sent Events
     SSE_HEARTBEAT_INTERVAL: float = 25.0  # seconds
 
+    # File Storage (Supabase / S3)
+    SUPABASE_URL: Optional[str] = None
+    SUPABASE_SERVICE_KEY: Optional[str] = None
+    SUPABASE_STORAGE_BUCKET: str = "designs"
+
+    # OpenAI / generative AI
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_IMAGE_MODEL: str = "gpt-image-1.5"
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/app.log"

@@ -85,6 +85,52 @@ class TestFullAuthFlow:
         assert refresh_data["access_token"]
         assert refresh_data["expires_in"] > 0
 
+        # Step 7: Request password reset via email OTP
+        reset_request_response = client.post(
+            "/api/v2/auth/password-reset",
+            json={"email": user_data["email"]}
+        )
+        assert reset_request_response.status_code == 200
+        assert "Password reset code sent to your email" in reset_request_response.json()["message"]
+
+        reset_otp_record = (
+            db_session.query(OTP)
+            .filter(
+                OTP.email == user_data["email"],
+                OTP.otp_type == "password_reset",
+                OTP.is_used == False
+            )
+            .order_by(OTP.expires_at.desc())
+            .first()
+        )
+        assert reset_otp_record is not None
+
+        reset_response = client.post(
+            "/api/v2/auth/reset-password",
+            json={
+                "email": user_data["email"],
+                "otp": reset_otp_record.otp_code,
+                "new_password": "NewPassword123!"
+            }
+        )
+        assert reset_response.status_code == 200
+        assert reset_response.json()["message"] == "Password reset successfully"
+
+        # Step 8: Login with the new password
+        login_response = client.post(
+            "/api/v2/auth/login",
+            json={
+                "email": user_data["email"],
+                "password": "NewPassword123!",
+                "remember_me": False
+            }
+        )
+        assert login_response.status_code == 200
+        login_data = login_response.json()
+        assert login_data["email"] == user_data["email"]
+        assert login_data["access_token"]
+        assert login_data["user_id"]
+
         # Cleanup created user and related records from the real database
         user = db_session.query(User).filter(User.email == user_data["email"]).first()
         if user:

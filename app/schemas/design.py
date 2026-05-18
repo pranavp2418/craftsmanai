@@ -17,9 +17,9 @@ class DesignBase(BaseModel):
 
 class DesignCreateRequest(DesignBase):
     name: str = Field(..., min_length=1)
-    initial_prompt: Optional[str] = None
-    initial_model: Optional[str] = None
-    initial_image_url: Optional[str] = None
+    jewellery_type: str = Field(..., min_length=1)
+    user_prompt: str = Field(..., min_length=1)
+    images: list[str] = Field(..., min_items=1, max_items=10)
 
 
 class DesignUpdateRequest(DesignBase):
@@ -35,6 +35,7 @@ class DesignResponse(BaseModel):
     jewellery_type: Optional[str]
     user_prompt: Optional[str]
     input_image_url: Optional[str]
+    input_image_urls: Optional[list[str]]
     status: DesignStatus
     created_at: datetime
     updated_at: Optional[datetime]

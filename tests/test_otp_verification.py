@@ -56,8 +56,12 @@ class TestOTPVerification:
             "new_password": "NewPassword123!"
         }
         
-        response = client.post("/api/v2/auth/password-reset-confirm", json=reset_confirm_data)
-        # This would succeed with proper OTP mocking
+        response = client.post("/api/v2/auth/reset-password", json=reset_confirm_data)
+        assert response.status_code == 200
+        assert response.json()["message"] in (
+            "Password reset successfully",
+            "Password reset successfully"
+        )
 
     def test_otp_expiration(self, client: TestClient, test_user_data: dict):
         """Test OTP expiration handling"""
@@ -129,7 +133,7 @@ class TestOTPVerification:
         
         # Should still return 200 for security (don't reveal email existence)
         assert response.status_code == 200
-        assert "Password reset email sent" in response.json()["message"]
+        assert "Password reset code sent to your email" in response.json()["message"]
 
     def test_otp_database_storage(self, db_session, create_test_user: User):
         """Test OTP storage in database"""
