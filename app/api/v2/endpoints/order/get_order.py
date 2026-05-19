@@ -11,7 +11,7 @@ router = APIRouter()
 def get_order(
     order_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     service = OrderService(db)
-    return service.get_order(order_id, current_user.id)
+    return service.get_order(order_id)

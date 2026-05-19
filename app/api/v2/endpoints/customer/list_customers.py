@@ -15,5 +15,5 @@ def list_customers(
     current_user: User = Depends(get_current_user)
 ):
     service = CustomerService(db)
-    items, total = service.list_customers(current_user.id, skip, limit)
-    return CustomerListResponse(items=items, total=total)
+    items = service.list_customers(created_by_user_id=current_user.id, offset=skip, limit=limit)
+    return CustomerListResponse(items=items, total=len(items))

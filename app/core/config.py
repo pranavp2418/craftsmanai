@@ -74,6 +74,19 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/app.log"
+
+    # Email Settings
+    SMTP_TLS: bool = True
+    SMTP_PORT: int = 587
+    SMTP_HOST: Optional[str] = None
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    EMAILS_FROM_EMAIL: Optional[str] = None
+    EMAILS_FROM_NAME: str = "CRAFTMEN"
+
+    @property
+    def SMTP_FROM(self) -> Optional[str]:
+        return self.EMAILS_FROM_EMAIL or self.SMTP_USER
         
     model_config = SettingsConfigDict(
         env_file=".env",

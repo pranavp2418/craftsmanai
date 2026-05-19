@@ -9,9 +9,16 @@ from app.models.order import OrderStatus, ManufacturerQuoteStatus
 
 
 class OrderCreateRequest(BaseModel):
-    design_id: int = Field(..., ge=1)
-    share_id: Optional[int] = Field(default=None, ge=1)
-    customer_id: Optional[int] = Field(default=None, ge=1)
+    """Request to create an order from a selected design variant.
+
+    Only ``design_variant_id`` and ``customer_id`` are required.
+    The ``share_id`` is automatically resolved:
+      - If a ``DesignShare`` already exists for this design + customer it is
+        re-used; otherwise a new share is created.
+    """
+
+    design_variant_id: int = Field(..., ge=1)
+    customer_id: int = Field(..., ge=1)
 
 
 class OrderStatusUpdateRequest(BaseModel):
@@ -82,3 +89,17 @@ class OrderActivityLogEntry(BaseModel):
 
 class OrderActivityLogListResponse(BaseModel):
     items: List[OrderActivityLogEntry]
+
+
+class OrderCreateResponse(BaseModel):
+    """Response returned by the order creation endpoint.
+
+    Includes the created order plus the resolved share details.
+    """
+
+    order: OrderResponse
+    share_id: int
+    design_id: int
+
+    class Config:
+        from_attributes = True

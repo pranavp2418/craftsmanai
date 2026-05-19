@@ -58,7 +58,10 @@ async def publish_sse_event(
 ):
     """Publish an SSE event to subscribed clients."""
 
-    delivered = await sse_service.publish(
+    # publish() is now fully synchronous – no await needed.
+    # It always goes through Redis pub/sub, so it works from
+    # any process (Celery worker, FastAPI, etc.)
+    delivered = sse_service.publish(
         payload.channel,
         data=payload.data,
         event=payload.event,

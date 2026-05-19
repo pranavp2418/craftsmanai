@@ -20,6 +20,8 @@ from .order import (
     OrderStatus,
     ManufacturerQuoteStatus,
 )
+from .email_template import EmailTemplate
+from .email_log import EmailLog, EmailStatus
 
 __all__ = [
     "User",
@@ -40,4 +42,7 @@ __all__ = [
     "OrderActivityLog",
     "OrderStatus",
     "ManufacturerQuoteStatus",
+    "EmailTemplate",
+    "EmailLog",
+    "EmailStatus",
 ]

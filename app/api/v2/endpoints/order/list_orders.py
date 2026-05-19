@@ -15,5 +15,5 @@ def list_orders(
     current_user: User = Depends(get_current_user)
 ):
     service = OrderService(db)
-    items, total = service.list_orders(current_user.id, skip, limit)
-    return OrderListResponse(items=items, total=total)
+    items = service.list_orders(limit=limit, offset=skip)
+    return OrderListResponse(items=items, total=len(items))

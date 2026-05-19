@@ -6,8 +6,17 @@ celery_app = Celery(
     "craftmen_backend",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks"]
+    include=[
+        "app.tasks.email_tasks",
+        "app.tasks.cleanup_tasks",
+        "app.tasks.design_tasks",
+        "app.tasks.metal_variant_tasks",
+        "app.tasks.angle_variant_tasks",
+    ]
 )
+
+# Load routing and schedule configurations (imported here to avoid circular dependencies)
+from app.tasks.config import CELERY_ROUTES, SCHEDULE_CONFIG
 
 # Configure Celery
 celery_app.conf.update(
@@ -18,11 +27,10 @@ celery_app.conf.update(
     enable_utc=settings.CELERY_ENABLE_UTC,
     
     # Task routing
-    task_routes={
-        'app.tasks.rate_limiting.*': {'queue': 'rate_limiting'},
-        'app.tasks.notifications.*': {'queue': 'notifications'},
-        'app.tasks.analytics.*': {'queue': 'analytics'},
-    },
+    task_routes=CELERY_ROUTES,
+    
+    # Periodic schedules
+    beat_schedule=SCHEDULE_CONFIG,
     
     # Task execution settings
     task_track_started=True,

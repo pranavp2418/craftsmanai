@@ -11,7 +11,14 @@ router = APIRouter()
 def create_customer(
     request: CustomerCreateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     service = CustomerService(db)
-    return service.create_customer(current_user.id, request)
+    return service.create_customer(
+        created_by_user_id=current_user.id,
+        name=request.name,
+        email=request.email,
+        phone=request.phone,
+        company_name=request.company_name,
+        address=request.address,
+    )

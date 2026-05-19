@@ -21,6 +21,16 @@ from .design_tasks import (
     generate_design_base_image,
 )
 
+# Metal variant generation tasks
+from .metal_variant_tasks import (
+    generate_metal_variant_images,
+)
+
+# Angle generation tasks
+from .angle_variant_tasks import (
+    generate_remaining_variant_angles,
+)
+
 # Analytics tasks (future)
 # from .analytics_tasks import (
 #     track_user_activity,
@@ -39,6 +49,12 @@ __all__ = [
 
     # Design tasks
     "generate_design_base_image",
+
+    # Metal variant tasks
+    "generate_metal_variant_images",
+
+    # Angle variant tasks
+    "generate_remaining_variant_angles",
     
     # Analytics tasks (future)
     # "track_user_activity",

@@ -10,7 +10,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-@create_task(name="cleanup_expired_otps")
+@create_task(name="cleanup_expired_otps", bind=False)
 def cleanup_expired_otps():
     """
     Clean up expired OTPs from database
@@ -42,6 +42,7 @@ def cleanup_expired_otps():
             db.commit()
             
             logger.info(f"✅ {task_name}: Deleted {deleted_count} expired OTPs")
+            return True
             
         finally:
             db.close()
@@ -50,7 +51,7 @@ def cleanup_expired_otps():
         logger.error(f"❌ {task_name} failed: {str(exc)}")
 
 
-@create_task(name="cleanup_expired_tokens")
+@create_task(name="cleanup_expired_tokens", bind=False)
 def cleanup_expired_tokens():
     """
     Clean up expired refresh tokens from database
@@ -72,6 +73,7 @@ def cleanup_expired_tokens():
             expired_count = token_repo.cleanup_expired_tokens()
             
             logger.info(f"✅ {task_name}: Cleaned up {expired_count} expired tokens")
+            return True
             
         finally:
             db.close()
@@ -80,23 +82,40 @@ def cleanup_expired_tokens():
         logger.error(f"❌ {task_name} failed: {str(exc)}")
 
 
-@create_task(name="cleanup_blacklisted_tokens")
+@create_task(name="cleanup_blacklisted_tokens", bind=False)
 def cleanup_blacklisted_tokens():
     """
-    Clean up expired blacklisted tokens from Redis
+    Clean up expired blacklisted tokens from Redis and Database
     
     Schedule: Daily at 2 AM
-    Purpose: Maintenance for Redis blacklist storage
+    Purpose: Maintenance for Redis and Database blacklist storage
     """
     task_name = "cleanup_blacklisted_tokens"
     
     try:
         logger.info(f"🧹 Starting {task_name}")
         
+        # 1. Redis monitoring
         from app.core.token_blacklist import token_blacklist
         token_blacklist.cleanup_expired_blacklist_entries()
         
+        # 2. Database cleanup
+        from app.core.database import SessionLocal
+        from app.models.blacklisted_token import BlacklistedToken
+        from datetime import datetime, timezone
+        
+        db = SessionLocal()
+        try:
+            deleted_count = db.query(BlacklistedToken).filter(
+                BlacklistedToken.expires_at <= datetime.now(timezone.utc)
+            ).delete()
+            db.commit()
+            logger.info(f"✅ {task_name}: Deleted {deleted_count} expired blacklisted tokens from DB")
+        finally:
+            db.close()
+            
         logger.info(f"✅ {task_name}: Blacklist cleanup completed")
+        return True
         
     except Exception as exc:
         logger.error(f"❌ {task_name} failed: {str(exc)}")
