@@ -7,9 +7,11 @@ from .design import (
     Design,
     DesignVariant,
     DesignShare,
+    DesignVariantManufacturerShare,
     DesignActivityLog,
     DesignStatus,
     DesignShareStatus,
+    ManufacturerShareStatus,
 )
 from .customer import Customer
 from .manufacturer import Manufacturer
@@ -32,9 +34,11 @@ __all__ = [
     "Design",
     "DesignVariant",
     "DesignShare",
+    "DesignVariantManufacturerShare",
     "DesignActivityLog",
     "DesignStatus",
     "DesignShareStatus",
+    "ManufacturerShareStatus",
     "Customer",
     "Manufacturer",
     "Order",

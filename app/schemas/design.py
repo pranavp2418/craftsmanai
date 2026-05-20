@@ -56,7 +56,7 @@ class DesignShareCreateRequest(BaseModel):
 
 class DesignShareResponse(BaseModel):
     id: int
-    design_id: int
+    design_variant_id: int
     customer_id: Optional[int]
     public_token: str
     status: DesignShareStatus

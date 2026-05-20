@@ -20,6 +20,20 @@ class DesignVariantAnglesRequest(BaseModel):
     angles: Dict[str, str] = Field(..., description="Mapping of angle names to image URLs")
 
 
+class DesignVariantAngleGenerationRequest(BaseModel):
+    """Request to generate viewing angles per metal type via background AI task.
+
+    Accepts a list of metals (e.g. ``["gold", "silver", "rose"]``).
+    For each metal, all standard viewing angles (side, top, three-quarter)
+    are generated and stored in a nested structure under ``angles_json``.
+    """
+
+    metals: List[str] = Field(
+        ...,
+        description="List of metal types to generate angles for (e.g. gold, silver, rose)",
+    )
+
+
 class DesignVariantMetalGenerationRequest(BaseModel):
     """Request to generate metal variant images via background AI task.
 

@@ -6,6 +6,7 @@ from .generate_metal_variants import router as metals_router
 from .select_variant import router as select_router
 from .get_variant import router as get_router
 from .list_variants import router as list_router
+from .share_with_manufacturer import router as share_manufacturer_router
 
 
 router = APIRouter(prefix="/design-variant", tags=["design-variant"])
@@ -16,3 +17,4 @@ router.include_router(metals_router)
 router.include_router(select_router)
 router.include_router(get_router)
 router.include_router(list_router)
+router.include_router(share_manufacturer_router)

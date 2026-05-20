@@ -23,6 +23,11 @@ class Manufacturer(Base):
 
     quotes = relationship("ManufacturerQuote", back_populates="manufacturer")
     orders = relationship("Order", back_populates="manufacturer", foreign_keys="Order.current_manufacturer_id")
+    variant_shares = relationship(
+        "DesignVariantManufacturerShare",
+        back_populates="manufacturer",
+        cascade="all, delete-orphan",
+    )
 
 
 __all__ = ["Manufacturer"]
