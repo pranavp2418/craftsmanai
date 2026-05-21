@@ -30,7 +30,7 @@ class TestTeamSettingsInvitation:
 
         client.app.dependency_overrides[get_current_user] = override_current_user
         try:
-            with patch("app.services.team_settings_service.send_team_invitation_email.delay"):
+            with patch("app.services.team_settings_service.send_team_invitation_email"):
                 response = client.post(
                     "/api/v2/teams-settings/invitations",
                     json={
@@ -87,7 +87,7 @@ class TestTeamSettingsInvitation:
 
         client.app.dependency_overrides[get_current_user] = override_current_user
         try:
-            with patch("app.services.team_settings_service.send_team_invitation_email.delay"):
+            with patch("app.services.team_settings_service.send_team_invitation_email"):
                 response = client.post(
                     "/api/v2/teams-settings/invitations",
                     json={
