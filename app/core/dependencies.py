@@ -9,10 +9,16 @@ from app.services.auth import AuthService
 from app.models.user import User
 from app.core.token_blacklist import token_blacklist
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
-async def get_token_from_header(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+async def get_token_from_header(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> str:
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return credentials.credentials
 
 

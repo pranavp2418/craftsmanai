@@ -20,20 +20,18 @@ class ManufacturerService:
         *,
         created_by_user_id: int,
         name: str,
-        company_name: Optional[str] = None,
-        email: Optional[str] = None,
-        phone: Optional[str] = None,
-        address: Optional[str] = None,
+        speciality: Optional[str] = None,
+        emails: Optional[str] = None,
+        phone_number: Optional[str] = None,
         location: Optional[str] = None,
     ) -> Manufacturer:
         token = self._generate_token()
         return self.manufacturer_repo.create_manufacturer(
             created_by_user_id=created_by_user_id,
             name=name,
-            company_name=company_name,
-            email=email,
-            phone=phone,
-            address=address,
+            speciality=speciality,
+            emails=emails,
+            phone_number=phone_number,
             location=location,
             public_token=token,
         )
@@ -49,3 +47,9 @@ class ManufacturerService:
 
     def update_manufacturer(self, manufacturer: Manufacturer, **kwargs) -> Manufacturer:
         return self.manufacturer_repo.update_manufacturer(manufacturer, **kwargs)
+
+    def count_manufacturers(self, *, created_by_user_id: int) -> int:
+        return self.manufacturer_repo.count_manufacturers(created_by_user_id=created_by_user_id)
+
+    def delete_manufacturer(self, manufacturer: Manufacturer) -> Manufacturer:
+        return self.manufacturer_repo.delete_manufacturer(manufacturer)

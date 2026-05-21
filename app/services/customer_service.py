@@ -19,21 +19,23 @@ class CustomerService:
         self,
         *,
         created_by_user_id: int,
-        name: str,
-        email: Optional[str] = None,
-        phone: Optional[str] = None,
-        company_name: Optional[str] = None,
-        address: Optional[str] = None,
+        full_name: str,
+        emails: Optional[str] = None,
+        phone_number: Optional[str] = None,
+        tag: Optional[str] = None,
+        location: Optional[str] = None,
+        is_active: bool = True,
     ) -> Customer:
         token = self._generate_token()
         return self.customer_repo.create_customer(
             created_by_user_id=created_by_user_id,
-            name=name,
-            email=email,
-            phone=phone,
-            company_name=company_name,
-            address=address,
+            full_name=full_name,
+            emails=emails,
+            phone_number=phone_number,
+            tag=tag,
+            location=location,
             public_token=token,
+            is_active=is_active,
         )
 
     def get_customer(self, customer_id: int) -> Optional[Customer]:
@@ -47,3 +49,6 @@ class CustomerService:
 
     def update_customer(self, customer: Customer, **kwargs) -> Customer:
         return self.customer_repo.update_customer(customer, **kwargs)
+
+    def delete_customer(self, customer: Customer) -> Customer:
+        return self.customer_repo.delete_customer(customer)

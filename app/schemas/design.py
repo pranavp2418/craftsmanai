@@ -19,7 +19,7 @@ class DesignCreateRequest(DesignBase):
     name: str = Field(..., min_length=1)
     jewellery_type: str = Field(..., min_length=1)
     user_prompt: str = Field(..., min_length=1)
-    images: list[str] = Field(..., min_items=1, max_items=10)
+    images:Optional [list[str]] = Field(default=None, min_items=1, max_items=10)
 
 
 class DesignUpdateRequest(DesignBase):
