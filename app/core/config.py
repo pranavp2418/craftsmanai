@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: Optional[str] = None
     EMAILS_FROM_EMAIL: Optional[str] = None
     EMAILS_FROM_NAME: str = "CRAFTMEN"
+    
+    # Frontend URL
+    FRONTEND_URL: str = "http://localhost:3000"
 
     @property
     def SMTP_FROM(self) -> Optional[str]:
