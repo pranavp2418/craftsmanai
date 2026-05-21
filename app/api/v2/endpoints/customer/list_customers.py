@@ -16,4 +16,5 @@ def list_customers(
 ):
     service = CustomerService(db)
     items = service.list_customers(created_by_user_id=current_user.id, offset=skip, limit=limit)
-    return CustomerListResponse(items=items, total=len(items))
+    total = service.customer_repo.count_customers(created_by_user_id=current_user.id)
+    return CustomerListResponse(items=items, total=total)

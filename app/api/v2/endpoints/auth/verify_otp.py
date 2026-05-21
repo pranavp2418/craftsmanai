@@ -132,12 +132,12 @@ async def verify_otp(
     try:
         from app.tasks.email_tasks import send_welcome_email
         send_welcome_email.delay(
-            to=result["email"],
-            user_name=result["username"] or result["email"]
+            to=user.email,
+            user_name=user.username or user.email
         )
-        logger.info(f"Welcome email queued for {result['email']}")
+        logger.info(f"Welcome email queued for {user.email}")
     except Exception as e:
-        logger.warning(f"Failed to queue welcome email for {result['email']}: {str(e)}")
+        logger.warning(f"Failed to queue welcome email for {user.email}: {str(e)}")
     
     return LoginResponse(
         access_token=access_token,

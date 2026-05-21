@@ -1,0 +1,270 @@
+import json
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from tests.conftest import TestingSessionLocal
+from app.models.user import User
+from app.models.otp import OTP
+from app.models.refresh_token import RefreshToken
+from app.models.user_device import UserDevice
+from app.models.customer import Customer
+from app.repositories.user import UserRepository
+from app.core.security import create_access_token
+
+
+def create_committed_user(email: str, username: str, full_name: str) -> User:
+    """Helper to create a committed user in the real test DB"""
+    session = TestingSessionLocal()
+    try:
+        user_repo = UserRepository(session)
+        # Clean up any existing user first
+        existing = user_repo.get_user_by_email(email)
+        if existing:
+            session.query(OTP).filter(OTP.email == email).delete()
+            session.query(RefreshToken).filter(RefreshToken.user_id == existing.id).delete()
+            session.query(UserDevice).filter(UserDevice.user_id == existing.id).delete()
+            session.query(Customer).filter(Customer.created_by_user_id == existing.id).delete()
+            session.query(User).filter(User.id == existing.id).delete()
+            session.commit()
+            
+        user = user_repo.create_user(
+            email=email,
+            username=username,
+            full_name=full_name,
+            password="TestPass123!",
+            is_verified=True,
+        )
+        session.commit()
+        session.refresh(user)
+        return user
+    finally:
+        session.close()
+
+
+def cleanup_user_by_email(email: str):
+    """Helper to clean up the committed user and associated customers"""
+    session = TestingSessionLocal()
+    try:
+        user = session.query(User).filter(User.email == email).first()
+        if user:
+            session.query(OTP).filter(OTP.email == email).delete()
+            session.query(RefreshToken).filter(RefreshToken.user_id == user.id).delete()
+            session.query(UserDevice).filter(UserDevice.user_id == user.id).delete()
+            session.query(Customer).filter(Customer.created_by_user_id == user.id).delete()
+            session.query(User).filter(User.id == user.id).delete()
+            session.commit()
+    finally:
+        session.close()
+
+
+class TestCustomerEndpoints:
+    """Test Suite for Customer Management API Endpoints aligned with UI specification"""
+
+    def test_create_customer_with_ui_payload(self, client: TestClient):
+        """Test creating a customer using the exact new UI fields"""
+        email = "customer_test@example.com"
+        try:
+            user = create_committed_user(email=email, username="custtest", full_name="Retailer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            payload = {
+                "full_name": "VIP Client Jane",
+                "tag": "VIP Customer",
+                "emails": [
+                    {"label": "Work", "email": "work_jane@vip.com"},
+                    {"label": "Home", "email": "home_jane@gmail.com"}
+                ],
+                "phone_number": "+1555123456",
+                "location": "Beverly Hills, CA",
+                "status": "Active"
+            }
+
+            response = client.post("/api/v2/customer/", json=payload, headers=headers)
+            assert response.status_code == 201
+
+            data = response.json()
+            assert data["full_name"] == "VIP Client Jane"
+            assert data["tag"] == "VIP Customer"
+            assert len(data["emails"]) == 2
+            assert data["emails"][0]["email"] == "work_jane@vip.com"
+            assert data["emails"][1]["email"] == "home_jane@gmail.com"
+            assert data["phone_number"] == "+1555123456"
+            assert data["location"] == "Beverly Hills, CA"
+            assert data["status"] == "Active"
+            assert "public_token" in data
+        finally:
+            cleanup_user_by_email(email)
+
+    def test_get_customer_legacy_support(self, client: TestClient):
+        """Test that legacy database rows are formatted properly for UI fields"""
+        email = "customer_legacy@example.com"
+        try:
+            user = create_committed_user(email=email, username="custlegacy", full_name="Retailer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # Create a customer with standard legacy fields directly in the database
+            session = TestingSessionLocal()
+            customer_valid_tag = Customer(
+                created_by_user_id=user.id,
+                full_name="Legacy Client 1",
+                emails="legacy1@domain.com",
+                phone_number="123456",
+                tag="VIP Customer",  # Valid Enum
+                location="123 Old St",
+                public_token="token_abc_123",
+                is_active=False
+            )
+            customer_invalid_tag = Customer(
+                created_by_user_id=user.id,
+                full_name="Legacy Client 2",
+                emails="legacy2@domain.com",
+                phone_number="789012",
+                tag="Old Corp",  # Invalid legacy text
+                location="456 New St",
+                public_token="token_xyz_789",
+                is_active=True
+            )
+            session.add(customer_valid_tag)
+            session.add(customer_invalid_tag)
+            session.commit()
+            id_valid = customer_valid_tag.id
+            id_invalid = customer_invalid_tag.id
+            session.close()
+
+            # 1. GET valid legacy customer
+            response = client.get(f"/api/v2/customer/{id_valid}", headers=headers)
+            assert response.status_code == 200
+            data = response.json()
+            assert data["full_name"] == "Legacy Client 1"
+            assert data["tag"] == "VIP Customer"
+            assert data["status"] == "Inactive"
+
+            # 2. GET invalid legacy customer (must map tag to None gracefully)
+            response = client.get(f"/api/v2/customer/{id_invalid}", headers=headers)
+            assert response.status_code == 200
+            data = response.json()
+            assert data["full_name"] == "Legacy Client 2"
+            assert data["tag"] is None  # Gracefully mapped to None
+            assert data["status"] == "Active"
+        finally:
+            cleanup_user_by_email(email)
+
+    def test_update_customer_with_ui_payload(self, client: TestClient):
+        """Test updating a customer using new UI fields"""
+        email = "customer_update@example.com"
+        try:
+            user = create_committed_user(email=email, username="custupdate", full_name="Retailer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # First create the customer
+            create_payload = {
+                "full_name": "Initial Name",
+                "tag": "Regular Customer",
+                "emails": [{"label": "Work", "email": "initial@vip.com"}],
+                "phone_number": "+1000",
+                "location": "Initial Loc",
+                "status": "Active"
+            }
+            res_create = client.post("/api/v2/customer/", json=create_payload, headers=headers)
+            assert res_create.status_code == 201
+            customer_id = res_create.json()["id"]
+
+            # Update the customer
+            update_payload = {
+                "full_name": "Updated Name",
+                "tag": "VIP Customer",
+                "emails": [
+                    {"label": "Work", "email": "updated_work@vip.com"},
+                    {"label": "Personal", "email": "updated_home@vip.com"}
+                ],
+                "phone_number": "+9999",
+                "location": "Updated Loc",
+                "status": "Inactive"
+            }
+            res_update = client.put(f"/api/v2/customer/{customer_id}", json=update_payload, headers=headers)
+            assert res_update.status_code == 200
+
+            data = res_update.json()
+            assert data["full_name"] == "Updated Name"
+            assert data["tag"] == "VIP Customer"
+            assert len(data["emails"]) == 2
+            assert data["emails"][0]["email"] == "updated_work@vip.com"
+            assert data["emails"][1]["email"] == "updated_home@vip.com"
+            assert data["phone_number"] == "+9999"
+            assert data["location"] == "Updated Loc"
+            assert data["status"] == "Inactive"
+        finally:
+            cleanup_user_by_email(email)
+
+    def test_list_customers_success(self, client: TestClient):
+        """Test listing multiple customers under the user's account with true count"""
+        email = "customer_list@example.com"
+        try:
+            user = create_committed_user(email=email, username="custlist", full_name="Retailer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # Create 3 customers
+            for i in range(3):
+                payload = {
+                    "full_name": f"Customer {i}",
+                    "tag": "VIP Customer",  # Valid Enum
+                    "emails": [{"label": "Work", "email": f"cust{i}@domain.com"}],
+                    "phone_number": f"+99{i}",
+                    "location": "Location",
+                    "status": "Active"
+                }
+                client.post("/api/v2/customer/", json=payload, headers=headers)
+
+            response = client.get("/api/v2/customer/?skip=0&limit=10", headers=headers)
+            assert response.status_code == 200
+
+            data = response.json()
+            assert data["total"] == 3
+            assert len(data["items"]) == 3
+            assert data["items"][0]["full_name"] == "Customer 2"  # Ordered by created_at desc
+            assert data["items"][1]["full_name"] == "Customer 1"
+            assert data["items"][2]["full_name"] == "Customer 0"
+        finally:
+            cleanup_user_by_email(email)
+
+    def test_delete_customer_soft(self, client: TestClient):
+        """Test soft deleting a customer sets the is_deleted flag and excludes it from queries"""
+        email = "customer_delete@example.com"
+        try:
+            user = create_committed_user(email=email, username="custdelete", full_name="Retailer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # Create customer
+            payload = {
+                "full_name": "To Be Deleted",
+                "tag": "Regular Customer",
+                "emails": [{"label": "Work", "email": "delete@vip.com"}],
+                "phone_number": "+1234",
+                "location": "A Place",
+                "status": "Active"
+            }
+            res_create = client.post("/api/v2/customer/", json=payload, headers=headers)
+            assert res_create.status_code == 201
+            customer_id = res_create.json()["id"]
+
+            # Soft delete customer
+            res_delete = client.delete(f"/api/v2/customer/{customer_id}", headers=headers)
+            assert res_delete.status_code == 200
+
+            # Retrieval should now return 404
+            res_get = client.get(f"/api/v2/customer/{customer_id}", headers=headers)
+            assert res_get.status_code == 404
+
+            # Listing should be empty (0 items)
+            res_list = client.get("/api/v2/customer/?skip=0&limit=10", headers=headers)
+            assert res_list.status_code == 200
+            assert res_list.json()["total"] == 0
+            assert len(res_list.json()["items"]) == 0
+        finally:
+            cleanup_user_by_email(email)
