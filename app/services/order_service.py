@@ -30,7 +30,7 @@ class OrderService:
 
         Steps:
         1. Lookup the variant and its parent design.
-        2. Resolve (or create) the ``DesignShare`` for this design + customer.
+        2. Resolve (or create) the ``DesignShare`` for this variant + customer.
         3. Create the ``Order`` linked to the share.
 
         Returns ``(order, share_id)``.
@@ -41,8 +41,8 @@ class OrderService:
             raise ValueError(f"DesignVariant with id {design_variant_id} not found")
         design_id = variant.design_id
 
-        # 2. Resolve share – reuse existing or create one
-        existing_shares = self.share_repo.list_for_design(design_id)
+        # 2. Resolve share – reuse existing share for this variant + customer, or create one
+        existing_shares = self.share_repo.list_for_design_variant(design_variant_id)
         share = next(
             (s for s in existing_shares if s.customer_id == customer_id),
             None,
@@ -50,11 +50,11 @@ class OrderService:
         if share is None:
             sharing_service = DesignSharingService(self.db)
             share = sharing_service.create_share(
-                design_id=design_id,
+                design_variant_id=design_variant_id,
                 customer_id=customer_id,
             )
 
-        # 3. Create the order
+        # 3. Create the order (store design_id and share_id)
         order = self.order_repo.create_order(
             design_id=design_id,
             customer_id=customer_id,

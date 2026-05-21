@@ -8,6 +8,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Enum as SqlEnum,
+    Float,
     ForeignKey,
     Integer,
     JSON,
@@ -53,7 +54,6 @@ class Design(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     variants = relationship("DesignVariant", back_populates="design", cascade="all, delete-orphan")
-    shares = relationship("DesignShare", back_populates="design", cascade="all, delete-orphan")
     activity_logs = relationship("DesignActivityLog", back_populates="design", cascade="all, delete-orphan")
     orders = relationship("Order", back_populates="design")
 
@@ -80,6 +80,8 @@ class DesignVariant(Base):
 
     design = relationship("Design", back_populates="variants")
     parent_variant = relationship("DesignVariant", remote_side=[id], backref="child_variants")
+    shares = relationship("DesignShare", back_populates="design_variant", cascade="all, delete-orphan")
+    manufacturer_shares = relationship("DesignVariantManufacturerShare", back_populates="design_variant", cascade="all, delete-orphan")
 
 
 class DesignShareStatus(str, Enum):
@@ -93,7 +95,7 @@ class DesignShare(Base):
     __tablename__ = "design_shares"
 
     id = Column(Integer, primary_key=True, index=True)
-    design_id = Column(Integer, ForeignKey("designs.id"), nullable=False, index=True)
+    design_variant_id = Column(Integer, ForeignKey("design_variants.id"), nullable=False, index=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True, index=True)
     public_token = Column(String(64), unique=True, nullable=False, index=True)
     status = Column(SqlEnum(DesignShareStatus, native_enum=False, length=32), nullable=False, default=DesignShareStatus.PENDING)
@@ -101,9 +103,35 @@ class DesignShare(Base):
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    design = relationship("Design", back_populates="shares")
+    design_variant = relationship("DesignVariant", back_populates="shares")
     customer = relationship("Customer", back_populates="design_shares")
     order = relationship("Order", back_populates="share", uselist=False)
+
+
+class ManufacturerShareStatus(str, Enum):
+    PENDING = "PENDING"
+    QUOTED = "QUOTED"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+
+
+class DesignVariantManufacturerShare(Base):
+    """Links an approved design variant to a manufacturer for quoting."""
+
+    __tablename__ = "design_variant_manufacturer_shares"
+
+    id = Column(Integer, primary_key=True, index=True)
+    design_variant_id = Column(Integer, ForeignKey("design_variants.id"), nullable=False, index=True)
+    manufacturer_id = Column(Integer, ForeignKey("manufacturers.id"), nullable=False, index=True)
+    public_token = Column(String(64), unique=True, nullable=False, index=True)
+    status = Column(SqlEnum(ManufacturerShareStatus, native_enum=False, length=32), nullable=False, default=ManufacturerShareStatus.PENDING)
+    cost_price = Column(Float, nullable=True)
+    delivery_time_days = Column(Integer, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    design_variant = relationship("DesignVariant", back_populates="manufacturer_shares")
+    manufacturer = relationship("Manufacturer", back_populates="variant_shares")
 
 
 class DesignActivityLog(Base):
@@ -125,7 +153,9 @@ __all__ = [
     "Design",
     "DesignVariant",
     "DesignShare",
+    "DesignVariantManufacturerShare",
     "DesignActivityLog",
     "DesignStatus",
     "DesignShareStatus",
+    "ManufacturerShareStatus",
 ]

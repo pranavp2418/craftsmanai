@@ -16,4 +16,5 @@ def list_manufacturers(
 ):
     service = ManufacturerService(db)
     items = service.list_manufacturers(created_by_user_id=current_user.id, offset=skip, limit=limit)
-    return ManufacturerListResponse(items=items, total=len(items))
+    total = service.count_manufacturers(created_by_user_id=current_user.id)
+    return ManufacturerListResponse(items=items, total=total)

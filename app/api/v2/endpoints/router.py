@@ -13,6 +13,7 @@ from .order import router as order_router
 from .quotes import router as quotes_router
 from .public import router as public_router
 from .team_settings import router as team_settings_router
+from .user_profile import router as user_profile_router
 
 api_router = APIRouter()
 
@@ -28,5 +29,5 @@ api_router.include_router(manufacturer_router)
 api_router.include_router(order_router)
 api_router.include_router(quotes_router)
 api_router.include_router(public_router)
-api_router.include_router(team_settings_router)
-
+api_router.include_router(teams_settings_router)
+api_router.include_router(user_profile_router)

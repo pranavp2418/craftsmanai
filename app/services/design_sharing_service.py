@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.design import DesignShare, DesignShareStatus
 from app.repositories.design_share import DesignShareRepository
 from app.repositories.activity_log import DesignActivityLogRepository
+from app.repositories.design_variant import DesignVariantRepository
 
 
 class DesignSharingService:
@@ -13,6 +14,7 @@ class DesignSharingService:
         self.db = db
         self.share_repo = DesignShareRepository(db)
         self.activity_repo = DesignActivityLogRepository(db)
+        self.variant_repo = DesignVariantRepository(db)
 
     def _token(self) -> str:
         return secrets.token_urlsafe(18)
@@ -20,21 +22,25 @@ class DesignSharingService:
     def create_share(
         self,
         *,
-        design_id: int,
+        design_variant_id: int,
         customer_id: Optional[int] = None,
         comment: Optional[str] = None,
     ) -> DesignShare:
+        variant = self.variant_repo.get_by_id(design_variant_id)
+        if not variant:
+            raise ValueError(f"DesignVariant with id {design_variant_id} not found")
+
         share = self.share_repo.create_share(
-            design_id=design_id,
+            design_variant_id=design_variant_id,
             customer_id=customer_id,
             public_token=self._token(),
             comment=comment,
         )
         self.activity_repo.log(
-            design_id=design_id,
+            design_id=variant.design_id,
             action_type="DESIGN_SHARED",
             message="Design shared with external stakeholder",
-            metadata={"share_id": share.id, "customer_id": customer_id},
+            metadata={"share_id": share.id, "variant_id": design_variant_id, "customer_id": customer_id},
         )
         return share
 
@@ -43,6 +49,35 @@ class DesignSharingService:
 
     def get_by_token(self, token: str) -> Optional[DesignShare]:
         return self.share_repo.get_by_token(token)
+
+    def update_variant(
+        self,
+        share: DesignShare,
+        *,
+        design_variant_id: int,
+    ) -> DesignShare:
+        """Update which variant the share points to (after refinement)."""
+        variant = self.variant_repo.get_by_id(design_variant_id)
+        if not variant:
+            raise ValueError(f"DesignVariant with id {design_variant_id} not found")
+
+        updated = self.share_repo.update_variant(share, design_variant_id=design_variant_id)
+
+        # Put the share back to PENDING so the customer reviews the new variant
+        if share.status == DesignShareStatus.NEEDS_REFINEMENT:
+            self.share_repo.update_status(
+                share,
+                status=DesignShareStatus.PENDING,
+                comment="Variant updated after refinement, pending customer review",
+            )
+
+        self.activity_repo.log(
+            design_id=variant.design_id,
+            action_type="VARIANT_UPDATED_ON_SHARE",
+            message=f"Share {share.id} updated to variant {design_variant_id}",
+            metadata={"share_id": share.id, "new_variant_id": design_variant_id},
+        )
+        return updated
 
     def update_status(
         self,
@@ -58,10 +93,13 @@ class DesignSharingService:
             DesignShareStatus.NEEDS_REFINEMENT: "NEEDS_REFINEMENT",
             DesignShareStatus.PENDING: "DESIGN_SHARED",
         }[status]
+        # Get the variant's design_id for activity logging
+        variant = share.design_variant
+        design_id = variant.design_id if variant else None
         self.activity_repo.log(
-            design_id=share.design_id,
+            design_id=design_id,
             action_type=action,
             message=comment,
-            metadata={"share_id": share.id, "status": status.value},
+            metadata={"share_id": share.id, "variant_id": share.design_variant_id, "status": status.value},
         )
         return updated

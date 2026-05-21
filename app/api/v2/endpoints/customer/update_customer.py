@@ -1,3 +1,4 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.dependencies import get_db, get_current_user
@@ -18,12 +19,19 @@ def update_customer(
     customer = service.get_customer(customer_id)
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
-    return service.update_customer(
-        customer,
-        name=request.name,
-        email=request.email,
-        phone=request.phone,
-        company_name=request.company_name,
-        address=request.address,
-        is_active=request.is_active,
-    )
+        
+    update_data = {}
+    if request.full_name is not None:
+        update_data["full_name"] = request.full_name
+    if request.tag is not None:
+        update_data["tag"] = request.tag
+    if request.phone_number is not None:
+        update_data["phone_number"] = request.phone_number
+    if request.location is not None:
+        update_data["location"] = request.location
+    if request.status is not None:
+        update_data["is_active"] = (request.status.strip().capitalize() == "Active")
+    if request.emails is not None:
+        update_data["emails"] = json.dumps([e.model_dump() for e in request.emails])
+        
+    return service.update_customer(customer, **update_data)

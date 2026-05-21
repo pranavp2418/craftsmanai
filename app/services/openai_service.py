@@ -846,6 +846,34 @@ The final design must:
         logger.info("Custom angle generated successfully")
         return result.data[0]
 
+    def generate_image_from_prompt(
+        self,
+        user_prompt: str,
+        size: str = "1024x1024"
+    ) -> str:
+        """
+        Generate image using prompt only (no reference image).
+        
+        Args:
+            user_prompt: User's design requirements
+            size: Output image size (default: 1024x1024)
+            
+        Returns:
+            OpenAI image object/URL response
+        """
+        logger.info("Generating image from prompt only")
+        prompt = self._build_master_prompt(user_prompt)
+        
+        result = self._client.images.generate(
+            model=getattr(settings, "OPENAI_TEXT_TO_IMAGE_MODEL", "gpt-image-2"),
+            prompt=prompt,
+            size=size,
+            n=1
+        )
+        
+        logger.info("Prompt-only image generated successfully")
+        return result.data[0]
+
 
 # Singleton instance
 openai_service = OpenAIService()

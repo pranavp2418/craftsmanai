@@ -1,3 +1,4 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.dependencies import get_db, get_current_user
@@ -14,11 +15,23 @@ def create_customer(
     current_user: User = Depends(get_current_user),
 ):
     service = CustomerService(db)
+    
+    # Serialize the list of emails into a JSON string for the DB column
+    email_db = None
+    if request.emails:
+        email_db = json.dumps([e.model_dump() for e in request.emails])
+        
+    # Translate status string to a boolean
+    is_active_db = True
+    if request.status:
+        is_active_db = (request.status.strip().capitalize() == "Active")
+        
     return service.create_customer(
         created_by_user_id=current_user.id,
-        name=request.name,
-        email=request.email,
-        phone=request.phone,
-        company_name=request.company_name,
-        address=request.address,
+        full_name=request.full_name,
+        emails=email_db,
+        phone_number=request.phone_number,
+        tag=request.tag,
+        location=request.location,
+        is_active=is_active_db,
     )

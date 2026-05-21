@@ -1,11 +1,22 @@
 """
-Celery task for generating the remaining viewing angles for a design variant.
+Celery task for generating viewing angles per metal type for a design variant.
 
-This task treats the base image as the primary/front view and generates the
-three remaining standard angles:
-  - side_view
-  - top_view
-  - three_quarter_view
+The task accepts a list of metals (e.g. ``["gold", "silver", "rose"]``).
+For each metal it generates all standard viewing angles (side_view, top_view,
+three_quarter_view) using the variant's base image as reference.  The results
+are stored as a nested dict under ``angles_json``:
+
+.. code-block:: json
+
+    {
+      "gold": {
+        "side_view": "https://...",
+        "top_view": "https://...",
+        "three_quarter_view": "https://..."
+      },
+      "silver": { ... },
+      "rose": { ... }
+    }
 """
 
 from __future__ import annotations
@@ -34,6 +45,21 @@ ANGLE_PROMPTS = {
 }
 
 
+def _metal_to_angle_prompt_suffix(metal: str) -> str:
+    """Return a rendering hint suffix for the given metal to be appended to the angle prompt."""
+    metal_hints = {
+        "gold": "Render the jewelry in 18K yellow gold with warm golden reflections and high-polish finish.",
+        "rose": "Render the jewelry in 18K rose gold with a pinkish-warm hue and high-polish finish.",
+        "silver": "Render the jewelry in sterling silver / white gold with cool, bright reflections and high-polish finish.",
+        "platinum": "Render the jewelry in platinum with a bright white lustre and slightly matte luxury finish.",
+        "white_gold": "Render the jewelry in 18K white gold with a bright white tone and rhodium-plated shine.",
+    }
+    return metal_hints.get(
+        metal,
+        f"Render the jewelry in {metal.replace('_', ' ').title()} metal with a high-polish finish.",
+    )
+
+
 def _extract_image_data(data_item: Any) -> tuple[bytes, str]:
     if getattr(data_item, "b64_json", None):
         return base64.b64decode(data_item.b64_json), "image/png"
@@ -53,8 +79,17 @@ def _extract_image_data(data_item: Any) -> tuple[bytes, str]:
 
 
 @create_task(name="generate_remaining_variant_angles", max_retries=3)
-def generate_remaining_variant_angles(self, variant_id: int, channel: str):
-    logger.info("Starting remaining angle generation for variant_id=%s", variant_id)
+def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], channel: str):
+    """Generate viewing angles for each requested metal for *variant_id*.
+
+    The Celery task runs in a separate worker process.  Results are published
+    as SSE events on *channel* when generation is complete (or fails).
+    """
+    logger.info(
+        "Starting per-metal angle generation for variant_id=%s, metals=%s",
+        variant_id,
+        metals,
+    )
     db = SessionLocal()
 
     try:
@@ -68,62 +103,96 @@ def generate_remaining_variant_angles(self, variant_id: int, channel: str):
         if not variant.base_design_image_url:
             raise ValueError(f"Variant {variant_id} has no base image URL")
 
+        # Build nested angles_json: keys are metal names, values are angle dicts
         existing_angles = variant.angles_json or {}
-        missing_angles = [
-            angle_name
-            for angle_name in ANGLE_PROMPTS.keys()
-            if not existing_angles.get(angle_name)
-        ]
+        generated_angles: dict[str, dict[str, str]] = {}
 
-        if not missing_angles:
+        # Preserve metals that already have all angles (so we don't re-generate)
+        for metal_name in metals:
+            metal_data = existing_angles.get(metal_name)
+            if isinstance(metal_data, dict) and all(
+                angle in metal_data for angle in ANGLE_PROMPTS.keys()
+            ):
+                generated_angles[metal_name] = metal_data
+
+        missing_metals = [m for m in metals if m not in generated_angles]
+
+        if not missing_metals:
             sse_manager.publish(
                 channel,
                 data={
                     "variant_id": variant.id,
                     "design_id": variant.design_id,
                     "status": "SKIPPED",
-                    "message": "All remaining standard angles already exist",
-                    "angles": existing_angles,
+                    "message": "All angles already exist for all requested metals",
+                    "angles": generated_angles,
                 },
                 event="variant.angles.generated",
             )
             return
 
-        generated_angles = dict(existing_angles)
+        for metal_name in missing_metals:
+            logger.info(
+                "Generating angles for metal=%s, variant_id=%s",
+                metal_name,
+                variant_id,
+            )
+            metal_angles: dict[str, str] = {}
 
-        for angle_name in missing_angles:
-            prompt = ANGLE_PROMPTS[angle_name]
-            logger.info("Generating %s for variant_id=%s", angle_name, variant_id)
-
-            if angle_name == "side_view":
-                generated_item = openai_service.generate_side_view(
-                    base_image_source=variant.base_design_image_url,
-                    angle_description=prompt,
-                )
-            elif angle_name == "top_view":
-                generated_item = openai_service.generate_top_view(
-                    base_image_source=variant.base_design_image_url,
-                    angle_description=prompt,
-                )
-            else:
-                generated_item = openai_service.generate_custom_angle(
-                    base_image_source=variant.base_design_image_url,
-                    angle_description=prompt,
+            for angle_name, base_prompt in ANGLE_PROMPTS.items():
+                # Combine the angle description with the metal rendering hint
+                metal_hint = _metal_to_angle_prompt_suffix(metal_name)
+                full_prompt = f"{base_prompt}\n\n{metal_hint}"
+                logger.info(
+                    "Generating %s for metal=%s, variant_id=%s",
+                    angle_name,
+                    metal_name,
+                    variant_id,
                 )
 
-            image_bytes, content_type = _extract_image_data(generated_item)
-            _validate_image_bytes(image_bytes, content_type)
+                if angle_name == "side_view":
+                    generated_item = openai_service.generate_side_view(
+                        base_image_source=variant.base_design_image_url,
+                        angle_description=full_prompt,
+                    )
+                elif angle_name == "top_view":
+                    generated_item = openai_service.generate_top_view(
+                        base_image_source=variant.base_design_image_url,
+                        angle_description=full_prompt,
+                    )
+                else:
+                    generated_item = openai_service.generate_custom_angle(
+                        base_image_source=variant.base_design_image_url,
+                        angle_description=full_prompt,
+                    )
 
-            bucket_path = f"generated/angles/{variant.design_id}/{variant.id}/{angle_name}"
-            image_url = upload_image_to_supabase(image_bytes, bucket_path)
-            generated_angles[angle_name] = image_url
+                image_bytes, content_type = _extract_image_data(generated_item)
+                _validate_image_bytes(image_bytes, content_type)
+
+                # Include metal in the storage path to prevent collisions
+                bucket_path = (
+                    f"generated/angles/{variant.design_id}/{variant.id}/"
+                    f"{metal_name}/{angle_name}"
+                )
+                image_url = upload_image_to_supabase(image_bytes, bucket_path)
+                metal_angles[angle_name] = image_url
+
+            generated_angles[metal_name] = metal_angles
+
+        # Merge back any metals that weren't requested but existed before
+        for existing_metal, existing_metal_data in existing_angles.items():
+            if existing_metal not in generated_angles:
+                generated_angles[existing_metal] = existing_metal_data
 
         variant_repo.update_variant(variant, angles_json=generated_angles)
         activity_repo.log(
             design_id=variant.design_id,
             action_type="ANGLES_GENERATED",
-            message="Generated remaining variant angles",
-            metadata={"variant_id": variant.id, "generated_angles": missing_angles},
+            message=f"Generated angles for metals: {', '.join(missing_metals)}",
+            metadata={
+                "variant_id": variant.id,
+                "metals": missing_metals,
+            },
         )
 
         sse_manager.publish(
@@ -132,16 +201,23 @@ def generate_remaining_variant_angles(self, variant_id: int, channel: str):
                 "variant_id": variant.id,
                 "design_id": variant.design_id,
                 "status": "GENERATED",
-                "generated_angles": missing_angles,
+                "generated_metals": missing_metals,
                 "angles": generated_angles,
             },
             event="variant.angles.generated",
         )
 
-        logger.info("Remaining angle generation completed for variant_id=%s", variant_id)
+        logger.info(
+            "Per-metal angle generation completed for variant_id=%s",
+            variant_id,
+        )
 
     except Exception as exc:
-        logger.exception("Remaining angle generation failed for variant_id=%s: %s", variant_id, exc)
+        logger.exception(
+            "Per-metal angle generation failed for variant_id=%s: %s",
+            variant_id,
+            exc,
+        )
         try:
             sse_manager.publish(
                 channel,
@@ -153,7 +229,10 @@ def generate_remaining_variant_angles(self, variant_id: int, channel: str):
                 event="variant.angles.failed",
             )
         except Exception:
-            logger.warning("Failed to publish angle generation failure event for variant_id=%s", variant_id)
+            logger.warning(
+                "Failed to publish angle generation failure event for variant_id=%s",
+                variant_id,
+            )
 
         raise self.retry(
             exc=exc,

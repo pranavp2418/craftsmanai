@@ -75,8 +75,17 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
         if not design:
             raise ValueError(f"Design with id {design_id} not found")
 
-        reference_image_url = _resolve_reference_image_url(design)
-        generated_item = openai_service.generate_base_image(reference_image_url, prompt)
+        # Check if a reference image is present, otherwise fallback to prompt-only generation
+        reference_image_url = None
+        if design.input_image_urls and isinstance(design.input_image_urls, list) and design.input_image_urls:
+            reference_image_url = design.input_image_urls[0]
+        elif design.input_image_url:
+            reference_image_url = design.input_image_url
+
+        if reference_image_url:
+            generated_item = openai_service.generate_base_image(reference_image_url, prompt)
+        else:
+            generated_item = openai_service.generate_image_from_prompt(prompt)
         image_bytes, content_type = _extract_generated_image_data(generated_item)
         _validate_image_bytes(image_bytes, content_type)
 
