@@ -143,6 +143,8 @@ def generate_metal_variant_images(
             event="metal_variants.generated",
         )
 
+        sse_manager.publish_close(channel)
+
         logger.info(
             "Metal variant generation completed for variant_id=%s",
             variant_id,
@@ -164,6 +166,7 @@ def generate_metal_variant_images(
                 },
                 event="metal_variants.failed",
             )
+            sse_manager.publish_close(channel)
         except Exception:
             logger.warning(
                 "Failed to publish SSE failure event for variant_id=%s",

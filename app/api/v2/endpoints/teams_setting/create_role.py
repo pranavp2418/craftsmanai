@@ -9,7 +9,7 @@ from app.models.user import User
 router = APIRouter()
 
 
-@router.post("/roles", response_model=TeamRolePermissionResponse, status_code=status.HTTP_201_CREATED, tags=["roles"])
+@router.post("/roles", response_model=TeamRolePermissionResponse, status_code=status.HTTP_201_CREATED)
 async def create_role(
     role_data: TeamRolePermissionCreate,
     current_user: User = Depends(get_current_user),

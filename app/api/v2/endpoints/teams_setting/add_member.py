@@ -9,7 +9,7 @@ from app.models.user import User
 router = APIRouter()
 
 
-@router.post("/teams/{team_id}/members", response_model=TeamMemberResponse, status_code=status.HTTP_201_CREATED, tags=["members"])
+@router.post("/teams/{team_id}/members", response_model=TeamMemberResponse, status_code=status.HTTP_201_CREATED)
 async def add_member(
     team_id: int,
     member_data: TeamMemberCreate,

@@ -9,7 +9,7 @@ from app.models.user import User
 router = APIRouter()
 
 
-@router.put("/teams/{team_id}/members/{user_id}", response_model=TeamMemberResponse, tags=["members"])
+@router.put("/teams/{team_id}/members/{user_id}", response_model=TeamMemberResponse)
 async def update_member_role(
     team_id: int,
     user_id: int,

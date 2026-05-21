@@ -8,7 +8,7 @@ from app.models.user import User
 router = APIRouter()
 
 
-@router.get("/invitations/me/count", response_model=dict, tags=["invitations"])
+@router.get("/invitations/me/count", response_model=dict)
 async def count_invitations(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)

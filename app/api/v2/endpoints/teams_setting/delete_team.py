@@ -8,7 +8,7 @@ from app.models.user import User
 router = APIRouter()
 
 
-@router.delete("/teams/{team_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["teams"])
+@router.delete("/teams/{team_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_team(
     team_id: int,
     current_user: User = Depends(get_current_user),

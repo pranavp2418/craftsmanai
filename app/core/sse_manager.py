@@ -21,8 +21,13 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Internal helpers – same as before
+# Internal helpers
 # ---------------------------------------------------------------------------
+
+# Sentinel used to signal that a stream should be closed.
+# When the background listener receives a message with event == __SSE_CLOSE__
+# it puts this sentinel into the subscriber queue instead of a formatted SSE string.
+_SSE_CLOSE_SENTINEL = object()
 
 
 def _encode_data(data: Any) -> str:
@@ -192,6 +197,26 @@ class SSEManager:
             logger.exception("Failed to publish SSE event to Redis: %s", exc)
         return 0
 
+    def publish_close(
+        self,
+        channel: str,
+        *,
+        event: Optional[str] = None,
+    ) -> int:
+        """Publish a close signal to *channel* via Redis pub/sub.
+
+        Subscribers currently listening on this channel will stop streaming
+        after receiving this signal (the connection is closed gracefully).
+        
+        A default ``event`` of ``"__SSE_CLOSE__"`` is used internally by the
+        manager so that ``listen()`` can detect the signal and break its loop.
+        """
+        return self.publish(
+            channel,
+            data=None,
+            event=event or "__SSE_CLOSE__",
+        )
+
     async def listen(
         self,
         channel: str,
@@ -202,6 +227,10 @@ class SSEManager:
 
         The caller must be in the same process as the background Redis listener
         (typically the FastAPI process).
+
+        The generator will stop iteration when a close signal (event type
+        ``__SSE_CLOSE__``) is received on the channel, causing the SSE
+        ``StreamingResponse`` to close the HTTP connection gracefully.
         """
         queue = await self.subscribe(channel)
         try:
@@ -216,6 +245,16 @@ class SSEManager:
                         continue
                 else:
                     message = await queue.get()
+
+                # If the message is the close sentinel, stop iteration so the
+                # StreamingResponse closes the connection gracefully.
+                if message is _SSE_CLOSE_SENTINEL:
+                    logger.info(
+                        "SSE stream closing for channel='%s' (received close signal)",
+                        channel,
+                    )
+                    break
+
                 yield message
         except asyncio.CancelledError:
             raise
@@ -262,6 +301,10 @@ class SSEManager:
         When using ``psubscribe`` (pattern-based subscription), Redis delivers
         messages with ``type`` = ``"pmessage"``, while exact ``subscribe``
         delivers with ``type`` = ``"message"``.  We accept both.
+
+        If the event type is ``__SSE_CLOSE__``, the close sentinel is pushed
+        instead of a formatted SSE string, causing ``listen()`` to break its
+        iteration loop and gracefully close the HTTP connection.
         """
         msg_type: str = message.get("type", "")
         if msg_type not in ("message", "pmessage"):
@@ -282,9 +325,26 @@ class SSEManager:
             logger.warning("Ignoring unparseable SSE payload on %s", channel)
             return
 
+        event_name = payload.get("event")
+
+        # If this is a close signal, push the sentinel so that listen() breaks.
+        if event_name == "__SSE_CLOSE__":
+            async with self._lock:
+                queues = list(self._channels.get(actual_channel, []))
+
+            logger.info(
+                "SSE Redis listener received close signal for channel='%s', "
+                "closing %d subscriber(s)",
+                actual_channel, len(queues),
+            )
+
+            for q in queues:
+                q.put_nowait(_SSE_CLOSE_SENTINEL)
+            return
+
         sse_message = _format_sse(
             data=_encode_data(payload.get("data")),
-            event=payload.get("event"),
+            event=event_name,
             event_id=payload.get("event_id"),
             retry=payload.get("retry"),
             comment=payload.get("comment"),

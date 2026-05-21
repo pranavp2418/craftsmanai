@@ -10,7 +10,7 @@ from app.models.user import User
 router = APIRouter()
 
 
-@router.get("/invitations/me", response_model=List[TeamInvitationResponse], tags=["invitations"])
+@router.get("/invitations/me", response_model=List[TeamInvitationResponse])
 async def get_my_invitations(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)

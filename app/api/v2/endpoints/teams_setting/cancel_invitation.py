@@ -8,7 +8,7 @@ from app.models.user import User
 router = APIRouter()
 
 
-@router.delete("/teams/{team_id}/invitations/{email}", status_code=status.HTTP_204_NO_CONTENT, tags=["invitations"])
+@router.delete("/teams/{team_id}/invitations/{email}", status_code=status.HTTP_204_NO_CONTENT)
 async def cancel_invitation(
     team_id: int,
     email: str,

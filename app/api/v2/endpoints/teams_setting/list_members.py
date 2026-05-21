@@ -10,7 +10,7 @@ from app.models.user import User
 router = APIRouter()
 
 
-@router.get("/teams/{team_id}/members", response_model=List[TeamMemberResponse], tags=["members"])
+@router.get("/teams/{team_id}/members", response_model=List[TeamMemberResponse])
 async def list_members(
     team_id: int,
     skip: int = Query(0, ge=0),

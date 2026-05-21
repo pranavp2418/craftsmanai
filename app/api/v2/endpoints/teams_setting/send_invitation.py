@@ -9,7 +9,7 @@ from app.models.user import User
 router = APIRouter()
 
 
-@router.post("/teams/{team_id}/invitations", response_model=dict, status_code=status.HTTP_201_CREATED, tags=["invitations"])
+@router.post("/teams/{team_id}/invitations", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def send_invitation(
     team_id: int,
     invitation_data: TeamInvitationCreate,

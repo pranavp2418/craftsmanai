@@ -9,7 +9,7 @@ from app.models.user import User
 router = APIRouter()
 
 
-@router.post("/invitations/accept", response_model=dict, tags=["invitations"])
+@router.post("/invitations/accept", response_model=dict)
 async def accept_invitation(
     request_data: InvitationAcceptRequest,
     current_user: User = Depends(get_current_user),

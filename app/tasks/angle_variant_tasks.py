@@ -129,6 +129,7 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
                 },
                 event="variant.angles.generated",
             )
+            sse_manager.publish_close(channel)
             return
 
         for metal_name in missing_metals:
@@ -207,6 +208,8 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
             event="variant.angles.generated",
         )
 
+        sse_manager.publish_close(channel)
+
         logger.info(
             "Per-metal angle generation completed for variant_id=%s",
             variant_id,
@@ -228,6 +231,7 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
                 },
                 event="variant.angles.failed",
             )
+            sse_manager.publish_close(channel)
         except Exception:
             logger.warning(
                 "Failed to publish angle generation failure event for variant_id=%s",

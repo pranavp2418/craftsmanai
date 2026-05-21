@@ -36,6 +36,19 @@ class SSEService:
             comment=comment,
         )
 
+    def publish_close(
+        self,
+        channel: str,
+        *,
+        event: Optional[str] = None,
+    ) -> int:
+        """Publish a close signal to *channel*.
+
+        Subscribers currently listening on this channel will stop streaming
+        after receiving this signal (the connection is closed gracefully).
+        """
+        return sse_manager.publish_close(channel, event=event)
+
 
 sse_service = SSEService()
 

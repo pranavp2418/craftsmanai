@@ -119,6 +119,12 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             event="design.generated",
         )
 
+        # Close the SSE stream – the client has received the final event.
+        try:
+            sse_manager.publish_close(channel)
+        except Exception:
+            logger.warning("Failed to publish SSE close signal for channel=%s", channel)
+
         logger.info("generate_design_base_image completed for design_id=%s", design_id)
 
     except Exception as exc:
@@ -133,6 +139,8 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                 },
                 event="design.failed",
             )
+            # Close the SSE stream on failure as well.
+            sse_manager.publish_close(channel)
         except Exception:
             logger.warning("Failed to publish SSE failure event for design_id=%s", design_id)
 
