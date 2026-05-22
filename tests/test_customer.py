@@ -201,7 +201,7 @@ class TestCustomerEndpoints:
             cleanup_user_by_email(email)
 
     def test_list_customers_success(self, client: TestClient):
-        """Test listing multiple customers under the user's account with true count"""
+        """Test listing multiple customers under the user's account with true count, search, and page fields"""
         email = "customer_list@example.com"
         try:
             user = create_committed_user(email=email, username="custlist", full_name="Retailer Admin")
@@ -225,12 +225,31 @@ class TestCustomerEndpoints:
 
             data = response.json()
             assert data["total"] == 3
+            assert data["page"] == 1
             assert len(data["items"]) == 3
             assert data["items"][0]["full_name"] == "Customer 2"  # Ordered by created_at desc
             assert data["items"][1]["full_name"] == "Customer 1"
             assert data["items"][2]["full_name"] == "Customer 0"
+
+            # Test search by name
+            res_search_name = client.get("/api/v2/customer/?search=Customer 1", headers=headers)
+            assert res_search_name.status_code == 200
+            data_name = res_search_name.json()
+            assert data_name["total"] == 1
+            assert len(data_name["items"]) == 1
+            assert data_name["items"][0]["full_name"] == "Customer 1"
+
+            # Test search by email
+            res_search_email = client.get("/api/v2/customer/?search=cust2@domain.com", headers=headers)
+            assert res_search_email.status_code == 200
+            data_email = res_search_email.json()
+            assert data_email["total"] == 1
+            assert len(data_email["items"]) == 1
+            assert data_email["items"][0]["full_name"] == "Customer 2"
+
         finally:
             cleanup_user_by_email(email)
+
 
     def test_delete_customer_soft(self, client: TestClient):
         """Test soft deleting a customer sets the is_deleted flag and excludes it from queries"""

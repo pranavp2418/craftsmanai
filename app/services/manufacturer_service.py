@@ -42,14 +42,15 @@ class ManufacturerService:
     def get_by_token(self, token: str) -> Optional[Manufacturer]:
         return self.manufacturer_repo.get_by_token(token)
 
-    def list_manufacturers(self, *, created_by_user_id: int, limit: int = 50, offset: int = 0) -> List[Manufacturer]:
-        return self.manufacturer_repo.list_manufacturers(created_by_user_id=created_by_user_id, limit=limit, offset=offset)
+    def list_manufacturers(self, *, created_by_user_id: int, limit: int = 50, offset: int = 0, search: Optional[str] = None) -> List[Manufacturer]:
+        return self.manufacturer_repo.list_manufacturers(created_by_user_id=created_by_user_id, limit=limit, offset=offset, search=search)
 
     def update_manufacturer(self, manufacturer: Manufacturer, **kwargs) -> Manufacturer:
         return self.manufacturer_repo.update_manufacturer(manufacturer, **kwargs)
 
-    def count_manufacturers(self, *, created_by_user_id: int) -> int:
-        return self.manufacturer_repo.count_manufacturers(created_by_user_id=created_by_user_id)
+    def count_manufacturers(self, *, created_by_user_id: int, search: Optional[str] = None) -> int:
+        return self.manufacturer_repo.count_manufacturers(created_by_user_id=created_by_user_id, search=search)
+
 
     def delete_manufacturer(self, manufacturer: Manufacturer) -> Manufacturer:
         return self.manufacturer_repo.delete_manufacturer(manufacturer)

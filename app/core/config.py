@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     
     # Device Management
     MAX_ACTIVE_DEVICES: int = 5
+    
+    # Stripe Settings
+    STRIPE_API_KEY: str = "sk_test_mock"
+    STRIPE_WEBHOOK_SECRET: str = "whsec_mock"
 
     # Rate Limiting
     RATE_LIMIT_GLOBAL: str = "60/minute"
@@ -29,6 +33,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_AUTH: str = "5/minute"
     RATE_LIMIT_REGISTER: str = "3/hour"
     RATE_LIMIT_PASSWORD_RESET: str = "3/hour"
+    RATE_LIMIT_PAYMENT: str = "10/minute"
 
     # Database
     DATABASE_URL: str

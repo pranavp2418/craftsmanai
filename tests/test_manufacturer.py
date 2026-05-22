@@ -176,7 +176,7 @@ class TestManufacturerEndpoints:
             cleanup_user_by_email(email)
 
     def test_list_manufacturers(self, client: TestClient):
-        """Test listing multiple manufacturers with correct pagination counts"""
+        """Test listing multiple manufacturers with correct pagination counts, search, and page fields"""
         email = "mfg_list@example.com"
         try:
             user = create_committed_user(email=email, username="mfglist", full_name="Designer Admin")
@@ -199,12 +199,31 @@ class TestManufacturerEndpoints:
 
             data = response.json()
             assert data["total"] == 3
+            assert data["page"] == 1
             assert len(data["items"]) == 3
             assert data["items"][0]["name"] == "Manufacturer 2"
             assert data["items"][1]["name"] == "Manufacturer 1"
             assert data["items"][2]["name"] == "Manufacturer 0"
+
+            # Test search by name
+            res_search_name = client.get("/api/v2/manufacturer/?search=Manufacturer 1", headers=headers)
+            assert res_search_name.status_code == 200
+            data_name = res_search_name.json()
+            assert data_name["total"] == 1
+            assert len(data_name["items"]) == 1
+            assert data_name["items"][0]["name"] == "Manufacturer 1"
+
+            # Test search by email
+            res_search_email = client.get("/api/v2/manufacturer/?search=mfg2@diamond.com", headers=headers)
+            assert res_search_email.status_code == 200
+            data_email = res_search_email.json()
+            assert data_email["total"] == 1
+            assert len(data_email["items"]) == 1
+            assert data_email["items"][0]["name"] == "Manufacturer 2"
+
         finally:
             cleanup_user_by_email(email)
+
 
     def test_delete_manufacturer_soft(self, client: TestClient):
         """Test soft deleting a manufacturer sets the is_deleted flag and excludes it from queries"""

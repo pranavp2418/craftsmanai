@@ -132,6 +132,8 @@ class CustomerResponse(BaseModel):
 class CustomerListResponse(BaseModel):
     items: List[CustomerResponse]
     total: int
+    page: int
+
 
 
 class LinkedProject(BaseModel):
