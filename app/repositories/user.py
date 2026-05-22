@@ -6,6 +6,8 @@ from datetime import datetime, timezone, timedelta
 from app.models.user import User
 from app.models.user_device import UserDevice
 from app.models.refresh_token import RefreshToken
+from app.models.notification_setting import NotificationSetting
+from app.models.brand_setting import BrandSetting
 from app.core.security import get_password_hash, verify_password, hash_token, verify_token
 from app.core.config import settings
 
@@ -30,6 +32,31 @@ class UserRepository:
         self.db.add(db_user)
         self.db.commit()
         self.db.refresh(db_user)
+
+        # Automatically create default notification settings (all fields ON)
+        db_notif = NotificationSetting(
+            user_id=db_user.id,
+            email_notifications=True,
+            push_notifications=True,
+            design_approval_alerts=True,
+            manufacturer_updates=True,
+            quote_reminders=True  # All fields ON by default on registration
+        )
+        self.db.add(db_notif)
+        self.db.commit()
+
+        # Automatically create default brand settings
+        db_brand = BrandSetting(
+            user_id=db_user.id,
+            brand_name=db_user.business_name or "Craftsman AI",
+            logo_url=None,
+            business_email=db_user.email,
+            phone_number=None,
+            primary_color="#6366F1"
+        )
+        self.db.add(db_brand)
+        self.db.commit()
+
         return db_user
 
     def get_user_by_id(self, user_id: int) -> Optional[User]:

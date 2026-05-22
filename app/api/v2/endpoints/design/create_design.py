@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, status, Form, File, UploadFile
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from fastapi import HTTPException
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_active_user
@@ -20,7 +21,7 @@ async def create_design(
     name: str = Form(...),
     jewellery_type: str = Form(...),
     user_prompt: str = Form(...),
-    files: Optional[List[UploadFile]] = File(default=None),
+    files: List[UploadFile] = File(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -30,6 +31,8 @@ async def create_design(
 
     # Read uploaded file bytes and pass them to standard validation/upload flow
     if files:
+        if files.__len__() > 1:
+            raise HTTPException(status_code=400, detail="Only 1 reference images allowed.")
         file_bytes_list = []
         for file in files:
             content = await file.read()

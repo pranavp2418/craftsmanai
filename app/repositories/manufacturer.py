@@ -42,11 +42,14 @@ class ManufacturerRepository:
     def get_by_token(self, token: str) -> Optional[Manufacturer]:
         return self.db.query(Manufacturer).filter(Manufacturer.public_token == token, Manufacturer.is_deleted == False).first()
 
-    def list_manufacturers(self, *, created_by_user_id: int, limit: int = 50, offset: int = 0) -> List[Manufacturer]:
+    def list_manufacturers(self, *, created_by_user_id: int, limit: int = 50, offset: int = 0, search: Optional[str] = None) -> List[Manufacturer]:
+        query = self.db.query(Manufacturer).filter(Manufacturer.created_by_user_id == created_by_user_id, Manufacturer.is_deleted == False)
+        if search:
+            query = query.filter(
+                (Manufacturer.name.ilike(f"%{search}%")) | (Manufacturer.emails.ilike(f"%{search}%"))
+            )
         return (
-            self.db.query(Manufacturer)
-            .filter(Manufacturer.created_by_user_id == created_by_user_id, Manufacturer.is_deleted == False)
-            .order_by(Manufacturer.created_at.desc())
+            query.order_by(Manufacturer.created_at.desc())
             .offset(offset)
             .limit(limit)
             .all()
@@ -60,13 +63,17 @@ class ManufacturerRepository:
         self.db.refresh(manufacturer)
         return manufacturer
 
-    def count_manufacturers(self, *, created_by_user_id: int) -> int:
+    def count_manufacturers(self, *, created_by_user_id: int, search: Optional[str] = None) -> int:
+        query = self.db.query(func.count(Manufacturer.id)).filter(Manufacturer.created_by_user_id == created_by_user_id, Manufacturer.is_deleted == False)
+        if search:
+            query = query.filter(
+                (Manufacturer.name.ilike(f"%{search}%")) | (Manufacturer.emails.ilike(f"%{search}%"))
+            )
         return (
-            self.db.query(func.count(Manufacturer.id))
-            .filter(Manufacturer.created_by_user_id == created_by_user_id, Manufacturer.is_deleted == False)
-            .scalar()
+            query.scalar()
             or 0
         )
+
 
     def delete_manufacturer(self, manufacturer: Manufacturer) -> Manufacturer:
         manufacturer.is_deleted = True

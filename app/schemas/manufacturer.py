@@ -132,6 +132,8 @@ class ManufacturerResponse(BaseModel):
 class ManufacturerListResponse(BaseModel):
     items: List[ManufacturerResponse]
     total: int
+    page: int
+
 
 
 class SentRequest(BaseModel):

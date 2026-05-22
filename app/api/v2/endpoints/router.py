@@ -14,6 +14,7 @@ from .quotes import router as quotes_router
 from .public import router as public_router
 from .teams_setting import router as teams_settings_router
 from .user_profile import router as user_profile_router
+from .Notification_settings import router as notification_settings_router
 
 api_router = APIRouter()
 
@@ -31,3 +32,13 @@ api_router.include_router(quotes_router)
 api_router.include_router(public_router)
 api_router.include_router(teams_settings_router)
 api_router.include_router(user_profile_router)
+api_router.include_router(notification_settings_router)
+from .brand_settings import router as brand_settings_router
+api_router.include_router(brand_settings_router)
+
+from .admin.subscription_plan import router as admin_subscription_router
+api_router.include_router(admin_subscription_router, prefix="/admin/subscription-plans", tags=["admin_subscription_plans"])
+
+from .reatiler_subscription import router as retailer_subscription_router
+api_router.include_router(retailer_subscription_router, prefix="/retailer/subscriptions", tags=["retailer_subscriptions"])
+
