@@ -22,7 +22,7 @@ def list_designs(
 ):
     service = DesignService(db)
     items, total = service.list_designs(
-        user_id=current_user.id,
+        user=current_user,
         status=status,
         limit=limit,
         offset=offset,

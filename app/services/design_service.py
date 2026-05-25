@@ -16,24 +16,36 @@ class DesignService:
         self.design_repo = DesignRepository(db)
         self.activity_repo = DesignActivityLogRepository(db)
 
-    def _generate_design_code(self, user: User) -> tuple[str, int]:
-        if getattr(user, "business_name", None):
-            words = [word for word in user.business_name.split() if word]
+    def _generate_design_code(self, owner_user: User, owner_id: int) -> tuple[str, int]:
+        if getattr(owner_user, "business_name", None):
+            words = [word for word in owner_user.business_name.split() if word]
             prefix = "".join(word[0] for word in words[:2]).upper()
-        elif user.design_prefix:
-            prefix = user.design_prefix.strip().upper()
-        elif user.full_name:
-            words = [word for word in user.full_name.split() if word]
+        elif owner_user.design_prefix:
+            prefix = owner_user.design_prefix.strip().upper()
+        elif owner_user.full_name:
+            words = [word for word in owner_user.full_name.split() if word]
             prefix = "".join(word[0] for word in words[:2]).upper()
         else:
-            prefix = (user.username or "DSN").upper()
+            prefix = (owner_user.username or "DSN").upper()
 
         prefix = "".join(ch for ch in prefix if ch.isalnum())
         prefix = prefix[:3].ljust(3, "X")
 
-        sequence_number = self.design_repo.get_next_sequence_number(user.id)
+        sequence_number = self.design_repo.get_next_sequence_number(owner_id)
         design_code = f"{prefix}-{sequence_number:03d}"
         return design_code, sequence_number
+
+    def _resolve_owner_id(self, user: User) -> tuple[int, Optional[int]]:
+        """
+        Resolve the effective owner user_id and the created_by_user_id.
+        
+        For team members: user_id = team_owner_id (who owns the workspace), 
+        created_by_user_id = current user (actual creator).
+        For regular users: user_id = current user, created_by_user_id = None.
+        """
+        if user.is_team_member and user.team_owner_id:
+            return user.team_owner_id, user.id
+        return user.id, None
 
     def create_design(
         self,
@@ -48,9 +60,17 @@ class DesignService:
         initial_model: Optional[str] = None,
         initial_image_url: Optional[str] = None,
     ) -> Design:
-        design_code, sequence_number = self._generate_design_code(user)
+        owner_id, created_by_id = self._resolve_owner_id(user)
+        # Fetch the actual owner user to generate the design code prefix from their account
+        owner_user = user
+        if owner_id != user.id:
+            from app.repositories.user import UserRepository
+            owner_user = UserRepository(self.db).get_user_by_id(owner_id)
+
+        design_code, sequence_number = self._generate_design_code(owner_user, owner_id)
         design = self.design_repo.create_design(
-            user_id=user.id,
+            user_id=owner_id,
+            created_by_user_id=created_by_id,
             design_code=design_code,
             sequence_number=sequence_number,
             name=name,
@@ -71,18 +91,44 @@ class DesignService:
         return self.design_repo.get_by_id(design_id)
 
     def get_design_for_user(self, *, design_id: int, user_id: int) -> Optional[Design]:
+        """Get design for a regular user (checks user_id matches)."""
         return self.design_repo.get_by_id_for_user(design_id, user_id)
+
+    def get_design_for_team_member(self, *, design_id: int, user: User) -> Optional[Design]:
+        """
+        Get design for a team member.
+        Team members can see designs where user_id = team_owner_id 
+        AND (created_by_user_id = their id OR any team design).
+        """
+        if not user.is_team_member or not user.team_owner_id:
+            return self.design_repo.get_by_id_for_user(design_id, user.id)
+        return self.design_repo.get_by_id_for_team_member(design_id, user.id, user.team_owner_id)
 
     def list_designs(
         self,
         *,
-        user_id: int,
+        user: User,
         status: Optional[DesignStatus] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[Design], int]:
-        items = self.design_repo.list_by_user(user_id, status=status, limit=limit, offset=offset)
-        total = self.design_repo.count_by_user(user_id, status=status)
+        """
+        List designs based on user type:
+        - Regular user: just their own designs
+        - Team member: only designs they created (for "my designs" view)
+        - Team owner: all designs owned by them (including team member creations)
+        """
+        if user.is_team_member and user.team_owner_id:
+            # Team member: only see designs they personally created
+            items = self.design_repo.list_by_created_by(
+                user.id, user.team_owner_id,
+                status=status, limit=limit, offset=offset
+            )
+            total = self.design_repo.count_by_created_by(user.id, user.team_owner_id, status=status)
+        else:
+            # Regular user or team owner: see all designs where user_id matches
+            items = self.design_repo.list_by_user(user.id, status=status, limit=limit, offset=offset)
+            total = self.design_repo.count_by_user(user.id, status=status)
         return items, total
 
     def update_design(

@@ -33,21 +33,28 @@ def get_redis_client():
 
 redis_client = None  # Will be loaded lazily
 
-# Create limiter only if not in test mode
-limiter = None
-if os.environ.get("TESTING") != "true" and settings.ENV != "test":
-    try:
+# Create limiter
+class MockLimiter:
+    def limit(self, *args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+    def exempt(self, obj):
+        return obj
+
+try:
+    if os.environ.get("TESTING") == "true" or settings.ENV in {"test", "development"}:
+        limiter = MockLimiter()
+    else:
         limiter = Limiter(
             key_func=get_remote_address,
             storage_uri=settings.CELERY_BROKER_URL,
             default_limits=[settings.RATE_LIMIT_GLOBAL]
         )
-    except Exception as e:
-        logger.warning(f"Failed to create Limiter: {e}")
-        limiter = None
-else:
-    # In test mode, create a no-op limiter
-    limiter = None
+except Exception as e:
+    logger.warning(f"Failed to create Limiter: {e}")
+    limiter = MockLimiter()
 
 
 class RateLimiter:

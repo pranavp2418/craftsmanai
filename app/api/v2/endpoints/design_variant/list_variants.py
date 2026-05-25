@@ -21,7 +21,7 @@ def list_design_variants(
     design_service = DesignService(db)
     variant_service = DesignVariantService(db)
 
-    design = design_service.get_design_for_user(design_id=design_id, user_id=current_user.id)
+    design = design_service.get_design_for_team_member(design_id=design_id, user=current_user)
     if not design:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
 
