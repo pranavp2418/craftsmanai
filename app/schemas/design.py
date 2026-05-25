@@ -29,6 +29,7 @@ class DesignUpdateRequest(DesignBase):
 class DesignResponse(BaseModel):
     id: int
     user_id: int
+    created_by_user_id: Optional[int] = None
     design_code: str
     sequence_number: int
     name: str

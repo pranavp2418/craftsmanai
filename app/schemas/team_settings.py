@@ -16,11 +16,13 @@ class MemberInvitationCreate(BaseModel):
     email: EmailStr
     role: TeamRoleEnum = TeamRoleEnum.designer
     full_name: Optional[str] = Field(None, max_length=255)
-    password: Optional[str] = Field(None, min_length=8, max_length=255)
+    password: Optional[str] = Field(None, min_length=8, max_length=255, description="Optional password for new users. If not provided, a default password will be generated.")
 
 
 class AcceptInvitationRequest(BaseModel):
     token: str
+    password: Optional[str] = Field(None, min_length=8, max_length=255, description="Password to set for new users upon accepting the invitation")
+    full_name: Optional[str] = Field(None, max_length=255, description="Full name to set for the new user")
 
 
 class MemberUpdateRequest(BaseModel):

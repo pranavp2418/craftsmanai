@@ -55,7 +55,11 @@ class TestTeamSettingsInvitation:
 
             accept_response = client.post(
                 "/api/v2/teams-settings/invitations/accept",
-                json={"token": data["token"]},
+                json={
+                    "token": data["token"],
+                    "password": "TestPassword123",
+                    "full_name": "Invited Member"
+                },
             )
 
             assert accept_response.status_code == 200
@@ -66,6 +70,11 @@ class TestTeamSettingsInvitation:
             db_session.refresh(invitation)
             assert invitation.is_accepted is True
             assert invitation.accepted_at is not None
+
+            # Verify the invited user's team member fields were set
+            db_session.refresh(invited_user)
+            assert invited_user.is_team_member is True
+            assert invited_user.team_owner_id == current_user.id
         finally:
             client.app.dependency_overrides.clear()
 
@@ -113,7 +122,11 @@ class TestTeamSettingsInvitation:
 
             accept_response = client.post(
                 "/api/v2/teams-settings/invitations/accept",
-                json={"token": data["token"]},
+                json={
+                    "token": data["token"],
+                    "password": "TestPassword123",
+                    "full_name": "Invited Member"
+                },
             )
 
             assert accept_response.status_code == 200
@@ -124,5 +137,12 @@ class TestTeamSettingsInvitation:
             db_session.refresh(invitation)
             assert invitation.is_accepted is True
             assert invitation.accepted_at is not None
+
+            # Verify the newly created user's team member fields
+            from app.models.user import User
+            new_user = db_session.query(User).filter(User.email == invited_email.lower()).first()
+            assert new_user is not None
+            assert new_user.is_team_member is True
+            assert new_user.team_owner_id == current_user.id
         finally:
             client.app.dependency_overrides.clear()

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -16,6 +16,14 @@ class User(Base):
     business_name = Column(String(255), nullable=True, doc="Business name for design code generation (e.g., 'Jack John' -> 'jj')")
     design_prefix = Column(String(10), nullable=True, doc="Prefix used for generating design codes")
     
+    # Team member fields
+    is_team_member = Column(Boolean, default=False, doc="Indicates if this user is a team member (not the account owner)")
+    team_owner_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True, doc="The user who invited/owns this team member")
+    
+    # Appearance fields
+    theme = Column(String(20), default="System Preference", doc="UI Theme: System Preference, Light Mode, Dark Mode")
+    navigation_color = Column(String(20), default="Light", doc="Sidebar navigation color: Light, Dark")
+
     # Status fields
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)

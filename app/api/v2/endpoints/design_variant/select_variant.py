@@ -26,7 +26,7 @@ def select_design_variant(
     if not variant:
         raise HTTPException(status_code=404, detail="Variant not found")
 
-    design = design_service.get_design_for_user(design_id=variant.design_id, user_id=current_user.id)
+    design = design_service.get_design_for_team_member(design_id=variant.design_id, user=current_user)
     if not design:
         raise HTTPException(status_code=404, detail="Design not found")
 

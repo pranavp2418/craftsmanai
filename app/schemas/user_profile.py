@@ -25,3 +25,19 @@ class UserProfileUpdate(BaseModel):
     last_name: Optional[str] = Field(None, max_length=100)
     whatsapp_number: Optional[str] = Field(None, max_length=20)
     username: Optional[str] = Field(None, max_length=100)
+
+class AppearanceSettingsUpdate(BaseModel):
+    theme: Optional[str] = Field(None, description="UI Theme: System Preference, Light Mode, Dark Mode")
+    navigation_color: Optional[str] = Field(None, description="Sidebar navigation color: Light, Dark")
+
+class AppearanceSettingsResponse(BaseModel):
+    theme: str
+    navigation_color: str
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=100)
+    confirm_new_password: str = Field(..., min_length=8, max_length=100)
+
+class TwoFactorAuthToggleRequest(BaseModel):
+    enable_2fa: bool

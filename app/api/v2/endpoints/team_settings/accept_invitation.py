@@ -14,4 +14,4 @@ def accept_invitation(
     db: Session = Depends(get_db),
 ):
     service = TeamSettingsService(db)
-    return service.accept_invitation(payload.token)
+    return service.accept_invitation(payload.token, payload.password, payload.full_name)

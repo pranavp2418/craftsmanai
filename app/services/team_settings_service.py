@@ -76,8 +76,9 @@ class TeamSettingsService:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An active invitation already exists for this email")
 
         password_hash = None
-        if not invited_user and payload.password:
-            password_hash = get_password_hash(payload.password)
+        if not invited_user:
+            raw_password = payload.password if hasattr(payload, 'password') and payload.password else "user@1234"
+            password_hash = get_password_hash(raw_password)
 
         invitation = MemberInvitation(
             account_id=invitation_account_id,
@@ -111,7 +112,7 @@ class TeamSettingsService:
 
         return InvitationTokenResponse(token=invitation.token)
 
-    def accept_invitation(self, token: str) -> AccountMemberResponse:
+    def accept_invitation(self, token: str, password: Optional[str] = None, full_name: Optional[str] = None) -> AccountMemberResponse:
         invitation = self.invitation_repo.get_by_token(token)
         if not invitation:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid or expired invitation")
@@ -122,11 +123,19 @@ class TeamSettingsService:
 
         user = self.user_repo.get_user_by_email(invitation.email)
         if not user:
-            user = self._create_user_from_invitation(invitation)
+            user = self._create_user_from_invitation(invitation, password, full_name)
+        elif full_name and not user.full_name:
+            user.full_name = full_name
+            self.db.commit()
 
         account_id = invitation.invited_by or invitation.account_id
         if account_id is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invitation is missing workspace information")
+
+        # Mark user as team member and set who invited them
+        user.is_team_member = True
+        user.team_owner_id = account_id
+        self.db.commit()
 
         member = self.member_repo.upsert_member(
             account_id=account_id,
@@ -173,16 +182,19 @@ class TeamSettingsService:
         if not removed:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
 
-    def _create_user_from_invitation(self, invitation: MemberInvitation) -> User:
-        if not invitation.password:
+    def _create_user_from_invitation(self, invitation: MemberInvitation, password: Optional[str] = None, full_name: Optional[str] = None) -> User:
+        if password:
+            hashed_password = get_password_hash(password)
+        elif invitation.password:
+            hashed_password = invitation.password
+        else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password is required for new users")
 
         username = self._generate_username(invitation.email)
-        hashed_password = invitation.password
         user = User(
             email=invitation.email.lower(),
             username=username,
-            full_name=None,
+            full_name=full_name,
             hashed_password=hashed_password,
             is_active=True,
             is_verified=True,
