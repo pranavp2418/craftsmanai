@@ -18,7 +18,7 @@ def get_design(
     current_user: User = Depends(get_current_active_user),
 ):
     service = DesignService(db)
-    design = service.get_design_for_user(design_id=design_id, user_id=current_user.id)
+    design = service.get_design_for_team_member(design_id=design_id, user=current_user)
     if not design:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
     return design

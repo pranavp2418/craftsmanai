@@ -42,7 +42,7 @@ def share_design_variant(
     if not variant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variant not found")
 
-    design = design_service.get_design_for_user(design_id=variant.design_id, user_id=current_user.id)
+    design = design_service.get_design_for_team_member(design_id=variant.design_id, user=current_user)
     if not design:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
 
@@ -78,7 +78,7 @@ def update_share_variant(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="New variant not found")
 
     # Verify the user owns the design
-    design = design_service.get_design_for_user(design_id=new_variant.design_id, user_id=current_user.id)
+    design = design_service.get_design_for_team_member(design_id=new_variant.design_id, user=current_user)
     if not design:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
 
