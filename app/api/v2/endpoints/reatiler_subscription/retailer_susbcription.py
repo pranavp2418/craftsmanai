@@ -153,29 +153,55 @@ def verify_payment(
             raise HTTPException(status_code=404, detail="Payment record not found")
 
         if session.payment_status == "paid":
-            stripe_sub_id = session.get('subscription', '')
+            stripe_sub_id = getattr(session, 'subscription', '') or ''
             existing_sub = db.query(UserSubscription).filter(
                 UserSubscription.stripe_subscription_id == stripe_sub_id
             ).first() if stripe_sub_id else None
 
+            plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == payment.plan_id).first()
+            plan_name = plan.name if plan else "Unknown Plan"
+
             if existing_subscription := existing_sub:
                 logger.info("Subscription already exists for this payment, skipping creation")
-                return {"status": "success", "message": "Subscription already created"}
+                return {
+                    "status": "success",
+                    "message": "Subscription already created",
+                    "amount": float(payment.amount) if payment.amount else 0.0,
+                    "payment_method": payment.payment_method or "card",
+                    "transaction_id": payment.stripe_payment_intent_id or getattr(session, 'payment_intent', None) or session_id,
+                    "plan_name": plan_name
+                }
+
+            # Retrieve payment intent & payment method safely (handles both subscription and payment modes)
+            payment_intent_id = getattr(session, 'payment_intent', None)
+            payment_method = "card"
+
+            if not payment_intent_id and getattr(session, 'invoice', None):
+                try:
+                    invoice_id = session.invoice
+                    invoice = stripe.Invoice.retrieve(invoice_id, expand=['payments.data.payment.payment_intent'])
+                    if getattr(invoice, 'payments', None) and invoice.payments.data:
+                        payment_item = invoice.payments.data[0]
+                        payment_obj = getattr(payment_item, 'payment', None)
+                        if payment_obj:
+                            pi_obj = getattr(payment_obj, 'payment_intent', None)
+                            if pi_obj:
+                                payment_intent_id = pi_obj.id
+                                if pi_obj.payment_method:
+                                    try:
+                                        pm = stripe.PaymentMethod.retrieve(pi_obj.payment_method)
+                                        payment_method = pm.card.brand if (pm and pm.card) else getattr(pm, 'type', 'card')
+                                    except Exception:
+                                        payment_method = "card"
+                except Exception as e:
+                    logger.error(f"Error retrieving subscription payment details from invoice: {e}")
 
             # Update payment status
             if payment.status != PaymentStatus.PAID:
                 payment.status = PaymentStatus.PAID
-                payment.stripe_payment_intent_id = session.payment_intent
+                payment.stripe_payment_intent_id = payment_intent_id
+                payment.payment_method = payment_method
 
-                try:
-                    if session.payment_intent:
-                        intent = stripe.PaymentIntent.retrieve(session.payment_intent)
-                        if intent and intent.payment_method_types:
-                            payment.payment_method = intent.payment_method_types[0]
-                except Exception:
-                    payment.payment_method = "card"
-
-            plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == payment.plan_id).first()
             if not plan:
                 db.rollback()
                 raise HTTPException(status_code=404, detail="Plan not found")
@@ -235,7 +261,14 @@ def verify_payment(
             db.add(user_sub)
 
             db.commit()
-            return {"status": "success", "message": "Payment verified and subscription created"}
+            return {
+                "status": "success",
+                "message": "Payment verified and subscription created",
+                "amount": float(payment.amount) if payment.amount else 0.0,
+                "payment_method": payment.payment_method or "card",
+                "transaction_id": payment.stripe_payment_intent_id or getattr(session, 'payment_intent', None) or session_id,
+                "plan_name": plan_name
+            }
         
         return {"status": "pending", "message": "Payment not completed yet"}
     except Exception as e:
@@ -288,11 +321,35 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             
             if payment.status != PaymentStatus.PAID:
                 payment.status = PaymentStatus.PAID
-                payment.stripe_payment_intent_id = session.get('payment_intent')
-                payment.stripe_webhook_event_id = event_id
+                
+                # Retrieve payment intent & payment method safely (handles both subscription and payment modes)
+                payment_intent_id = getattr(session, 'payment_intent', None)
+                payment_method = "card"
 
-                if 'payment_method_types' in session and session['payment_method_types']:
-                    payment.payment_method = session['payment_method_types'][0]
+                # If subscription mode, retrieve from invoice
+                invoice_id = getattr(session, 'invoice', None) or (session.get('invoice') if hasattr(session, 'get') else None)
+                if not payment_intent_id and invoice_id:
+                    try:
+                        invoice = stripe.Invoice.retrieve(invoice_id, expand=['payments.data.payment.payment_intent'])
+                        if getattr(invoice, 'payments', None) and invoice.payments.data:
+                            payment_item = invoice.payments.data[0]
+                            payment_obj = getattr(payment_item, 'payment', None)
+                            if payment_obj:
+                                pi_obj = getattr(payment_obj, 'payment_intent', None)
+                                if pi_obj:
+                                    payment_intent_id = pi_obj.id
+                                    if pi_obj.payment_method:
+                                        try:
+                                            pm = stripe.PaymentMethod.retrieve(pi_obj.payment_method)
+                                            payment_method = pm.card.brand if (pm and pm.card) else getattr(pm, 'type', 'card')
+                                        except Exception:
+                                            payment_method = "card"
+                    except Exception as e:
+                        logger.error(f"Error retrieving subscription payment details from invoice in webhook: {e}")
+
+                payment.stripe_payment_intent_id = payment_intent_id
+                payment.payment_method = payment_method
+                payment.stripe_webhook_event_id = event_id
 
                 db.commit()
                 logger.info(f"Payment {payment.id} status updated to PAID via webhook")
