@@ -24,6 +24,7 @@ from .order import (
 )
 from .email_template import EmailTemplate
 from .email_log import EmailLog, EmailStatus
+from .notification import Notification
 from .notification_setting import NotificationSetting
 from .brand_setting import BrandSetting
 from .subscription import SubscriptionPlan, UserSubscription, Payment, SubscriptionActivityLog
@@ -66,6 +67,7 @@ __all__ = [
     "EmailTemplate",
     "EmailLog",
     "EmailStatus",
+    "Notification",
     "NotificationSetting",
     "RetailerTeam",
     "TeamMember",

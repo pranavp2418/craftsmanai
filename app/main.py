@@ -37,6 +37,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+fastapi_app = FastAPI(title="Craftmen API", version="2.0.0")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -61,15 +64,8 @@ async def lifespan(app: FastAPI):
     logger.info("SSE Redis listener stopped.")
 
 
-# ------------------------------------------------------------------
-# Build the inner FastAPI application (REST routes)
-# ------------------------------------------------------------------
-fastapi_app = FastAPI(
-    title=settings.PROJECT_NAME,
-    description="Backend API for Craftmen application",
-    version="2.0.0",
-    lifespan=lifespan,
-)
+# Re-assign lifespan since it's instantiated now
+fastapi_app.router.lifespan_context = lifespan
 
 # Add middleware in correct order
 fastapi_app.add_middleware(HealthCheckMiddleware)
@@ -98,7 +94,7 @@ fastapi_app.include_router(api_router, prefix="/api/v2")
 app = socketio.ASGIApp(
     socketio_server=sio,
     other_asgi_app=fastapi_app,
-    socketio_path=settings.SOCKETIO_PATH.lstrip("/"),
+    socketio_path="socket.io",
 )
 
 # Export both for different use cases:
