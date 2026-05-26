@@ -7,6 +7,7 @@ from app.api import deps
 from app.models.user import User
 from app.models.customer import Customer
 from app.models.order import Order
+import json
 
 router = APIRouter()
 
@@ -154,23 +155,29 @@ async def get_customers(
         retailer_name   = row[3]
         retailer_email  = row[4]
 
-        customers.append({
-            "id":           str(customer.id),
-            "name":         customer.full_name,
-            "email":        customer.emails,
-            "phone":        customer.phone_number,
-            "location":     customer.location,
-            "status":       "ACTIVE" if customer.is_active else "INACTIVE",
-            "created_at":   customer.created_at,
-            "last_active":  customer.updated_at,
-            "retailer": {
-                "name":  retailer_name,
-                "email": retailer_email,
-            } if retailer_name else None,
-            "total_orders":  total_orders,
-            "active_orders": active_orders,
-        })
 
+    customers.append({
+        "id":           str(customer.id),
+        "name":         customer.full_name,
+        "emails": [
+            {
+                "label": item.get("label"),
+                "email": item.get("email"),
+            }
+            for item in json.loads(customer.emails or "[]")
+        ],
+        "phone":        customer.phone_number,
+        "location":     customer.location,
+        "status":       "ACTIVE" if customer.is_active else "INACTIVE",
+        "created_at":   customer.created_at,
+        "last_active":  customer.updated_at,
+        "retailer": {
+            "name":  retailer_name,
+            "email": retailer_email,
+        } if retailer_name else None,
+        "total_orders":  total_orders,
+        "active_orders": active_orders,
+    })
     total_pages = (total_customers + limit - 1) // limit
 
     return {

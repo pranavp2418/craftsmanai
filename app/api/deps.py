@@ -35,6 +35,9 @@ class AsyncSessionAdapter:
     async def refresh(self, instance, *args, **kwargs):
         self.db.refresh(instance, *args, **kwargs)
 
+    async def flush(self):
+        self.db.flush()
+
     def add(self, instance):
         self.db.add(instance)
 

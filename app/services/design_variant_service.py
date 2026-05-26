@@ -58,6 +58,8 @@ class DesignVariantService:
         prompt_used: Optional[str] = None,
         model_used: Optional[str] = None,
         base_design_image_url: Optional[str] = None,
+        style_tags: Optional[str] = None,
+        design_focus: Optional[str] = None,
     ) -> DesignVariant:
         version = self._next_version(design_id)
         variant = self.variant_repo.create_variant(
@@ -68,6 +70,8 @@ class DesignVariantService:
             prompt_used=prompt_used,
             model_used=model_used,
             base_design_image_url=base_design_image_url,
+            style_tags=style_tags,
+            design_focus=design_focus,
         )
         self.activity_repo.log(
             design_id=design_id,

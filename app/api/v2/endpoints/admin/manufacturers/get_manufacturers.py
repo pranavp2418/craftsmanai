@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import or_, func
-
+import json
 from app.api import deps
 from app.models.user import User
 from app.models.manufacturer import Manufacturer
@@ -89,7 +89,13 @@ async def get_admin_manufacturers(
         manu_list.append({
             "manufacturer_id": m.id,
             "name": m.name,
-            "email": m.emails,
+             "email": [
+            {
+                "label": item.get("label"),
+                "email": item.get("email"),
+            }
+            for item in json.loads(m.emails or "[]")
+        ],
             "contact_number": m.phone_number,
             "location": m.location,
             "status": "ACTIVE" if m.is_active else "INACTIVE",

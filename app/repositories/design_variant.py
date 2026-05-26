@@ -24,6 +24,8 @@ class DesignVariantRepository:
         prompt_used: Optional[str] = None,
         model_used: Optional[str] = None,
         is_selected: bool = False,
+        design_focus: Optional[str] = None,
+        style_tags: Optional[str] = None,
     ) -> DesignVariant:
         variant = DesignVariant(
             design_id=design_id,
@@ -36,6 +38,8 @@ class DesignVariantRepository:
             prompt_used=prompt_used,
             model_used=model_used,
             is_selected=is_selected,
+            design_focus=design_focus,
+            style_tags=style_tags,
         )
         self.db.add(variant)
         self.db.commit()

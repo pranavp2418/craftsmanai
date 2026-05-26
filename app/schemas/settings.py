@@ -1,13 +1,24 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from uuid import UUID
 
 
 class SystemSettingsBase(BaseModel):
-    maintenance_mode: Optional[bool] = None
-    allow_new_registrations: Optional[bool] = None
-    commission_rate: Optional[float] = None
-    contact_support_email: Optional[EmailStr] = None
+    default_currency: Optional[str] = None
+    default_lead_time_unit: Optional[str] = None
+    ai_provider: Optional[str] = None
+    retry_limit: Optional[int] = None
+    timeout_seconds: Optional[int] = None
+    link_expiry_days: Optional[int] = None
+    
+    # Feature Toggles
+    ai_image_detection: Optional[bool] = None
+    guided_visual_quiz: Optional[bool] = None
+    prompt_only_flow: Optional[bool] = None
+    manufacturer_notifications: Optional[bool] = None
+    email_notifications: Optional[bool] = None
+    in_app_notifications: Optional[bool] = None
 
 
 class SystemSettingsUpdate(SystemSettingsBase):
@@ -16,11 +27,19 @@ class SystemSettingsUpdate(SystemSettingsBase):
 
 class SystemSettingsResponse(BaseModel):
     id: int
-    maintenance_mode: bool
-    allow_new_registrations: bool
-    commission_rate: float
-    contact_support_email: EmailStr
-    created_at: datetime
+    default_request_status: str
+    default_currency: str
+    default_lead_time_unit: str
+    ai_provider: str
+    retry_limit: int
+    timeout_seconds: int
+    link_expiry_days: int
+    ai_image_detection: bool
+    guided_visual_quiz: bool
+    prompt_only_flow: bool
+    manufacturer_notifications: bool
+    email_notifications: bool
+    in_app_notifications: bool
     updated_at: datetime
 
     class Config:
