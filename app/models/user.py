@@ -28,6 +28,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     is_superuser = Column(Boolean, default=False)
+    is_2fa_enabled = Column(Boolean, default=False)
     subscription_plan = Column(String(50), default="Starter", nullable=False)
     
     # Timestamps
