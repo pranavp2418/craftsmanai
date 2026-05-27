@@ -32,8 +32,8 @@ async def add_or_update_settings(
 
     if not db_settings:
         # --- CREATE FLOW ---
-        # Create new record using all fields (includes Pydantic defaults)
-        db_settings = SystemSettings(**settings_in.model_dump())
+        # Create new record using only provided fields (preserving database-defined defaults for other columns)
+        db_settings = SystemSettings(**settings_in.model_dump(exclude_unset=True))
         db.add(db_settings)
         await db.flush() # Ensure ID and other DB-generated fields are ready
         

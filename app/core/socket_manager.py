@@ -12,12 +12,11 @@ Architecture:
     - Automatic user presence tracking
 """
 
-from typing import Dict, List, Optional, Any, Callable
+from typing import Any, Callable, List, Mapping, Optional, TypedDict
 from datetime import datetime, UTC
 import logging
 import urllib.parse
 
-import socketio
 from socketio import AsyncServer, AsyncRedisManager
 
 from app.core.config import settings
@@ -27,11 +26,24 @@ from app.core.realtime_state import SessionData, realtime_state
 logger = logging.getLogger(__name__)
 
 
+class AuthenticatedUser(TypedDict):
+    user_id: str
+    email: str
+    username: str
+    payload: dict[str, Any]
+
+
+def _now_utc_iso() -> str:
+    """Return an ISO-8601 UTC timestamp."""
+    return datetime.now(UTC).isoformat()
+
+
 # ---------------------------------------------------------------------------
 # Token extraction: from auth dict OR from query string (Postman support)
 # ---------------------------------------------------------------------------
 
-def _extract_token(auth: Optional[dict], environ: dict) -> Optional[str]:
+
+def _extract_token(auth: Optional[Mapping[str, Any]], environ: Mapping[str, Any]) -> Optional[str]:
     """
     Extract JWT token from either:
     1. `auth["token"]` — standard Socket.IO client auth
@@ -39,7 +51,11 @@ def _extract_token(auth: Optional[dict], environ: dict) -> Optional[str]:
     """
     # Method 1: Socket.IO auth dict
     if auth and "token" in auth:
-        return auth["token"]
+        token = auth["token"]
+        if isinstance(token, str):
+            token = token.strip()
+            if token:
+                return token
 
     # Method 2: Query string (Postman / raw WebSocket).
     # socketio passes environ which follows PEP 3333 (WSGI).
@@ -50,8 +66,10 @@ def _extract_token(auth: Optional[dict], environ: dict) -> Optional[str]:
     params = urllib.parse.parse_qs(raw_qs)
     token_list = params.get("token")
     if token_list:
-        logger.debug("Token extracted from query string, len=%d", len(token_list[0]))
-        return token_list[0]
+        token = token_list[0].strip()
+        if token:
+            logger.debug("Token extracted from query string, len=%d", len(token))
+            return token
 
     # Method 3: ASGI scope query_string (passed as bytes in 'asgi.scope')
     asgi_scope = environ.get("asgi.scope", {})
@@ -61,8 +79,10 @@ def _extract_token(auth: Optional[dict], environ: dict) -> Optional[str]:
         params = urllib.parse.parse_qs(raw_qs)
         token_list = params.get("token")
         if token_list:
-            logger.debug("Token extracted from asgi.scope query_string")
-            return token_list[0]
+            token = token_list[0].strip()
+            if token:
+                logger.debug("Token extracted from asgi.scope query_string")
+                return token
 
     logger.debug(
         "No token in auth=%s, query_string=%s",
@@ -72,7 +92,7 @@ def _extract_token(auth: Optional[dict], environ: dict) -> Optional[str]:
     return None
 
 
-def _authenticate(token: str) -> Optional[dict]:
+def _authenticate(token: str) -> Optional[AuthenticatedUser]:
     """
     Validate a JWT token and return user info.
 
@@ -107,16 +127,100 @@ def _authenticate(token: str) -> Optional[dict]:
 # Redis adapter helper
 # ---------------------------------------------------------------------------
 
+
 def _create_redis_manager() -> Optional[AsyncRedisManager]:
     """Create a Redis-based Socket.IO adapter if configured."""
     if not settings.SOCKETIO_REDIS_ADAPTER:
         return None
     try:
-        from socketio import AsyncRedisManager as _ARM
-        return _ARM(settings.REDIS_URL)
+        return AsyncRedisManager(settings.REDIS_URL)
     except Exception as exc:
         logger.warning("Redis adapter unavailable – falling back to in-process: %s", exc)
         return None
+
+
+async def _load_recent_notifications(user_id: str) -> tuple[int, list[dict[str, Any]]]:
+    """Fetch recent notifications for a user and mark them as read."""
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        logger.warning("Skipping notification bootstrap for non-integer user id: %s", user_id)
+        return 0, []
+
+    recent_notifications: list[dict[str, Any]] = []
+    unread_count = 0
+    try:
+        from app.core.database import SessionLocal
+        from app.repositories.notification import NotificationRepository
+
+        db = SessionLocal()
+        try:
+            repo = NotificationRepository(db)
+            unread_count = repo.get_unread_count(user_id_int)
+            recent_db_notifications = repo.get_by_user_id(user_id_int, limit=20)
+
+            for item in recent_db_notifications:
+                recent_notifications.append(
+                    {
+                        "id": item.id,
+                        "type": item.type,
+                        "title": item.title,
+                        "message": item.message,
+                        "data": item.data or {},
+                        "source": item.source,
+                        "reference_id": item.reference_id,
+                        "is_read": item.is_read,
+                        "created_at": item.created_at.isoformat() if item.created_at else None,
+                    }
+                )
+
+            if recent_notifications:
+                repo.mark_all_as_read(user_id_int)
+                logger.info(
+                    "Fetched %d recent notification(s) for user %s on connect",
+                    len(recent_notifications),
+                    user_id,
+                )
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Failed to fetch recent notifications for user %s: %s", user_id, exc)
+
+    return unread_count, recent_notifications
+
+
+def _build_connect_init_notification(
+    unread_count: int,
+    recent_notifications: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build user-friendly init notification payload for first socket connect."""
+    recent_count = len(recent_notifications)
+
+    if unread_count > 0:
+        title = f"You have {unread_count} unread notification(s)"
+        message = (
+            f"Loaded {recent_count} recent notification(s). "
+            "Your notifications are now connected and will arrive in real-time."
+        )
+    elif recent_count > 0:
+        title = f"You have {recent_count} recent notification(s)"
+        message = "Loaded your recent notifications. New ones will arrive in real-time."
+    else:
+        title = "No notifications"
+        message = "You have no previous notifications. New ones will arrive in real-time."
+
+    return {
+        "type": "init",
+        "title": title,
+        "message": message,
+        "data": {
+            "unread_count": 0,  # unread were marked as read during connect init
+            "unread_count_before_init": unread_count,
+            "is_connect_init": True,
+            "recent_notifications": recent_notifications,
+        },
+        "created_at": _now_utc_iso(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -142,8 +246,9 @@ if _redis_mgr:
 # Connection lifecycle
 # ---------------------------------------------------------------------------
 
+
 @sio.event
-async def connect(sid: str, environ: dict, auth: dict) -> bool:
+async def connect(sid: str, environ: dict, auth: Optional[dict]) -> bool:
     """
     Called when a client connects.
 
@@ -165,7 +270,7 @@ async def connect(sid: str, environ: dict, auth: dict) -> bool:
     username = user_info["username"]
     email = user_info["email"]
 
-    connected_at = datetime.now(UTC).isoformat()
+    connected_at = _now_utc_iso()
     session_payload = {
         "user_id": user_id,
         "username": username,
@@ -215,6 +320,15 @@ async def connect(sid: str, environ: dict, auth: dict) -> bool:
         "connected_at": connected_at,
     }, to=sid)
 
+    unread_count, recent_notifications = await _load_recent_notifications(user_id)
+
+    # Emit connection-init notification with context-sensitive copy.
+    await sio.emit(
+        "notification",
+        _build_connect_init_notification(unread_count, recent_notifications),
+        to=sid,
+    )
+
     return True
 
 
@@ -232,7 +346,7 @@ async def disconnect(sid: str) -> None:
         await sio.emit("user_status", {
             "user_id": user_id,
             "status": "offline",
-            "last_seen": datetime.now(UTC).isoformat(),
+            "last_seen": _now_utc_iso(),
         }, room="user_updates")
         logger.info("Socket.IO disconnect  sid=%s  user=%s", sid, user_id)
     elif user_id:
@@ -250,6 +364,7 @@ async def disconnect(sid: str) -> None:
 # Event handlers defined elsewhere – registered via core/websocket_events.py
 # ---------------------------------------------------------------------------
 
+
 def register_event_handler(event: str, handler: Callable) -> None:
     """Allow external modules to register event handlers on the global sio."""
     sio.on(event, handler)
@@ -258,6 +373,7 @@ def register_event_handler(event: str, handler: Callable) -> None:
 # ---------------------------------------------------------------------------
 # Public helpers (used by REST endpoints, Celery tasks, etc.)
 # ---------------------------------------------------------------------------
+
 
 async def emit_to_user(
     user_id: str,
@@ -270,10 +386,12 @@ async def emit_to_user(
 
     Returns the number of rooms the event was sent to (0 if user offline).
     """
+    active_sockets = await realtime_state.list_user_sockets(user_id)
     room = f"user:{user_id}"
     await sio.emit(event, data, room=room, namespace=namespace)
-    # We can't easily count receivers here, so return 1 as best-effort
-    return 1
+    # Keep backward-compatible best-effort semantics while returning a useful
+    # indicator when presence state is known.
+    return 1 if active_sockets else 0
 
 
 async def emit_to_room(
@@ -309,7 +427,7 @@ async def send_notification(
         "title": title,
         "message": message,
         "data": data or {},
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": _now_utc_iso(),
     })
 
 
@@ -321,8 +439,8 @@ async def get_online_users() -> List[str]:
     """
     # sio.manager is an internal; we approximate through rooms.
     # "user:*" rooms hold each user's sockets, so we enumerate them.
-    rooms = sio.manager.rooms  # This is a dict: {namespace: {room: {sid}}}
-    namespace_map = rooms.get("/", {})
+    rooms = getattr(sio.manager, "rooms", {}) or {}
+    namespace_map = rooms.get("/", {}) if isinstance(rooms, dict) else {}
     user_ids = set()
     prefix = "user:"
     for room_id in namespace_map:

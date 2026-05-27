@@ -13,6 +13,9 @@ class DesignVariantBase(BaseModel):
 
 
 class DesignVariantRefineRequest(DesignVariantBase):
+    style_tags: Optional[str] = Field(None, description="List of style tags to guide the refinement")
+    design_focus: Optional[str] = Field(None, description="Specific area of the design to focus on (e.g. 'ring band', 'gemstone')", max_length=100)
+
     parent_variant_id: int = Field(..., ge=1)
 
 

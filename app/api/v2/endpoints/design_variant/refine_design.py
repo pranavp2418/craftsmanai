@@ -36,6 +36,8 @@ def refine_design_variant(
         prompt_used=payload.prompt_used,
         model_used=payload.model_used,
         base_design_image_url=payload.base_design_image_url,
+        style_tags=payload.style_tags if payload.style_tags else None,
+        design_focus=payload.design_focus if payload.design_focus else None,
     )
 
     return variant
