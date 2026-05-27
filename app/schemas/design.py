@@ -51,8 +51,12 @@ class DesignListResponse(BaseModel):
 
 
 class DesignShareCreateRequest(BaseModel):
+    require_approval: bool = Field(default=False, description="Whether the share requires approval before the customer can access it")
+    allow_feedback: bool = Field(default=True, description="Whether the customer can provide feedback on the shared design")
+    allow_review_request:bool = Field(default=True, description="Whether the customer can request a review of the shared design")
     customer_id: Optional[int] = None
     comment: Optional[str] = None
+    
 
 
 class DesignShareResponse(BaseModel):
@@ -64,6 +68,9 @@ class DesignShareResponse(BaseModel):
     comment: Optional[str]
     reviewed_at: Optional[datetime]
     created_at: datetime
+    require_approval: bool  
+    allow_feedback: bool
+    allow_review_request: bool
 
     class Config:
         from_attributes = True

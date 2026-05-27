@@ -88,16 +88,24 @@ async def login(
     is_dev = True  # TODO: Get from settings
     cookie_secure = not is_dev
     
+    # response.set_cookie(
+    #     key="refresh_token",
+    #     value=refresh_token,
+    #     max_age=max_age,
+    #     httponly=True,
+    #     secure=True,
+    #     samesite="None",
+    #     path="/"
+    # )
     response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        max_age=max_age,
-        httponly=True,
-        secure=cookie_secure,
-        samesite="Lax",
-        path="/"
-    )
-    
+    key="refresh_token",
+    value=refresh_token,
+    max_age=max_age,
+    httponly=True,
+    secure=True,      # IMPORTANT for HTTP
+    samesite="Lax",    # or None only with HTTPS
+    path="/"
+)
     logger.info(f"User logged in: {user.email}")
     
     return LoginResponse(

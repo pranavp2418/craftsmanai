@@ -49,12 +49,23 @@ class DesignVariantRepository:
     def get_by_id(self, variant_id: int) -> Optional[DesignVariant]:
         return self.db.query(DesignVariant).filter(DesignVariant.id == variant_id).first()
 
-    def list_for_design(self, design_id: int) -> List[DesignVariant]:
-        return (
+    def list_for_design(self, design_id: int, skip: Optional[int] = None, limit: Optional[int] = None) -> List[DesignVariant]:
+        query = (
             self.db.query(DesignVariant)
             .filter(DesignVariant.design_id == design_id)
             .order_by(DesignVariant.created_at.desc())
-            .all()
+        )
+        if skip is not None:
+            query = query.offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
+
+    def count_for_design(self, design_id: int) -> int:
+        return (
+            self.db.query(DesignVariant)
+            .filter(DesignVariant.design_id == design_id)
+            .count()
         )
 
     def get_selected_variant(self, design_id: int) -> Optional[DesignVariant]:
