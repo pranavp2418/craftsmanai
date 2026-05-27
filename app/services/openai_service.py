@@ -846,6 +846,33 @@ The final design must:
         logger.info("Custom angle generated successfully")
         return result.data[0]
 
+    def transcribe_audio(self, file_content: bytes, filename: str) -> str:
+        """
+        Transcribe audio using OpenAI Whisper API.
+        
+        Args:
+            file_content: Raw bytes of the audio file
+            filename: Name of the file (must have extension like .mp3, .wav, .webm, etc.)
+            
+        Returns:
+            Transcribed text
+        """
+        logger.info(f"Transcribing audio file: {filename}")
+        
+        # Whisper API expects a tuple with (filename, file_content) or file-like object
+        # Using a tuple is the standard approach for passing bytes to OpenAI file uploads
+        file_tuple = (filename, file_content)
+        
+        result = self._client.audio.transcriptions.create(
+            model="whisper-1",
+            file=file_tuple,
+            language="en",
+            prompt="The user is providing instructions for jewelry design modifications. Please transcribe exactly what is said. Avoid generating random words if the audio is silent or unclear."
+        )
+        
+        logger.info("Audio transcribed successfully")
+        return result.text
+
     def generate_image_from_prompt(
         self,
         user_prompt: str,

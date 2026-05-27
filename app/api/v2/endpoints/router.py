@@ -15,10 +15,12 @@ from .public import router as public_router
 from .team_settings import router as team_settings_router
 from .user_profile import router as user_profile_router
 from .Notification_settings import router as notification_settings_router
+from .ai import router as ai_router
 
 api_router = APIRouter()
 
 # Register routers here
+api_router.include_router(ai_router, prefix="/ai", tags=["ai"])
 api_router.include_router(auth_router, prefix="/auth", tags=["authentication"])
 api_router.include_router(health_router, prefix="/endpoints", tags=["health"])
 api_router.include_router(websocket_router, prefix="/endpoints", tags=["websocket"])
