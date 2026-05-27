@@ -13,9 +13,16 @@ class TestAuthentication:
     """Test authentication endpoints"""
 
     # The mock_rate_limiter fixture will auto-apply
-    def test_register_user_success(self, client: TestClient, test_user_data: dict):
+    def test_register_user_success(self, client: TestClient):
         """Test successful user registration"""
-        response = client.post("/api/v2/auth/signup", json=test_user_data)
+        import uuid
+        unique_email = f"reg_success_{uuid.uuid4().hex[:8]}@example.com"
+        user_data = {
+            "email": unique_email,
+            "password": "TestPass123!",
+            "whatsapp_number": "+1234567890"
+        }
+        response = client.post("/api/v2/auth/signup", json=user_data)
         
         assert response.status_code == 201
         data = response.json()
@@ -23,32 +30,89 @@ class TestAuthentication:
         assert "verification code" in data["message"]
 
     def test_register_user_duplicate_email(self, client: TestClient, test_user_data: dict):
-        """Test registration with duplicate email"""
+        """Test registration with duplicate email for already verified user"""
+        import uuid
+        suffix = uuid.uuid4().hex[:8]
+        user_data = {
+            "email": f"dup_verified_{suffix}@example.com",
+            "password": "TestPass123!",
+            "whatsapp_number": "+1234567890"
+        }
         # First registration
-        client.post("/api/v2/auth/signup", json=test_user_data)
+        client.post("/api/v2/auth/signup", json=user_data)
         
-        # Second registration with same email
-        response = client.post("/api/v2/auth/signup", json=test_user_data)
+        # Manually mark user as verified to simulate a fully registered user
+        from tests.conftest import override_get_db
+        from app.models.user import User
         
-        # Should return 201 with generic message (idempotent behavior)
+        db = next(override_get_db())
+        try:
+            user = db.query(User).filter(User.email == user_data["email"]).first()
+            if user:
+                user.is_verified = True
+                db.commit()
+        finally:
+            db.close()
+        
+        # Second registration with same email (now verified)
+        response = client.post("/api/v2/auth/signup", json=user_data)
+        
+        # Should return 409 Conflict since user is already verified
+        assert response.status_code == 409
+        data = response.json()
+        assert "Email already registered" in data["detail"]
+        assert "already registered" in data["detail"].lower()
+
+    def test_register_user_unverified_retry(self, client: TestClient, test_user_data: dict):
+        """Test registration with duplicate email for unverified user - should resend OTP"""
+        import uuid
+        suffix = uuid.uuid4().hex[:8]
+        user_data = {
+            "email": f"dup_unverified_{suffix}@example.com",
+            "password": "TestPass123!",
+            "whatsapp_number": "+1234567890"
+        }
+        # First registration (creates unverified user)
+        first_response = client.post("/api/v2/auth/signup", json=user_data)
+        assert first_response.status_code == 201
+        
+        # Second registration with same email (user is still unverified)
+        response = client.post("/api/v2/auth/signup", json=user_data)
+        
+        # Should succeed with 201 and send a new OTP
         assert response.status_code == 201
         data = response.json()
         assert data["success"] is True
         assert "verification code" in data["message"]
 
     def test_register_user_duplicate_username(self, client: TestClient, test_user_data: dict):
-        """Test registration with duplicate username"""
+        """Test registration with duplicate username - duplicate email for verified user"""
+        import uuid
+        suffix = uuid.uuid4().hex[:8]
         # First registration
-        client.post("/api/v2/auth/signup", json=test_user_data)
+        first_user = test_user_data.copy()
+        first_user["email"] = f"dupuser_first_{suffix}@example.com"
+        client.post("/api/v2/auth/signup", json=first_user)
         
-        # Second registration with same username but different email
-        duplicate_user = test_user_data.copy()
-        duplicate_user["email"] = "different@example.com"
+        # Mark user as verified so duplicate signup is rejected
+        from tests.conftest import override_get_db
+        from app.models.user import User
+        db = next(override_get_db())
+        try:
+            user = db.query(User).filter(User.email == first_user["email"]).first()
+            if user:
+                user.is_verified = True
+                db.commit()
+        finally:
+            db.close()
         
+        # Signup with the same email again should give 409 since user is now verified
+        duplicate_user = first_user.copy()
         response = client.post("/api/v2/auth/signup", json=duplicate_user)
         
-        # Should succeed (username uniqueness might be enforced at DB level)
-        assert response.status_code == 201
+        # Should return 409 Conflict since the email is already registered and verified
+        assert response.status_code == 409
+        assert "already registered" in response.json()["detail"].lower()
 
     def test_register_user_invalid_password(self, client: TestClient, test_user_data: dict):
         """Test registration with invalid password"""
@@ -301,17 +365,25 @@ class TestAuthenticationSecurity:
         # Wait for expiration (in real tests, you'd use time.sleep or mocking)
         # For now, just test the structure
 
-    def test_signup_otp_flow(self, client: TestClient, test_user_data: dict):
+    def test_signup_otp_flow(self, client: TestClient):
         """Test signup with OTP verification flow"""
+        import uuid
+        unique_email = f"otpflow_{uuid.uuid4().hex[:8]}@example.com"
+        signup_data = {
+            "email": unique_email,
+            "password": "TestPass123!",
+            "whatsapp_number": "+1234567890"
+        }
+        
         # Step 1: Signup
-        response = client.post("/api/v2/auth/signup", json=test_user_data)
+        response = client.post("/api/v2/auth/signup", json=signup_data)
         
         assert response.status_code == 201
         assert response.json()["success"] is True
         assert "verification code" in response.json()["message"]
         
         # Step 2: Resend OTP (use the same email from signup)
-        resend_data = {"email": test_user_data["email"]}
+        resend_data = {"email": unique_email}
         response = client.post("/api/v2/auth/resend-otp", json=resend_data)
         
         assert response.status_code == 200
