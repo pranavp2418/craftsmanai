@@ -49,7 +49,7 @@ class DesignRepository:
         return design
 
     def get_by_id(self, design_id: int) -> Optional[Design]:
-        return self.db.query(Design).filter(Design.id == design_id).first()
+        return self.db.query(Design).filter(Design.id == design_id, Design.is_deleted.is_(False)).first()
 
     def get_by_id_for_user(self, design_id: int, user_id: int) -> Optional[Design]:
         """Get design by ID allowing team members to see designs owned by their team owner."""
@@ -57,7 +57,8 @@ class DesignRepository:
             self.db.query(Design)
             .filter(
                 Design.id == design_id,
-                Design.user_id == user_id
+                Design.user_id == user_id,
+                Design.is_deleted.is_(False),
             )
             .first()
         )
@@ -69,36 +70,36 @@ class DesignRepository:
             .filter(
                 Design.id == design_id,
                 Design.user_id == team_owner_id,
-                Design.created_by_user_id == user_id
+                Design.created_by_user_id == user_id,
+                Design.is_deleted.is_(False),
             )
             .first()
         )
 
+    def list_archived(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Design]:
+        return (
+            self.db.query(Design)
+            .filter(Design.is_archived.is_(True), Design.is_deleted.is_(False))
+            .order_by(Design.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
 
-        def list_archived(
-            self,
-            *,
-            limit: int = 50,
-            offset: int = 0,
-        ) -> List[Design]:
-            return (
-                self.db.query(Design)
-                .filter(Design.is_archived.is_(True))
-                .order_by(Design.created_at.desc())
-                .offset(offset)
-                .limit(limit)
-                .all()
-            )
-
-        def count_archived(self) -> int:
-            return (
-                self.db.query(func.count(Design.id))
-                .filter(Design.is_archived.is_(True))
-                .scalar()
-                or 0
-            )
+    def count_archived(self) -> int:
+        return (
+            self.db.query(func.count(Design.id))
+            .filter(Design.is_archived.is_(True), Design.is_deleted.is_(False))
+            .scalar()
+            or 0
+        )
     def get_by_code(self, design_code: str) -> Optional[Design]:
-        return self.db.query(Design).filter(Design.design_code == design_code).first()
+        return self.db.query(Design).filter(Design.design_code == design_code, Design.is_deleted.is_(False)).first()
 
     def list_by_user(
         self,
@@ -108,7 +109,7 @@ class DesignRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> List[Design]:
-        query = self.db.query(Design).filter(Design.user_id == user_id, Design.is_archived.is_(False))
+        query = self.db.query(Design).filter(Design.user_id == user_id, Design.is_archived.is_(False), Design.is_deleted.is_(False))
         if status:
             query = query.filter(Design.status == status)
         return query.order_by(Design.created_at.desc()).offset(offset).limit(limit).all()
@@ -122,7 +123,7 @@ class DesignRepository:
         offset: int = 0,
     ) -> List[Design]:
         """List all designs owned by a team owner, including those created by team members."""
-        query = self.db.query(Design).filter(Design.user_id == team_owner_id, Design.is_archived.is_(False))
+        query = self.db.query(Design).filter(Design.user_id == team_owner_id, Design.is_archived.is_(False), Design.is_deleted.is_(False))
         if status:
             query = query.filter(Design.status == status)
         return query.order_by(Design.created_at.desc()).offset(offset).limit(limit).all()
@@ -141,6 +142,7 @@ class DesignRepository:
             Design.user_id == team_owner_id,
             Design.created_by_user_id == user_id,
             Design.is_archived.is_(False),
+            Design.is_deleted.is_(False),
         )
         if status:
             query = query.filter(Design.status == status)
@@ -152,7 +154,7 @@ class DesignRepository:
         *,
         status: Optional[DesignStatus] = None,
     ) -> int:
-        query = self.db.query(func.count(Design.id)).filter(Design.user_id == user_id, Design.is_archived.is_(False))
+        query = self.db.query(func.count(Design.id)).filter(Design.user_id == user_id, Design.is_archived.is_(False), Design.is_deleted.is_(False))
         if status:
             query = query.filter(Design.status == status)
         return query.scalar() or 0
@@ -164,7 +166,7 @@ class DesignRepository:
         status: Optional[DesignStatus] = None,
     ) -> int:
         """Count all designs owned by a team owner."""
-        query = self.db.query(func.count(Design.id)).filter(Design.user_id == team_owner_id, Design.is_archived.is_(False))
+        query = self.db.query(func.count(Design.id)).filter(Design.user_id == team_owner_id, Design.is_archived.is_(False), Design.is_deleted.is_(False))
         if status:
             query = query.filter(Design.status == status)
         return query.scalar() or 0
@@ -181,6 +183,7 @@ class DesignRepository:
             Design.user_id == team_owner_id,
             Design.created_by_user_id == user_id,
             Design.is_archived.is_(False),
+            Design.is_deleted.is_(False),
         )
         if status:
             query = query.filter(Design.status == status)
@@ -195,5 +198,6 @@ class DesignRepository:
         return design
 
     def delete(self, design: Design) -> None:
-        self.db.delete(design)
+        design.is_deleted = True
         self.db.commit()
+        self.db.refresh(design)
