@@ -27,4 +27,5 @@ def list_designs(
         limit=limit,
         offset=offset,
     )
+    items = [design for design in items if not getattr(design, "is_archived", False)]
     return DesignListResponse(items=items, total=total)

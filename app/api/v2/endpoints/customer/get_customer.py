@@ -20,6 +20,13 @@ from app.models.order import Order, ManufacturerQuote
 router = APIRouter()
 
 
+def _resolve_share_design(share: DesignShare):
+    design_variant = getattr(share, "design_variant", None)
+    if design_variant is None:
+        return None
+    return getattr(design_variant, "design", None)
+
+
 @router.get("/{customer_id}", response_model=CustomerDetailResponse)
 def get_customer(
     customer_id: int,
@@ -37,7 +44,7 @@ def get_customer(
     # 2. Build linked projects list
     linked_projects = []
     for share in shares:
-        design = share.design
+        design = _resolve_share_design(share)
         if design:
             linked_projects.append(
                 LinkedProject(
@@ -55,7 +62,7 @@ def get_customer(
     interaction_dates = [customer.created_at]
 
     for share in shares:
-        design = share.design
+        design = _resolve_share_design(share)
         if not design:
             continue
         

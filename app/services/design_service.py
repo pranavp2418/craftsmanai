@@ -131,6 +131,12 @@ class DesignService:
             total = self.design_repo.count_by_user(user.id, status=status)
         return items, total
 
+    def list_archived_designs(self, *, limit: int = 50, offset: int = 0):
+        return self.design_repo.list_archived(limit=limit, offset=offset)
+
+    def count_archived_designs(self) -> int:
+        return self.design_repo.count_archived()
+
     def update_design(
         self,
         design: Design,
@@ -168,3 +174,27 @@ class DesignService:
             action_type="DESIGN_DELETED",
             message=f"Design {design.design_code} deleted",
         )
+
+    def archive_design(self, design: Design, *, user: Optional[User] = None, message: Optional[str] = None) -> Design:
+        archived = self.design_repo.update_design(design, is_archived=True)
+        if user or message:
+            self.activity_repo.log(
+                design_id=design.id,
+                user_id=user.id if user else None,
+                action_type="DESIGN_ARCHIVED",
+                message=message or f"Design {design.design_code} archived",
+                metadata={"is_archived": True},
+            )
+        return archived
+
+    def restore_design(self, design: Design, *, user: Optional[User] = None, message: Optional[str] = None) -> Design:
+        restored = self.design_repo.update_design(design, is_archived=False)
+        if user or message:
+            self.activity_repo.log(
+                design_id=design.id,
+                user_id=user.id if user else None,
+                action_type="DESIGN_RESTORED",
+                message=message or f"Design {design.design_code} restored",
+                metadata={"is_archived": False},
+            )
+        return restored
