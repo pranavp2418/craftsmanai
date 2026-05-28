@@ -26,6 +26,12 @@ class DesignVariantService:
     def count_variants(self, design_id: int) -> int:
         return self.variant_repo.count_for_design(design_id)
 
+    def list_archived_variants(self, user_id: int, skip: Optional[int] = None, limit: Optional[int] = None):
+        return self.variant_repo.list_archived_for_user(user_id, skip=skip, limit=limit)
+
+    def count_archived_variants(self, user_id: int) -> int:
+        return self.variant_repo.count_archived_for_user(user_id)
+
     def create_initial_variant(
         self,
         *,
@@ -114,3 +120,33 @@ class DesignVariantService:
             metadata={"variant_id": variant.id},
         )
         return selected
+
+    def archive_variant(self, variant: DesignVariant, *, message: Optional[str] = None) -> DesignVariant:
+        archived = self.variant_repo.update_variant(variant, is_archived=True)
+        self.activity_repo.log(
+            design_id=variant.design_id,
+            action_type="VARIANT_ARCHIVED",
+            message=message or f"Variant {variant.variant_name} archived",
+            metadata={"variant_id": variant.id, "is_archived": True},
+        )
+        return archived
+
+    def restore_variant(self, variant: DesignVariant, *, message: Optional[str] = None) -> DesignVariant:
+        restored = self.variant_repo.update_variant(variant, is_archived=False)
+        self.activity_repo.log(
+            design_id=variant.design_id,
+            action_type="VARIANT_RESTORED",
+            message=message or f"Variant {variant.variant_name} restored",
+            metadata={"variant_id": variant.id, "is_archived": False},
+        )
+        return restored
+
+    def delete_variant(self, variant: DesignVariant, *, message: Optional[str] = None) -> DesignVariant:
+        deleted = self.variant_repo.delete_variant(variant)
+        self.activity_repo.log(
+            design_id=variant.design_id,
+            action_type="VARIANT_DELETED",
+            message=message or f"Variant {variant.variant_name} deleted",
+            metadata={"variant_id": variant.id, "is_deleted": True},
+        )
+        return deleted

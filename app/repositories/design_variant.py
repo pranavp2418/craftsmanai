@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.design import DesignVariant
+from app.models.design import Design, DesignVariant
 
 
 class DesignVariantRepository:
@@ -47,12 +47,16 @@ class DesignVariantRepository:
         return variant
 
     def get_by_id(self, variant_id: int) -> Optional[DesignVariant]:
-        return self.db.query(DesignVariant).filter(DesignVariant.id == variant_id).first()
+        return self.db.query(DesignVariant).filter(DesignVariant.id == variant_id, DesignVariant.is_deleted.is_(False)).first()
 
     def list_for_design(self, design_id: int, skip: Optional[int] = None, limit: Optional[int] = None) -> List[DesignVariant]:
         query = (
             self.db.query(DesignVariant)
-            .filter(DesignVariant.design_id == design_id)
+            .filter(
+                DesignVariant.design_id == design_id,
+                DesignVariant.is_archived.is_(False),
+                DesignVariant.is_deleted.is_(False),
+            )
             .order_by(DesignVariant.created_at.desc())
         )
         if skip is not None:
@@ -64,14 +68,51 @@ class DesignVariantRepository:
     def count_for_design(self, design_id: int) -> int:
         return (
             self.db.query(DesignVariant)
-            .filter(DesignVariant.design_id == design_id)
+            .filter(
+                DesignVariant.design_id == design_id,
+                DesignVariant.is_archived.is_(False),
+                DesignVariant.is_deleted.is_(False),
+            )
+            .count()
+        )
+
+    def list_archived_for_user(self, user_id: int, skip: Optional[int] = None, limit: Optional[int] = None) -> List[DesignVariant]:
+        query = (
+            self.db.query(DesignVariant)
+            .join(Design, DesignVariant.design_id == Design.id)
+            .filter(
+                Design.user_id == user_id,
+                DesignVariant.is_archived.is_(True),
+                DesignVariant.is_deleted.is_(False),
+            )
+            .order_by(DesignVariant.created_at.desc())
+        )
+        if skip is not None:
+            query = query.offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
+
+    def count_archived_for_user(self, user_id: int) -> int:
+        return (
+            self.db.query(DesignVariant)
+            .join(Design, DesignVariant.design_id == Design.id)
+            .filter(
+                Design.user_id == user_id,
+                DesignVariant.is_archived.is_(True),
+                DesignVariant.is_deleted.is_(False),
+            )
             .count()
         )
 
     def get_selected_variant(self, design_id: int) -> Optional[DesignVariant]:
         return (
             self.db.query(DesignVariant)
-            .filter(DesignVariant.design_id == design_id, DesignVariant.is_selected.is_(True))
+            .filter(
+                DesignVariant.design_id == design_id,
+                DesignVariant.is_selected.is_(True),
+                DesignVariant.is_deleted.is_(False),
+            )
             .first()
         )
 
@@ -89,6 +130,12 @@ class DesignVariantRepository:
         for field, value in kwargs.items():
             if hasattr(variant, field) and value is not None:
                 setattr(variant, field, value)
+        self.db.commit()
+        self.db.refresh(variant)
+        return variant
+
+    def delete_variant(self, variant: DesignVariant) -> DesignVariant:
+        variant.is_deleted = True
         self.db.commit()
         self.db.refresh(variant)
         return variant

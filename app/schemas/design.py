@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
 from app.models.design import DesignStatus, DesignShareStatus
+from app.schemas.design_variant import PaginationMetadata
 
 
 class DesignBase(BaseModel):
@@ -48,6 +49,7 @@ class DesignResponse(BaseModel):
 class DesignListResponse(BaseModel):
     items: List[DesignResponse]
     total: int
+    pagination: Optional[PaginationMetadata] = None
 
 
 class DesignShareCreateRequest(BaseModel):

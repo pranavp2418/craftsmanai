@@ -75,6 +75,7 @@ class DesignVariantResponse(BaseModel):
     prompt_used: Optional[str]
     model_used: Optional[str]
     is_selected: bool
+    is_archived: bool
     created_at: datetime
 
 

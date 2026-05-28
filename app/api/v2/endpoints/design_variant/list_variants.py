@@ -28,7 +28,7 @@ def list_design_variants(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
 
     skip = (page - 1) * limit
-    variants = variant_service.list_variants(design.id, skip=skip, limit=limit)
+    variants = [variant for variant in variant_service.list_variants(design.id, skip=skip, limit=limit) if not variant.is_archived]
     total_items = variant_service.count_variants(design.id)
     total_pages = (total_items + limit - 1) // limit if total_items > 0 else 0
 
