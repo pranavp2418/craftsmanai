@@ -77,8 +77,8 @@ fastapi_app.add_middleware(GlobalRateLimitMiddleware)
 # CORS middleware
 fastapi_app.add_middleware(
     CORSMiddleware,
-    # allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
-    allow_origins=["http://192.168.1.83:3000","https://k6r4l6c7-3000.inc1.devtunnels.ms","http://localhost:3000","https://gq7l179z-3000.inc1.devtunnels.ms","https://pq3ck368-8000.inc1.devtunnels.ms","https://2vrmpjhw-3000.inc1.devtunnels.ms"],
+    allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
+    # allow_origins=["http://192.168.1.83:3000","https://k6r4l6c7-3000.inc1.devtunnels.ms","http://localhost:3000","https://gq7l179z-3000.inc1.devtunnels.ms","https://pq3ck368-8000.inc1.devtunnels.ms","https://2vrmpjhw-3000.inc1.devtunnels.ms"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
