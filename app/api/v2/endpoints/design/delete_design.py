@@ -18,9 +18,11 @@ def delete_design(
     current_user: User = Depends(get_current_active_user),
 ):
     service = DesignService(db)
-    design = service.get_design_for_team_member(design_id=design_id, user=current_user)
+    design = service.get_design(design_id)
     if not design:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
+    if design.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not allowed to delete this design")
 
     service.delete_design(design)
     return None

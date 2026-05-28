@@ -173,6 +173,7 @@ class DesignService:
             design_id=design.id,
             action_type="DESIGN_DELETED",
             message=f"Design {design.design_code} deleted",
+            metadata={"is_deleted": True},
         )
 
     def archive_design(self, design: Design, *, user: Optional[User] = None, message: Optional[str] = None) -> Design:
