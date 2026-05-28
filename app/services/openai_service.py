@@ -902,5 +902,230 @@ The final design must:
         return result.data[0]
 
 
+    def _load_image_bytes_from_source(self, source: str) -> bytes:
+        """Load image bytes from URL or local path."""
+        if source.startswith("http"):
+            import requests as req
+            resp = req.get(source)
+            resp.raise_for_status()
+            return resp.content
+        with open(source, "rb") as f:
+            return f.read()
+
+    def _encode_image_to_base64(self, image_bytes: bytes) -> str:
+        """Encode image bytes to base64 string."""
+        return base64.b64encode(image_bytes).decode('utf-8')
+
+    def analyze_changes_with_vision(
+        self,
+        image_source: str,
+        user_request: str,
+    ) -> dict:
+        """
+        Agent 1: Analyze what changes need to be made using GPT-4o vision.
+        
+        Args:
+            image_source: URL or local path of reference image
+            user_request: User's design modification request
+            
+        Returns:
+            dict with keys: changes_needed, must_preserve, complex_elements, metal_type, stone_type, design_style
+        """
+        logger.info("Analyzing changes with vision for request: %s", user_request)
+        try:
+            image_bytes = self._load_image_bytes_from_source(image_source)
+            base64_image = self._encode_image_to_base64(image_bytes)
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are a master jewelry designer analyzing images for modifications. 
+                    
+Your task:
+1. Examine the reference jewelry image carefully
+2. Parse the user's modification request
+3. Identify EXACTLY what needs to change
+4. Specify what must remain unchanged
+5. Note any complex elements (text, spinning parts, stacked bands)
+
+Output format:
+{
+  "changes_needed": ["list of specific changes"],
+  "must_preserve": ["list of elements to keep exactly"],
+  "complex_elements": ["text", "spinning_bands", "stacked_bands", etc.],
+  "metal_type": "detected or specified",
+  "stone_type": "detected or specified",
+  "design_style": "brief description"
+}"""
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Analyze this jewelry image and the user's request: '{user_request}'\n\nProvide a detailed JSON analysis of what needs to change and what must be preserved."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
+            ]
+
+            response = self._client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=500,
+                temperature=0.3
+            )
+
+            analysis_text = response.choices[0].message.content.strip()
+
+            # Try to extract JSON from response
+            try:
+                start_idx = analysis_text.find('{')
+                end_idx = analysis_text.rfind('}') + 1
+                if start_idx != -1 and end_idx != 0:
+                    json_str = analysis_text[start_idx:end_idx]
+                    import json
+                    return json.loads(json_str)
+            except Exception:
+                pass
+
+            # Fallback
+            return {
+                "changes_needed": [user_request],
+                "must_preserve": ["overall_style", "proportions"],
+                "complex_elements": [],
+                "metal_type": "unknown",
+                "stone_type": "unknown",
+                "design_style": "jewelry"
+            }
+
+        except Exception as e:
+            logger.warning("Vision analysis failed: %s", e)
+            return {
+                "changes_needed": [user_request],
+                "must_preserve": ["overall_style"],
+                "complex_elements": [],
+                "metal_type": "unknown",
+                "stone_type": "unknown",
+                "design_style": "jewelry"
+            }
+
+    def compare_and_validate(
+        self,
+        base_image_source: str,
+        generated_image_source: str,
+        analysis: dict,
+    ) -> dict:
+        """
+        Agent 3: Compare generated image with requirements and identify issues.
+        
+        Args:
+            base_image_source: URL or local path of reference base image
+            generated_image_source: URL or local path of generated image
+            analysis: Analysis dict from analyze_changes_with_vision()
+            
+        Returns:
+            dict with keys: changes_implemented, missing_changes, quality_issues, needs_refinement, refinement_notes
+        """
+        logger.info("Comparing and validating generated image")
+        try:
+            base_bytes = self._load_image_bytes_from_source(base_image_source)
+            generated_bytes = self._load_image_bytes_from_source(generated_image_source)
+
+            base64_base = self._encode_image_to_base64(base_bytes)
+            base64_generated = self._encode_image_to_base64(generated_bytes)
+
+            changes_text = ", ".join(analysis.get("changes_needed", []))
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are a quality control expert for jewelry CAD renders.
+
+Your task:
+1. Compare the base image with the generated image
+2. Verify all requested changes are implemented
+3. Check for quality issues (floating elements, incomplete bands, etc.)
+4. Identify what needs refinement
+
+Output format:
+{
+  "changes_implemented": ["list of successfully implemented changes"],
+  "missing_changes": ["list of changes not implemented"],
+  "quality_issues": ["list of quality problems"],
+  "needs_refinement": true/false,
+  "refinement_notes": "specific instructions for next iteration"
+}"""
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Compare these images. Base (left) vs Generated (right). Required changes: {changes_text}\n\nAnalyze if all changes are implemented and identify any quality issues."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64_base}"
+                            }
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64_generated}"
+                            }
+                        }
+                    ]
+                }
+            ]
+
+            response = self._client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=500,
+                temperature=0.3
+            )
+
+            comparison_text = response.choices[0].message.content.strip()
+
+            # Try to extract JSON
+            try:
+                start_idx = comparison_text.find('{')
+                end_idx = comparison_text.rfind('}') + 1
+                if start_idx != -1 and end_idx != 0:
+                    json_str = comparison_text[start_idx:end_idx]
+                    import json
+                    return json.loads(json_str)
+            except Exception:
+                pass
+
+            # Fallback assessment
+            needs_refinement = "incomplete" in comparison_text.lower() or "missing" in comparison_text.lower()
+            return {
+                "changes_implemented": ["basic_changes"],
+                "missing_changes": [] if not needs_refinement else ["some_changes"],
+                "quality_issues": [] if not needs_refinement else ["needs_improvement"],
+                "needs_refinement": needs_refinement,
+                "refinement_notes": comparison_text
+            }
+
+        except Exception as e:
+            logger.warning("Comparison failed: %s", e)
+            return {
+                "changes_implemented": [],
+                "missing_changes": ["unknown"],
+                "quality_issues": ["comparison_failed"],
+                "needs_refinement": True,
+                "refinement_notes": "Unable to compare, need to regenerate"
+            }
+
+
 # Singleton instance
 openai_service = OpenAIService()

@@ -7,7 +7,8 @@ import string
 
 from app.core.database import get_db
 from app.core.rate_limiter import check_auth_rate_limit
-from app.schemas.auth import OTPVerifyRequest, LoginResponse
+from app.core.device_fingerprint import get_device_info_from_request
+from app.schemas.auth import OTPVerifyRequest, LoginResponse, DeviceInfo
 from app.services.auth import AuthService
 from app.models.otp import OTP
 from app.core.security import create_access_token, create_refresh_token
@@ -93,14 +94,32 @@ async def verify_otp(
     access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
     refresh_token, token_id, expires_at = create_refresh_token(str(user.id), False)
     
-    # Handle device management if device_info is provided
+    # Handle device management - auto-detect from headers or use provided device_info
     device_id = None
-    if otp_data.device_info:
-        device_data = otp_data.device_info.dict(exclude_none=True)
+    # Auto-detect device from request headers as primary source
+    auto_device_info = get_device_info_from_request(request)
+    
+    if auto_device_info and auto_device_info.device_id:
+        device_data = auto_device_info.model_dump(exclude_none=True)
+        
+        existing_device = auth_service.device_repo.get_device_by_device_id(
+            user.id, auto_device_info.device_id
+        )
+        if existing_device:
+            device_id = auto_device_info.device_id
+            auth_service.device_repo.update_device_last_used(existing_device.id)
+        else:
+            active_devices = auth_service.device_repo.get_active_device_count(user.id)
+            if active_devices >= settings.MAX_ACTIVE_DEVICES:
+                auth_service.device_repo.revoke_old_devices(user.id, settings.MAX_ACTIVE_DEVICES - 1)
+            auth_service.device_repo.create_device(user.id, device_data)
+            device_id = auto_device_info.device_id
+    elif otp_data.device_info and otp_data.device_info.device_id:
+        # Fallback to provided device_info
+        device_data = otp_data.device_info.model_dump(exclude_none=True)
         if not device_data.get("device_id"):
             import uuid
             device_data["device_id"] = str(uuid.uuid4())
-            
         existing_device = auth_service.device_repo.get_device_by_device_id(
             user.id, device_data["device_id"]
         )

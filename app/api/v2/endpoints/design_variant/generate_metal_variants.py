@@ -41,12 +41,27 @@ def generate_metal_variants(
     if not payload.metals:
         raise HTTPException(status_code=400, detail="At least one metal must be specified")
 
+    # Check which requested metals already exist (skip regeneration)
+    existing_metal_variations = variant.metal_variations_json or {}
+    already_existing = [m for m in payload.metals if m in existing_metal_variations and existing_metal_variations[m] is not None]
+    missing_metals = [m for m in payload.metals if m not in already_existing]
+
+    if not missing_metals:
+        return {
+            "success": True,
+            "message": "All requested metals already exist. No generation needed.",
+            "variant_id": variant.id,
+            "metals": payload.metals,
+            "already_existing": already_existing,
+            "skipped": True,
+        }
+
     channel = f"metal_variants:{variant_id}"
 
-    # Dispatch the background Celery task
+    # Dispatch the background Celery task with only the missing metals
     generate_metal_variant_images.delay(
         variant_id=variant.id,
-        metals=payload.metals,
+        metals=missing_metals,
         channel=channel,
     )
 
@@ -54,6 +69,7 @@ def generate_metal_variants(
         "success": True,
         "message": f"Metal variant generation started for variant_id={variant_id}",
         "variant_id": variant.id,
-        "metals": payload.metals,
+        "metals": missing_metals,
+        "already_existing": already_existing,
         "sse_channel": channel,
     }

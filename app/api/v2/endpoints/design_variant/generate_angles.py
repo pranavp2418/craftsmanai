@@ -10,6 +10,12 @@ from app.services.design_variant_service import DesignVariantService
 from app.tasks.angle_variant_tasks import generate_remaining_variant_angles
 
 
+ANGLE_PROMPTS = {
+    "side_view",
+    "top_view",
+    "three_quarter_view",
+}
+
 router = APIRouter()
 
 
@@ -56,17 +62,40 @@ def generate_variant_angles(
     if not payload.metals:
         raise HTTPException(status_code=400, detail="At least one metal must be specified")
 
+    # Check which requested metals already have all angles generated
+    existing_angles = variant.angles_json or {}
+    already_existing = []
+    for metal in payload.metals:
+        metal_data = existing_angles.get(metal)
+        if isinstance(metal_data, dict) and all(
+            angle in metal_data for angle in ANGLE_PROMPTS
+        ):
+            already_existing.append(metal)
+
+    missing_metals = [m for m in payload.metals if m not in already_existing]
+
+    if not missing_metals:
+        return {
+            "success": True,
+            "message": "All requested metals already have angles generated. No generation needed.",
+            "variant_id": variant.id,
+            "metals": payload.metals,
+            "already_existing": already_existing,
+            "skipped": True,
+        }
+
     channel = f"variant_angles:{variant_id}"
     generate_remaining_variant_angles.delay(
         variant_id=variant.id,
-        metals=payload.metals,
+        metals=missing_metals,
         channel=channel,
     )
     return {
         "success": True,
         "message": f"Angle generation started for variant_id={variant.id}",
         "variant_id": variant.id,
-        "metals": payload.metals,
+        "metals": missing_metals,
+        "already_existing": already_existing,
         "sse_channel": channel,
         "angles_to_generate": ["side_view", "top_view", "three_quarter_view"],
     }

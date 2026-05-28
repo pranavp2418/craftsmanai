@@ -107,15 +107,28 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
         existing_angles = variant.angles_json or {}
         generated_angles: dict[str, dict[str, str]] = {}
 
-        # Preserve metals that already have all angles (so we don't re-generate)
+        # Preserve ALL existing metals that were NOT requested (never remove old data)
+        for existing_metal, existing_metal_data in existing_angles.items():
+            if existing_metal not in metals:
+                generated_angles[existing_metal] = existing_metal_data
+
+        # Determine which requested metals already have all angles (skip regeneration)
+        already_existing = []
         for metal_name in metals:
             metal_data = existing_angles.get(metal_name)
             if isinstance(metal_data, dict) and all(
                 angle in metal_data for angle in ANGLE_PROMPTS.keys()
             ):
+                already_existing.append(metal_name)
                 generated_angles[metal_name] = metal_data
 
-        missing_metals = [m for m in metals if m not in generated_angles]
+        missing_metals = [m for m in metals if m not in already_existing]
+
+        if already_existing:
+            logger.info(
+                "Skipping already-existing angle metals for variant_id=%s: %s",
+                variant_id, already_existing,
+            )
 
         if not missing_metals:
             sse_manager.publish(
