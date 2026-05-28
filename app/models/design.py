@@ -52,6 +52,7 @@ class Design(Base):
     input_image_urls = Column(JSON, nullable=True)
     status = Column(SqlEnum(DesignStatus, native_enum=False, length=32), nullable=False, default=DesignStatus.DRAFT)
     is_archived = Column(Boolean, nullable=False, default=False)
+    is_deleted = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
