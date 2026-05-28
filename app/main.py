@@ -37,9 +37,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-fastapi_app = FastAPI(title="Craftmen API", version="2.0.0")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -64,15 +61,15 @@ async def lifespan(app: FastAPI):
     logger.info("SSE Redis listener stopped.")
 
 
-# Re-assign lifespan since it's instantiated now
-fastapi_app.router.lifespan_context = lifespan
-
-# Add middleware in correct order
-fastapi_app.add_middleware(HealthCheckMiddleware)
-fastapi_app.add_middleware(RequestLoggingMiddleware)
-fastapi_app.add_middleware(SecurityHeadersMiddleware)
-fastapi_app.add_middleware(IPBasedRateLimitMiddleware)
-fastapi_app.add_middleware(GlobalRateLimitMiddleware)
+# ------------------------------------------------------------------
+# Build the inner FastAPI application (REST routes)
+# ------------------------------------------------------------------
+fastapi_app = FastAPI(
+    title=settings.PROJECT_NAME,
+    description="Backend API for Craftmen application",
+    version="2.0.0",
+    lifespan=lifespan,
+)
 
 # CORS middleware
 fastapi_app.add_middleware(
@@ -83,6 +80,15 @@ fastapi_app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add middleware in correct order
+fastapi_app.add_middleware(HealthCheckMiddleware)
+fastapi_app.add_middleware(RequestLoggingMiddleware)
+fastapi_app.add_middleware(SecurityHeadersMiddleware)
+fastapi_app.add_middleware(IPBasedRateLimitMiddleware)
+fastapi_app.add_middleware(GlobalRateLimitMiddleware)
+
+
 
 # Register REST API routes
 fastapi_app.include_router(api_router, prefix="/api/v2")
