@@ -12,6 +12,7 @@ import requests
 from app.core.database import SessionLocal
 from app.models.design import Design
 from app.services.ai_workflow_service import AIGenerationWorkflowService
+from app.services.ai_workflow_v5_service import generate_jewelry_with_cross_agent
 from app.services.design_variant_service import DesignVariantService
 from app.services.openai_service import openai_service
 from app.services.storage_service import _validate_image_bytes, upload_image_to_supabase
@@ -75,22 +76,49 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
         if not design:
             raise ValueError(f"Design with id {design_id} not found")
 
-        # Check if a reference image is present, otherwise fallback to prompt-only generation
-        reference_image_url = None
-        if design.input_image_urls and isinstance(design.input_image_urls, list) and design.input_image_urls:
-            reference_image_url = design.input_image_urls[0]
-        elif design.input_image_url:
-            reference_image_url = design.input_image_url
+        # Resolve reference image URL
+        reference_image_url = _resolve_reference_image_url(design) if (
+            (design.input_image_urls and isinstance(design.input_image_urls, list) and design.input_image_urls)
+            or design.input_image_url
+        ) else None
 
         if reference_image_url:
-            generated_item = openai_service.generate_base_image(reference_image_url, prompt)
-        else:
-            generated_item = openai_service.generate_image_from_prompt(prompt)
-        image_bytes, content_type = _extract_generated_image_data(generated_item)
-        _validate_image_bytes(image_bytes, content_type)
+            # ── V5 Cross-Agent Pipeline ──────────────────────────────
+            # Build a progress callback that publishes SSE events at each stage
+            def _progress_callback(stage: str, data: dict):
+                sse_data = {
+                    "design_id": design.id,
+                    "design_code": design.design_code,
+                    "stage": stage,
+                    "message": data.get("message", ""),
+                }
+                _publish_sse(channel, data=sse_data, event=f"design.{stage}")
 
-        bucket_path = f"generated/base/{design.design_code}"
-        generated_image_url = upload_image_to_supabase(image_bytes, bucket_path)
+            # Run the cross-agent iterative refinement pipeline
+            final_image_bytes, validations = generate_jewelry_with_cross_agent(
+                base_image_source=reference_image_url,
+                user_request=prompt,
+                max_iterations=3,
+                progress_callback=_progress_callback,
+            )
+
+            if final_image_bytes is None:
+                raise ValueError("Cross-agent generation pipeline failed to produce a final image.")
+
+            _validate_image_bytes(final_image_bytes, "image/png")
+
+            # Upload final refined image to Supabase
+            bucket_path = f"generated/base/{design.design_code}"
+            generated_image_url = upload_image_to_supabase(final_image_bytes, bucket_path)
+
+        else:
+            # ── Fallback: prompt-only generation (no reference image) ─
+            generated_item = openai_service.generate_image_from_prompt(prompt)
+            image_bytes, content_type = _extract_generated_image_data(generated_item)
+            _validate_image_bytes(image_bytes, content_type)
+
+            bucket_path = f"generated/base/{design.design_code}"
+            generated_image_url = upload_image_to_supabase(image_bytes, bucket_path)
 
         variant_service = DesignVariantService(db)
         variant = variant_service.create_initial_variant(

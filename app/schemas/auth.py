@@ -5,9 +5,12 @@ import re
 
 
 class DeviceInfo(BaseModel):
+    device_id: Optional[str] = None
     device_type: Optional[str] = None
     device_os: Optional[str] = None
     browser: Optional[str] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
 
 
 class SignupRequest(BaseModel):

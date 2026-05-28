@@ -1,16 +1,44 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
 from typing import Any
+from datetime import datetime, timezone, timedelta
 
 from app.core.database import get_db
 from app.core.rate_limiter import check_auth_rate_limit
+from app.core.device_fingerprint import get_device_info_from_request
 from app.schemas.auth import RefreshTokenRequest, LoginResponse
 from app.services.auth import AuthService
+from app.core.token_blacklist import token_blacklist
+from app.models.blacklisted_token import BlacklistedToken
 import logging
+from jose import ExpiredSignatureError, JWTError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _blacklist_token_in_db(db: Session, jti: str, token_type: str, expires_at: datetime, reason: str = "refresh", user_id: str = None):
+    """Insert a blacklisted token record into the database for persistence and audit trail"""
+    try:
+        existing = db.query(BlacklistedToken).filter(BlacklistedToken.jti == jti).first()
+        if existing:
+            return True
+            
+        blacklisted = BlacklistedToken(
+            jti=jti,
+            token_type=token_type,
+            user_id=int(user_id) if user_id else None,
+            reason=reason,
+            expires_at=expires_at
+        )
+        db.add(blacklisted)
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to blacklist token {jti} in DB: {str(e)}")
+        return False
 
 
 @router.post("/refresh-token", response_model=LoginResponse)
@@ -30,6 +58,7 @@ async def refresh_token(
     
     # Get refresh token from cookie or alternative header
     refresh_token = request.cookies.get("refresh_token") or request.headers.get("X-Refresh-Token")
+    
     logger.info(f"Refresh token present: {bool(refresh_token)}")
     
     if not refresh_token:

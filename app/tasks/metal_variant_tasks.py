@@ -91,9 +91,44 @@ def generate_metal_variant_images(
         if not base_image_url:
             raise ValueError(f"Variant {variant_id} has no base image URL")
 
+        # Preserve existing metal variations that were not requested
+        existing_metal_variations = variant.metal_variations_json or {}
         metal_variations: dict[str, str] = {}
 
-        for metal in metals:
+        # Keep all existing metals that weren't requested (never remove old data)
+        for existing_metal, existing_url in existing_metal_variations.items():
+            if existing_metal not in metals:
+                metal_variations[existing_metal] = existing_url
+
+        # Determine which requested metals already exist (skip regeneration)
+        already_existing = [m for m in metals if m in existing_metal_variations and existing_metal_variations[m] is not None]
+        missing_metals = [m for m in metals if m not in existing_metal_variations or existing_metal_variations[m] is None]
+
+        if already_existing:
+            logger.info(
+                "Skipping already-existing metals for variant_id=%s: %s",
+                variant_id, already_existing,
+            )
+            # Preserve existing data for metals that already have it
+            for metal in already_existing:
+                metal_variations[metal] = existing_metal_variations[metal]
+
+        if not missing_metals:
+            sse_manager.publish(
+                channel,
+                data={
+                    "variant_id": variant.id,
+                    "design_id": variant.design_id,
+                    "status": "SKIPPED",
+                    "message": "All requested metals already exist",
+                    "metal_variations": metal_variations,
+                },
+                event="metal_variants.generated",
+            )
+            sse_manager.publish_close(channel)
+            return
+
+        for metal in missing_metals:
             prompt = _metal_to_prompt(metal)
             logger.info("Generating %s variant for variant_id=%s", metal, variant_id)
 
@@ -120,7 +155,8 @@ def generate_metal_variant_images(
                 )
                 metal_variations[metal] = None
 
-        # Update the variant's metal_variations_json with the new mapping
+        # Update the variant's metal_variations_json with merged data
+        # (preserves old metals + adds newly generated ones)
         updated = variant_repo.update_variant(
             variant,
             metal_variations_json=metal_variations,
