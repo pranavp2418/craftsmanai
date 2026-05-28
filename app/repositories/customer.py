@@ -1,9 +1,12 @@
 from typing import List, Optional
 
+from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.models.customer import Customer
+from app.models.manufacturer import Manufacturer
+from app.schemas.validations import find_contact_conflict
 
 
 class CustomerRepository:
@@ -22,6 +25,19 @@ class CustomerRepository:
         location: Optional[str] = None,
         is_active: bool = True,
     ) -> Customer:
+        conflict_field = find_contact_conflict(
+            self.db,
+            created_by_user_id=created_by_user_id,
+            emails=emails,
+            phone_number=phone_number,
+            models=(Customer, Manufacturer),
+        )
+        if conflict_field:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Customer with same {conflict_field} already exists",
+            )
+
         customer = Customer(
             created_by_user_id=created_by_user_id,
             full_name=full_name,

@@ -8,6 +8,9 @@ from app.models.user import User
 from app.models.otp import OTP
 from app.models.refresh_token import RefreshToken
 from app.models.user_device import UserDevice
+from app.models.notification_setting import NotificationSetting
+from app.models.brand_setting import BrandSetting
+from app.models.customer import Customer
 from app.models.manufacturer import Manufacturer
 from app.repositories.user import UserRepository
 from app.core.security import create_access_token
@@ -25,6 +28,9 @@ def create_committed_user(email: str, username: str, full_name: str) -> User:
             session.query(RefreshToken).filter(RefreshToken.user_id == existing.id).delete()
             session.query(UserDevice).filter(UserDevice.user_id == existing.id).delete()
             session.query(Manufacturer).filter(Manufacturer.created_by_user_id == existing.id).delete()
+            session.query(Customer).filter(Customer.created_by_user_id == existing.id).delete()
+            session.query(NotificationSetting).filter(NotificationSetting.user_id == existing.id).delete()
+            session.query(BrandSetting).filter(BrandSetting.user_id == existing.id).delete()
             session.query(User).filter(User.id == existing.id).delete()
             session.commit()
             
@@ -52,6 +58,9 @@ def cleanup_user_by_email(email: str):
             session.query(RefreshToken).filter(RefreshToken.user_id == user.id).delete()
             session.query(UserDevice).filter(UserDevice.user_id == user.id).delete()
             session.query(Manufacturer).filter(Manufacturer.created_by_user_id == user.id).delete()
+            session.query(Customer).filter(Customer.created_by_user_id == user.id).delete()
+            session.query(NotificationSetting).filter(NotificationSetting.user_id == user.id).delete()
+            session.query(BrandSetting).filter(BrandSetting.user_id == user.id).delete()
             session.query(User).filter(User.id == user.id).delete()
             session.commit()
     finally:
@@ -90,6 +99,138 @@ class TestManufacturerEndpoints:
             assert data["phone_number"] == "+39 02 4567 8901"
             assert data["location"] == "Milan, Italy"
             assert data["status"] == "Active"
+        finally:
+            cleanup_user_by_email(email)
+
+    def test_create_manufacturer_rejects_duplicate_email(self, client: TestClient):
+        email = "mfg_dup_email@example.com"
+        try:
+            user = create_committed_user(email=email, username="mfgdupeemail", full_name="Designer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            first_payload = {
+                "name": "First Maker",
+                "speciality": "Gold Specialist",
+                "emails": [{"label": "Work", "email": "shared@maker.com"}],
+                "phone_number": "+1001",
+                "location": "Rome"
+            }
+            second_payload = {
+                "name": "Second Maker",
+                "speciality": "Silver Specialist",
+                "emails": [{"label": "Work", "email": "shared@maker.com"}],
+                "phone_number": "+1002",
+                "location": "Milan"
+            }
+
+            first_response = client.post("/api/v2/manufacturer/", json=first_payload, headers=headers)
+            assert first_response.status_code == 201
+
+            second_response = client.post("/api/v2/manufacturer/", json=second_payload, headers=headers)
+            assert second_response.status_code == 409
+            assert second_response.json()["detail"] == "Manufacturer with same email already exists"
+        finally:
+            cleanup_user_by_email(email)
+
+    def test_create_manufacturer_rejects_duplicate_phone(self, client: TestClient):
+        email = "mfg_dup_phone@example.com"
+        try:
+            user = create_committed_user(email=email, username="mfgdupphone", full_name="Designer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            first_payload = {
+                "name": "First Forge",
+                "speciality": "Diamond Setting",
+                "emails": [{"label": "Work", "email": "first@forge.com"}],
+                "phone_number": "+2001",
+                "location": "Turin"
+            }
+            second_payload = {
+                "name": "Second Forge",
+                "speciality": "Diamond Setting",
+                "emails": [{"label": "Work", "email": "second@forge.com"}],
+                "phone_number": "+2001",
+                "location": "Venice"
+            }
+
+            first_response = client.post("/api/v2/manufacturer/", json=first_payload, headers=headers)
+            assert first_response.status_code == 201
+
+            second_response = client.post("/api/v2/manufacturer/", json=second_payload, headers=headers)
+            assert second_response.status_code == 409
+            assert second_response.json()["detail"] == "Manufacturer with same phone number already exists"
+        finally:
+            cleanup_user_by_email(email)
+
+    def test_create_manufacturer_rejects_invalid_contact_format(self, client: TestClient):
+        email = "mfg_invalid_contact@example.com"
+        try:
+            user = create_committed_user(email=email, username="mfginvalidcontact", full_name="Designer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            invalid_phone_payload = {
+                "name": "Invalid Phone Maker",
+                "speciality": "Pearl Jewelry",
+                "emails": [{"label": "Work", "email": "valid@maker.com"}],
+                "phone_number": "12-34-AB",
+                "location": "Bologna"
+            }
+            invalid_email_payload = {
+                "name": "Invalid Email Maker",
+                "speciality": "Enamel Work",
+                "emails": [{"label": "Work", "email": "not-an-email"}],
+                "phone_number": "+3001",
+                "location": "Naples"
+            }
+
+            invalid_phone_response = client.post("/api/v2/manufacturer/", json=invalid_phone_payload, headers=headers)
+            assert invalid_phone_response.status_code == 422
+            assert invalid_phone_response.json()["detail"] == "Invalid phone number format"
+
+            invalid_email_response = client.post("/api/v2/manufacturer/", json=invalid_email_payload, headers=headers)
+            assert invalid_email_response.status_code == 422
+        finally:
+            cleanup_user_by_email(email)
+
+    def test_create_manufacturer_rejects_duplicate_customer_contact(self, client: TestClient):
+        email = "mfg_customer_cross_dup@example.com"
+        try:
+            user = create_committed_user(email=email, username="mfgcrossdup", full_name="Designer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            customer = Customer(
+                created_by_user_id=user.id,
+                full_name="Existing Client",
+                emails='[{"label":"Work","email":"shared-cross@example.com"}]',
+                phone_number="+4001",
+                tag="VIP Customer",
+                location="Paris",
+                public_token="cross_customer_token",
+                is_active=True,
+            )
+
+            session = TestingSessionLocal()
+            try:
+                session.add(customer)
+                session.commit()
+            finally:
+                session.close()
+
+            payload = {
+                "name": "Cross Duplicate Maker",
+                "speciality": "Gold Specialist",
+                "emails": [{"label": "Work", "email": "shared-cross@example.com"}],
+                "phone_number": "+5001",
+                "location": "Milan"
+            }
+
+            response = client.post("/api/v2/manufacturer/", json=payload, headers=headers)
+            assert response.status_code == 409
+            assert response.json()["detail"] == "Manufacturer with same email already exists"
         finally:
             cleanup_user_by_email(email)
 
