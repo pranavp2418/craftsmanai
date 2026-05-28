@@ -78,8 +78,8 @@ class AccountMemberRepository:
             .first()
         )
 
-    def list_by_account(self, account_id: int) -> List[AccountMember]:
-        return (
+    def list_by_account(self, account_id: int, skip: Optional[int] = None, limit: Optional[int] = None) -> List[AccountMember]:
+        query = (
             self.db.query(AccountMember)
             .filter(
                 and_(
@@ -89,8 +89,25 @@ class AccountMemberRepository:
                 )
             )
             .order_by(AccountMember.created_at.asc())
-            .all()
         )
+        if skip is not None:
+            query = query.offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
+
+    def count_by_account(self, account_id: int) -> int:
+        return (
+            self.db.query(func.count(AccountMember.id))
+            .filter(
+                and_(
+                    AccountMember.account_id == account_id,
+                    AccountMember.status == "active",
+                    AccountMember.deleted_at.is_(None),
+                )
+            )
+            .scalar()
+        ) or 0
 
     def count_active_admins(self, account_id: int) -> int:
         return (

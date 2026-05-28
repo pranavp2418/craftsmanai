@@ -76,7 +76,17 @@ class AccountMemberResponse(BaseModel):
         from_attributes = True
 
 
+class PaginationMetadata(BaseModel):
+    page: int
+    limit: int
+    total_items: int
+    total_pages: int
+    has_next: bool
+    has_prev: bool
+
+
 class TeamMembersListResponse(BaseModel):
     account_id: int
     members_count: int
     members: list[AccountMemberResponse]
+    pagination: Optional[PaginationMetadata] = None

@@ -146,13 +146,36 @@ class TeamSettingsService:
         self.invitation_repo.mark_accepted(invitation)
         return self._member_to_response(member)
 
-    def list_members(self, invited_by: int, current_user_id: int) -> TeamMembersListResponse:
+    def list_members(
+        self,
+        invited_by: int,
+        current_user_id: int,
+        skip: Optional[int] = None,
+        limit: Optional[int] = None,
+        page: Optional[int] = None,
+    ) -> TeamMembersListResponse:
         self._require_member(invited_by, current_user_id)
-        members = self.member_repo.list_by_account(invited_by)
+        members = self.member_repo.list_by_account(invited_by, skip=skip, limit=limit)
+        total_items = self.member_repo.count_by_account(invited_by)
+
+        pagination = None
+        if page is not None and limit is not None:
+            from app.schemas.team_settings import PaginationMetadata
+            total_pages = (total_items + limit - 1) // limit if total_items > 0 else 0
+            pagination = PaginationMetadata(
+                page=page,
+                limit=limit,
+                total_items=total_items,
+                total_pages=total_pages,
+                has_next=page < total_pages,
+                has_prev=page > 1
+            )
+
         return TeamMembersListResponse(
             account_id=invited_by,
-            members_count=len(members),
+            members_count=total_items,
             members=[self._member_to_response(member) for member in members],
+            pagination=pagination,
         )
 
     def update_member(self, invited_by: int, user_id: int, payload: MemberUpdateRequest, current_user_id: int) -> AccountMemberResponse:

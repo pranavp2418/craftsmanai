@@ -25,6 +25,9 @@ class DesignSharingService:
         design_variant_id: int,
         customer_id: Optional[int] = None,
         comment: Optional[str] = None,
+        require_approval: bool = False,
+        allow_feedback: bool = True,
+        allow_review_request: bool = True
     ) -> DesignShare:
         variant = self.variant_repo.get_by_id(design_variant_id)
         if not variant:
@@ -35,6 +38,9 @@ class DesignSharingService:
             customer_id=customer_id,
             public_token=self._token(),
             comment=comment,
+            require_approval=require_approval,
+            allow_feedback=allow_feedback,
+            allow_review_request=allow_review_request
         )
         self.activity_repo.log(
             design_id=variant.design_id,

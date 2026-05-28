@@ -47,10 +47,10 @@ async def create_retailer(
     
     new_retailer = User(
         email=retailer_in.email,
+        username=identifier,
         full_name=retailer_in.name,
         whatsapp_number=retailer_in.phone,
         hashed_password=get_password_hash(retailer_in.password),
-        retailer_identifier=identifier,
         is_superuser=False,
         is_active=is_active_val
     )

@@ -20,8 +20,11 @@ class DesignVariantService:
     def get_variant(self, variant_id: int) -> Optional[DesignVariant]:
         return self.variant_repo.get_by_id(variant_id)
 
-    def list_variants(self, design_id: int):
-        return self.variant_repo.list_for_design(design_id)
+    def list_variants(self, design_id: int, skip: Optional[int] = None, limit: Optional[int] = None):
+        return self.variant_repo.list_for_design(design_id, skip=skip, limit=limit)
+
+    def count_variants(self, design_id: int) -> int:
+        return self.variant_repo.count_for_design(design_id)
 
     def create_initial_variant(
         self,
