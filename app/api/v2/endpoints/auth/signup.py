@@ -35,9 +35,15 @@ async def signup(
     existing_user = user_repo.get_user_by_email(user_in.email)
     
     if existing_user:
-        # Always return generic message to prevent email enumeration
-        # This is idempotent behavior - same response whether new or existing user
+        if existing_user.is_verified:
+            logger.warning(f"Duplicate signup attempt for existing verified email: {user_in.email}")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already registered"
+            )
+        # User exists but is not verified - resend OTP for verification
         user = existing_user
+        logger.info(f"Resending OTP for unverified user: {user.email}")
     else:
         # Create new user
         user = user_repo.create_user(
@@ -49,20 +55,14 @@ async def signup(
         # Update WhatsApp number
         user_repo.update_user(user.id, whatsapp_number=user_in.whatsapp_number)
     
-    # Generate OTP for both new and existing users
+    # Generate OTP
     from app.services.auth import AuthService
     auth_service = AuthService(db)
     otp_code = auth_service.generate_and_save_otp(
         user.email, "email_verification", user.id
     )
     
-    # Log OTP for debugging (only in development)
-    import os
-    if os.environ.get("ENV") == "development" or os.environ.get("DEBUG") == "true":
-        print(f"🔐 DEBUG OTP for {user.email}: {otp_code}")
-    
-    logger.info(f"Generated OTP for user {user.email}: code={otp_code}")
-    logger.warning(f"OTP_DEBUG: User {user.email} received OTP: {otp_code}")  # More visible in logs
+    logger.info(f"OTP generated and sent to {user.email}")
     
     # Send OTP email (background task)
     from app.tasks.email_tasks import send_signup_otp_email
@@ -72,9 +72,9 @@ async def signup(
         user_name=user.full_name or user.email
     )
     
-    logger.info(f"User signup: {user.email} (ID: {user.id})")
+    logger.info(f"User signup/retry: {user.email} (ID: {user.id})")
     
     return SignUpResponse(
         success=True,
-        message="If this email is registered, you will receive a verification code."
+        message="A verification code has been sent to your email."
     )

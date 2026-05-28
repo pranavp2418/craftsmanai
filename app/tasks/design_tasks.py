@@ -152,3 +152,122 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
 
     finally:
         db.close()
+
+
+@create_task(name="refine_design_variant_image", max_retries=3)
+def refine_design_variant_image(
+    self,
+    design_id: int,
+    variant_id: int,
+    parent_variant_id: int,
+    prompt: str,
+    model_used: str,
+    style_tags: str = None,
+    design_focus: str = None,
+    channel: str = None,
+):
+    """Generate a refined variant image via AI in the background.
+
+    Takes the parent variant's image as reference, calls OpenAI to
+    generate a refined image, uploads it, and updates the variant record.
+
+    SSE events are published on the ``channel`` (e.g. ``variant:42``).
+    """
+    logger.info(
+        "Starting refine_design_variant_image for variant_id=%s (design_id=%s)",
+        variant_id, design_id,
+    )
+    db = SessionLocal()
+
+    try:
+        from app.models.design import DesignVariant
+        from app.services.design_variant_service import DesignVariantService
+
+        # Fetch parent variant to get the reference image
+        parent_variant = db.query(DesignVariant).filter(DesignVariant.id == parent_variant_id).first()
+        if not parent_variant or not parent_variant.base_design_image_url:
+            raise ValueError(
+                f"Parent variant {parent_variant_id} has no base_design_image_url"
+            )
+
+        reference_image_url = parent_variant.base_design_image_url
+
+        # Build a combined prompt incorporating style_tags and design_focus
+        combined_prompt = prompt or ""
+        if style_tags:
+            combined_prompt = f"{combined_prompt}\nStyle tags: {style_tags}"
+        if design_focus:
+            combined_prompt = f"{combined_prompt}\nFocus on: {design_focus}"
+
+        # Generate refined image via OpenAI
+        generated_item = openai_service.generate_base_image(reference_image_url, combined_prompt)
+        image_bytes, content_type = _extract_generated_image_data(generated_item)
+        _validate_image_bytes(image_bytes, content_type)
+
+        # Upload to Supabase
+        bucket_path = f"generated/refined/{design_id}/v{variant_id}"
+        generated_image_url = upload_image_to_supabase(image_bytes, bucket_path)
+
+        # Update the variant record with the generated image URL
+        variant_service = DesignVariantService(db)
+        variant = variant_service.get_variant(variant_id)
+        if not variant:
+            raise ValueError(f"Variant {variant_id} not found for image update")
+
+        # Update the variant's base_design_image_url
+        from app.repositories.design_variant import DesignVariantRepository
+        variant_repo = DesignVariantRepository(db)
+        variant_repo.update_variant(variant, base_design_image_url=generated_image_url)
+
+        _publish_sse(
+            channel,
+            data={
+                "design_id": design_id,
+                "variant_id": variant.id,
+                "parent_variant_id": parent_variant_id,
+                "variant_name": variant.variant_name,
+                "version_number": variant.version_number,
+                "status": "REFINED",
+                "base_image_url": generated_image_url,
+                "prompt_used": prompt,
+                "style_tags": style_tags,
+                "design_focus": design_focus,
+            },
+            event="design.refined",
+        )
+
+        # Close the SSE stream
+        try:
+            sse_manager.publish_close(channel)
+        except Exception:
+            logger.warning("Failed to publish SSE close signal for channel=%s", channel)
+
+        logger.info("refine_design_variant_image completed for variant_id=%s", variant_id)
+
+    except Exception as exc:
+        logger.exception(
+            "refine_design_variant_image failed for variant_id=%s: %s", variant_id, exc
+        )
+        try:
+            _publish_sse(
+                channel,
+                data={
+                    "design_id": design_id,
+                    "variant_id": variant_id,
+                    "status": "FAILED",
+                    "error": str(exc),
+                },
+                event="design.failed",
+            )
+            sse_manager.publish_close(channel)
+        except Exception:
+            logger.warning("Failed to publish SSE failure event for channel=%s", channel)
+
+        raise self.retry(
+            exc=exc,
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3,
+        )
+
+    finally:
+        db.close()

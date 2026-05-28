@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 
 
 class DesignVariantBase(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
     prompt_used: Optional[str] = None
     model_used: Optional[str] = None
     base_design_image_url: Optional[str] = None
@@ -60,6 +62,8 @@ class DesignVariantSelectRequest(BaseModel):
 
 
 class DesignVariantResponse(BaseModel):
+    model_config = {"protected_namespaces": (), "from_attributes": True}
+
     id: int
     design_id: int
     parent_variant_id: Optional[int]
@@ -72,9 +76,6 @@ class DesignVariantResponse(BaseModel):
     model_used: Optional[str]
     is_selected: bool
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class DesignVariantListResponse(BaseModel):
