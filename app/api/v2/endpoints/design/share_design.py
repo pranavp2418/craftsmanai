@@ -50,6 +50,9 @@ def share_design_variant(
         design_variant_id=variant.id,
         customer_id=payload.customer_id,
         comment=payload.comment,
+        require_approval=payload.require_approval,
+        allow_feedback=payload.allow_feedback,
+        allow_review_request=payload.allow_review_request
     )
 
     return share

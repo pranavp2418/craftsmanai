@@ -78,5 +78,15 @@ class DesignVariantResponse(BaseModel):
     created_at: datetime
 
 
+class PaginationMetadata(BaseModel):
+    page: int
+    limit: int
+    total_items: int
+    total_pages: int
+    has_next: bool
+    has_prev: bool
+
+
 class DesignVariantListResponse(BaseModel):
     items: List[DesignVariantResponse]
+    pagination: Optional[PaginationMetadata] = None
