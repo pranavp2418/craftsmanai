@@ -1,4 +1,8 @@
+import logging
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import Any
 
@@ -7,11 +11,28 @@ from app.core.rate_limiter import check_register_rate_limit
 from app.repositories.user import UserRepository
 from app.schemas.auth import SignupRequest, SignUpResponse
 from app.services.email_service import EmailService
-import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _generate_unique_username(user_repo: UserRepository, email: str) -> str:
+    base_username = re.sub(r"[^a-z0-9._-]", "", email.split("@")[0].lower()).strip("._-")
+    if not base_username:
+        base_username = "user"
+
+    max_length = 100
+    username = base_username[:max_length]
+    suffix = 1
+
+    while user_repo.username_exists(username):
+        suffix_str = str(suffix)
+        trimmed_base = base_username[: max_length - len(suffix_str)]
+        username = f"{trimmed_base}{suffix_str}"
+        suffix += 1
+
+    return username
 
 
 @router.post("/signup", response_model=SignUpResponse, status_code=201)
@@ -46,12 +67,33 @@ async def signup(
         logger.info(f"Resending OTP for unverified user: {user.email}")
     else:
         # Create new user
-        user = user_repo.create_user(
-            email=user_in.email,
-            username=user_in.email.split('@')[0],  # Use email prefix as username
-            full_name=None,
-            password=user_in.password
-        )
+        username = _generate_unique_username(user_repo, user_in.email)
+        try:
+            user = user_repo.create_user(
+                email=user_in.email,
+                username=username,
+                full_name=None,
+                password=user_in.password
+            )
+        except IntegrityError:
+            db.rollback()
+            logger.warning(
+                "Signup insert failed for email=%s username=%s due to unique constraint",
+                user_in.email,
+                username,
+            )
+
+            if user_repo.email_exists(user_in.email):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Email already registered"
+                )
+
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Username already taken"
+            )
+
         # Update WhatsApp number
         user_repo.update_user(user.id, whatsapp_number=user_in.whatsapp_number)
     

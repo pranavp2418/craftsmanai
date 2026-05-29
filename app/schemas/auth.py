@@ -76,6 +76,7 @@ class LoginResponse(BaseModel):
     is_verified: bool
     notification_message: Optional[str] = None
     profile_image_url: Optional[str] = None
+    full_name: Optional[str] = None
 
 
 class OTPRequest(BaseModel):

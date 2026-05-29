@@ -26,13 +26,13 @@ class GlobalRateLimitMiddleware(BaseHTTPMiddleware):
         
         try:
             # Check rate limit
-            rate_limiter.check_rate_limit(key, self.rate_limit)
+            rate_limiter.check_rate_limit(key, rate_limit_str=self.rate_limit)
             
             # Process request
             response = await call_next(request)
             
             # Add rate limit headers
-            headers = rate_limiter.get_rate_limit_headers(key, self.rate_limit)
+            headers = rate_limiter.get_rate_limit_headers(key, rate_limit_str=self.rate_limit)
             for header_key, header_value in headers.items():
                 response.headers[header_key] = header_value
             
@@ -65,13 +65,13 @@ class IPBasedRateLimitMiddleware(BaseHTTPMiddleware):
         
         try:
             # Check rate limit
-            rate_limiter.check_rate_limit(key, self.rate_limit)
+            rate_limiter.check_rate_limit(key, rate_limit_str=self.rate_limit)
             
             # Process request
             response = await call_next(request)
             
             # Add rate limit headers
-            headers = rate_limiter.get_rate_limit_headers(key, self.rate_limit)
+            headers = rate_limiter.get_rate_limit_headers(key, rate_limit_str=self.rate_limit)
             for header_key, header_value in headers.items():
                 response.headers[header_key] = header_value
             

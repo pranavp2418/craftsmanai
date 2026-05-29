@@ -132,5 +132,8 @@ async def login(
         is_superuser=user.is_superuser,
         is_verified=user.is_verified,
         notification_message="Welcome back!",
-        profile_image_url=None
+        profile_image_url=None,
+        full_name=user.full_name if user.full_name else None
+
+
     )
