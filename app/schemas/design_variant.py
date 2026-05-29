@@ -88,6 +88,27 @@ class PaginationMetadata(BaseModel):
     has_prev: bool
 
 
+class ArchivedDesignVariantResponse(BaseModel):
+    model_config = {"protected_namespaces": (), "from_attributes": True}
+
+    id: int
+    design_id: int
+    parent_variant_id: Optional[int]
+    variant_name: str
+    version_number: int
+    base_design_image_url: Optional[str]
+
+
+class ArchivedDesignVariantListResponse(BaseModel):
+    items: List[ArchivedDesignVariantResponse]
+    pagination: Optional[PaginationMetadata] = None
+
+
+class VariantRestoreResponse(BaseModel):
+    id: int
+    message: str
+
+
 class DesignVariantListResponse(BaseModel):
     items: List[DesignVariantResponse]
     pagination: Optional[PaginationMetadata] = None

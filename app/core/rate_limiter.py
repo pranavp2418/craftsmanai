@@ -33,28 +33,28 @@ def get_redis_client():
 
 redis_client = None  # Will be loaded lazily
 
-# Create limiter
-class MockLimiter:
+class DummyLimiter:
     def limit(self, *args, **kwargs):
         def decorator(func):
             return func
         return decorator
+    def exempt(self, func):
+        return func
 
-    def exempt(self, obj):
-        return obj
-
+# Create limiter only if not in test mode
 try:
-    if os.environ.get("TESTING") == "true" or settings.ENV in {"test", "development"}:
-        limiter = MockLimiter()
-    else:
+    if os.environ.get("TESTING") != "true" and settings.ENV != "test":
         limiter = Limiter(
             key_func=get_remote_address,
             storage_uri=settings.CELERY_BROKER_URL,
             default_limits=[settings.RATE_LIMIT_GLOBAL]
         )
+    else:
+        limiter = DummyLimiter()
 except Exception as e:
     logger.warning(f"Failed to create Limiter: {e}")
-    limiter = MockLimiter()
+    limiter = DummyLimiter()
+
 
 
 class RateLimiter:
@@ -177,7 +177,10 @@ class RateLimiter:
         if os.environ.get("TESTING") == "true" or os.environ.get("ENV") == "development" or settings.ENV in {"development", "test"}:
             return  # Skip rate limiting in tests
         
-        limit, window = self.parse_rate_limit(kwargs.get("rate_limit_str", "5/minute"))
+        rate_limit_str = kwargs.get("rate_limit_str")
+        if rate_limit_str is None and len(args) > 1:
+            rate_limit_str = args[1]
+        limit, window = self.parse_rate_limit(rate_limit_str or "5/minute")
         allowed, info = self.is_allowed(args[0], limit, window)
         
         if not allowed:
@@ -200,7 +203,10 @@ class RateLimiter:
         if os.environ.get("TESTING") == "true" or os.environ.get("ENV") == "development" or settings.ENV in {"development", "test"}:
             return False  # Never rate limited in tests
         
-        limit, window = self.parse_rate_limit(kwargs.get("rate_limit_str", "5/minute"))
+        rate_limit_str = kwargs.get("rate_limit_str")
+        if rate_limit_str is None and len(args) > 1:
+            rate_limit_str = args[1]
+        limit, window = self.parse_rate_limit(rate_limit_str or "5/minute")
         allowed, info = self.is_allowed(args[0], limit, window)
         
         return not allowed
