@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_db, get_current_superuser as get_current_admin
+from app.core.dependencies import get_db, get_current_superuser as get_current_admin,get_current_user
 from app.models.user import User
 from app.schemas.design import DesignListResponse
 from app.schemas.design_variant import PaginationMetadata
@@ -16,7 +16,7 @@ def list_archived_designs(
 	page: int = Query(1, ge=1),
 	limit: int = Query(50, ge=1, le=100),
 	db: Session = Depends(get_db),
-	current_admin: User = Depends(get_current_admin),
+	current_admin: User = Depends(get_current_user),
 ):
 	service = DesignService(db)
 

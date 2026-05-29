@@ -46,6 +46,11 @@ class DesignResponse(BaseModel):
         from_attributes = True
 
 
+class DesignRestoreResponse(BaseModel):
+    id: int
+    message: str
+
+
 class DesignListResponse(BaseModel):
     items: List[DesignResponse]
     total: int
