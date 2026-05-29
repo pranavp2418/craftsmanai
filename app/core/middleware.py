@@ -100,10 +100,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         
-        # Add CORS headers if not already present
-        if "Access-Control-Allow-Origin" not in response.headers:
-            # This will be handled by CORS middleware, but add fallback
-            response.headers["Access-Control-Allow-Origin"] = "*"
+        # # Add CORS headers if not already present
+        # if "Access-Control-Allow-Origin" not in response.headers:
+        #     # This will be handled by CORS middleware, but add fallback
+        #     response.headers["Access-Control-Allow-Origin"] = "*"
         
         return response
 
