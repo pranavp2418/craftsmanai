@@ -305,6 +305,38 @@ class TestCustomerEndpoints:
         finally:
             cleanup_user_by_email(email)
 
+    def test_update_customer_with_flat_email_payload(self, client: TestClient):
+        """Test updating a customer with a single flat email field"""
+        email = "customer_update_flat_email@example.com"
+        try:
+            user = create_committed_user(email=email, username="custupdateflat", full_name="Retailer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            create_payload = {
+                "full_name": "Initial Name",
+                "emails": [{"label": "Work", "email": "initial@vip.com"}],
+                "phone_number": "+1000",
+                "location": "Initial Loc",
+                "status": "Active",
+            }
+            res_create = client.post("/api/v2/customer/", json=create_payload, headers=headers)
+            assert res_create.status_code == 201
+            customer_id = res_create.json()["id"]
+
+            update_payload = {
+                "email": "UPDATES@VIP.COM",
+                "status": "Active",
+            }
+            res_update = client.put(f"/api/v2/customer/{customer_id}", json=update_payload, headers=headers)
+            assert res_update.status_code == 200
+
+            data = res_update.json()
+            assert len(data["emails"]) == 1
+            assert data["emails"][0]["email"] == "updates@vip.com"
+        finally:
+            cleanup_user_by_email(email)
+
     def test_list_customers_success(self, client: TestClient):
         """Test listing multiple customers under the user's account with true count, search, and page fields"""
         email = "customer_list@example.com"

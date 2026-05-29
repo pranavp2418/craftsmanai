@@ -4,7 +4,49 @@ import json
 from enum import Enum
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
+
+from app.schemas.validations import NormalizedEmailStr
+
+
+def _coerce_customer_emails(data: any) -> any:
+    if not isinstance(data, dict):
+        return data
+
+    email_value = data.get("emails")
+    if email_value is None and "email" in data:
+        email_value = data.get("email")
+
+    if email_value is None:
+        return data
+
+    if isinstance(email_value, str):
+        email_text = email_value.strip()
+        if not email_text:
+            data["emails"] = None
+            return data
+
+        try:
+            parsed = json.loads(email_text)
+        except Exception:
+            parsed = email_text
+    else:
+        parsed = email_value
+
+    if isinstance(parsed, list):
+        normalized_emails = []
+        for value in parsed:
+            if isinstance(value, dict):
+                normalized_emails.append(value)
+            elif value is not None and str(value).strip():
+                normalized_emails.append({"label": "Work", "email": value})
+        data["emails"] = normalized_emails
+    elif isinstance(parsed, dict):
+        data["emails"] = [parsed]
+    elif parsed is not None:
+        data["emails"] = [{"label": "Work", "email": parsed}]
+
+    return data
 
 
 class CustomerTag(str, Enum):
@@ -16,7 +58,7 @@ class CustomerTag(str, Enum):
 
 class EmailAddressSchema(BaseModel):
     label: str = Field(default="Work")
-    email: EmailStr
+    email: NormalizedEmailStr
 
 
 class CustomerCreateRequest(BaseModel):
@@ -27,6 +69,11 @@ class CustomerCreateRequest(BaseModel):
     location: Optional[str] = None
     status: Optional[str] = Field(default="Active")  # "Active" or "Inactive"
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_email_payload(cls, data: any) -> any:
+        return _coerce_customer_emails(data)
+
 
 class CustomerUpdateRequest(BaseModel):
     full_name: Optional[str] = None
@@ -35,6 +82,11 @@ class CustomerUpdateRequest(BaseModel):
     phone_number: Optional[str] = None
     location: Optional[str] = None
     status: Optional[str] = None  # "Active" or "Inactive"
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_email_payload(cls, data: any) -> any:
+        return _coerce_customer_emails(data)
 
 
 class CustomerResponse(BaseModel):

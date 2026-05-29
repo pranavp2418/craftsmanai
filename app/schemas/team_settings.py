@@ -3,7 +3,9 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
+
+from app.schemas.validations import NormalizedEmailStr
 
 
 class TeamRoleEnum(str, Enum):
@@ -13,7 +15,7 @@ class TeamRoleEnum(str, Enum):
 
 
 class MemberInvitationCreate(BaseModel):
-    email: EmailStr
+    email: NormalizedEmailStr
     role: TeamRoleEnum = TeamRoleEnum.designer
     full_name: Optional[str] = Field(None, max_length=255)
     password: Optional[str] = Field(None, min_length=8, max_length=255, description="Optional password for new users. If not provided, a default password will be generated.")
