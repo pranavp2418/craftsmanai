@@ -79,6 +79,15 @@ class DesignVariantResponse(BaseModel):
     created_at: datetime
 
 
+class PaginationMetadata(BaseModel):
+    page: int
+    limit: int
+    total_items: int
+    total_pages: int
+    has_next: bool
+    has_prev: bool
+
+
 class ArchivedDesignVariantResponse(BaseModel):
     model_config = {"protected_namespaces": (), "from_attributes": True}
 
@@ -98,15 +107,6 @@ class ArchivedDesignVariantListResponse(BaseModel):
 class VariantRestoreResponse(BaseModel):
     id: int
     message: str
-
-
-class PaginationMetadata(BaseModel):
-    page: int
-    limit: int
-    total_items: int
-    total_pages: int
-    has_next: bool
-    has_prev: bool
 
 
 class DesignVariantListResponse(BaseModel):
