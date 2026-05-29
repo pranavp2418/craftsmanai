@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     # CORS
-    BACKEND_CORS_ORIGINS=  List[AnyHttpUrl] = []
+    BACKEND_CORS_ORIGINS: List[str] = ["https://craftmenai.txogavideo.in", "http://localhost:3000"]
 
     # Socket.IO
     SOCKETIO_PATH: str = "/socket.io"
