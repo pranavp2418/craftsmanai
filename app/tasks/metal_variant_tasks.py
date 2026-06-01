@@ -16,6 +16,7 @@ from typing import Any
 import requests
 
 from app.core.database import SessionLocal
+from app.models.design import Design
 from app.models.design import DesignVariant
 from app.repositories.design_variant import DesignVariantRepository
 from app.repositories.activity_log import DesignActivityLogRepository
@@ -91,6 +92,10 @@ def generate_metal_variant_images(
         if not base_image_url:
             raise ValueError(f"Variant {variant_id} has no base image URL")
 
+        # Look up jewellery_type from the associated Design
+        design = db.query(Design).filter(Design.id == variant.design_id).first()
+        jewellery_type = design.jewellery_type if design else ""
+
         # Preserve existing metal variations that were not requested
         existing_metal_variations = variant.metal_variations_json or {}
         metal_variations: dict[str, str] = {}
@@ -136,6 +141,7 @@ def generate_metal_variant_images(
                 generated_item = openai_service.generate_side_view(
                     base_image_source=base_image_url,
                     angle_description=prompt,
+                    jewellery_type=jewellery_type,
                 )
                 image_bytes, content_type = _extract_image_data(generated_item)
                 _validate_image_bytes(image_bytes, content_type)

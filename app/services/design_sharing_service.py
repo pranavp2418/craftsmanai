@@ -38,9 +38,7 @@ class DesignSharingService:
             customer_id=customer_id,
             public_token=self._token(),
             comment=comment,
-            require_approval=require_approval,
-            allow_feedback=allow_feedback,
-            allow_review_request=allow_review_request
+            
         )
         self.activity_repo.log(
             design_id=variant.design_id,

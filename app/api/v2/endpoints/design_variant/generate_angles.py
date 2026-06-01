@@ -1,8 +1,10 @@
+import time
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_active_user
+from app.core.sse_manager import sse_manager
 from app.models.user import User
 from app.schemas.design_variant import DesignVariantAngleGenerationRequest
 from app.services.design_service import DesignService
@@ -74,17 +76,35 @@ def generate_variant_angles(
 
     missing_metals = [m for m in payload.metals if m not in already_existing]
 
+    channel = f"variant_angles:{variant_id}"
+
     if not missing_metals:
+        # Data already exists — publish via SSE after a short delay so the
+        # frontend has time to subscribe to the channel, then return.
+        time.sleep(2)
+        sse_manager.publish(
+            channel,
+            data={
+                "variant_id": variant.id,
+                "design_id": variant.design_id,
+                "status": "GENERATED",
+                "message": "All requested metals already have angles. Returning existing data.",
+                "angles": existing_angles,
+                "from_cache": True,
+            },
+            event="variant.angles.generated",
+        )
+        sse_manager.publish_close(channel)
         return {
             "success": True,
-            "message": "All requested metals already have angles generated. No generation needed.",
+            "message": "All requested metals already have angles generated. Returning existing data via SSE.",
             "variant_id": variant.id,
             "metals": payload.metals,
             "already_existing": already_existing,
             "skipped": True,
+            "sse_channel": channel,
         }
 
-    channel = f"variant_angles:{variant_id}"
     generate_remaining_variant_angles.delay(
         variant_id=variant.id,
         metals=missing_metals,

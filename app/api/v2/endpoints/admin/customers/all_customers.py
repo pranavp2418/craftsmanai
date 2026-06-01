@@ -12,6 +12,37 @@ import json
 router = APIRouter()
 
 
+def parse_customer_emails(raw_emails):
+    """Parse customer emails stored as JSON, raw string, or malformed legacy data."""
+    if not raw_emails:
+        return []
+
+    if isinstance(raw_emails, list):
+        parsed = raw_emails
+    else:
+        try:
+            parsed = json.loads(raw_emails)
+        except Exception:
+            return [{"label": "Work", "email": str(raw_emails)}]
+
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+
+    if not isinstance(parsed, list):
+        return [{"label": "Work", "email": str(raw_emails)}]
+
+    emails = []
+    for item in parsed:
+        if isinstance(item, dict):
+            emails.append({
+                "label": item.get("label") or "Work",
+                "email": item.get("email") or "",
+            })
+        elif item:
+            emails.append({"label": "Work", "email": str(item)})
+    return emails
+
+
 @router.get("/", response_model=Dict[str, Any])
 async def get_customers(
     db: AsyncSession = Depends(deps.get_db),
@@ -158,13 +189,7 @@ async def get_customers(
         customers.append({
             "id":           str(customer.id),
             "name":         customer.full_name,
-            "emails": [
-                {
-                    "label": item.get("label"),
-                    "email": item.get("email"),
-                }
-                for item in json.loads(customer.emails or "[]")
-            ],
+            "emails": parse_customer_emails(customer.emails),
             "phone":        customer.phone_number,
             "location":     customer.location,
             "status":       "ACTIVE" if customer.is_active else "INACTIVE",
