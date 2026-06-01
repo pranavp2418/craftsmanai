@@ -64,17 +64,26 @@ def manufacturer_access_shared_variant(
     filtered_angles = variant.angles_json
 
     if shared_metal:
-        # Only return the shared metal's variation
-        if isinstance(filtered_metal_variations, dict):
-            filtered_metal_variations = {
-                shared_metal: filtered_metal_variations.get(shared_metal)
-            }
+        # Normalize to lowercase for consistent lookup
+        shared_metal_lower = shared_metal.lower()
 
-        # Only return angles for the shared metal
+        # Only return the shared metal's variation (case-insensitive lookup)
+        if isinstance(filtered_metal_variations, dict):
+            metal_value = None
+            for key in filtered_metal_variations:
+                if key.lower() == shared_metal_lower:
+                    metal_value = filtered_metal_variations[key]
+                    break
+            filtered_metal_variations = {shared_metal_lower: metal_value}
+
+        # Only return angles for the shared metal (case-insensitive lookup)
         if isinstance(filtered_angles, dict):
-            filtered_angles = {
-                shared_metal: filtered_angles.get(shared_metal)
-            }
+            angles_value = None
+            for key in filtered_angles:
+                if key.lower() == shared_metal_lower:
+                    angles_value = filtered_angles[key]
+                    break
+            filtered_angles = {shared_metal_lower: angles_value}
 
     variant_responses = [
         PublicDesignVariantResponse(

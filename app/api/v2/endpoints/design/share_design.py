@@ -46,11 +46,14 @@ def share_design_variant(
     if not design:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
 
+    # Normalize metal to lowercase for consistent lookup
+    metal = payload.metal.lower() if payload.metal else None
+
     share = sharing_service.create_share(
         design_variant_id=variant.id,
         customer_id=payload.customer_id,
         comment=payload.comment,
-        shared_metal=payload.metal,
+        shared_metal=metal,
     )
 
     return share
