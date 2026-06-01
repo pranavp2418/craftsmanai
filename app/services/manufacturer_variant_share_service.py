@@ -50,6 +50,9 @@ class DesignVariantManufacturerShareService:
     def get_by_token(self, token: str) -> Optional[DesignVariantManufacturerShare]:
         return self.share_repo.get_by_token(token)
 
+    def list_for_variant(self, design_variant_id: int) -> list[DesignVariantManufacturerShare]:
+        return self.share_repo.list_for_variant(design_variant_id)
+
     def submit_quote(
         self,
         share: DesignVariantManufacturerShare,

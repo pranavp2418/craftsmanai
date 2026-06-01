@@ -5,6 +5,9 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from app.models.design import DesignStatus
+from app.schemas.manufacturer import ManufacturerResponse
+
 
 class ManufacturerVariantShareRequest(BaseModel):
     """Request to share a design variant with a manufacturer for quoting."""
@@ -25,6 +28,37 @@ class ManufacturerVariantShareResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ManufacturerVariantShareDetailResponse(BaseModel):
+    id: int
+    design_variant_id: int
+    manufacturer_id: int
+    manufacturer: Optional[ManufacturerResponse] = None
+    shared_date: datetime
+    quoted_price: Optional[float] = None
+    estimated_delivery_days: Optional[int] = None
+    estimated_delivery_date: Optional[datetime] = None
+    manufacturer_notes: Optional[str] = None
+    status: str
+    public_token: str
+
+    class Config:
+        from_attributes = True
+
+
+class VariantManufacturerSharesResponse(BaseModel):
+    variant_id: int
+    variant_name: str
+    version_number: int
+    design_id: int
+    design_code: str
+    design_name: str
+    design_variant_status: DesignStatus
+    design_status: DesignStatus
+    total_shares: int
+    shares: list[ManufacturerVariantShareDetailResponse]
+    share_details: list[ManufacturerVariantShareDetailResponse] = Field(default_factory=list)
 
 
 class ManufacturerQuoteSubmitRequest(BaseModel):
