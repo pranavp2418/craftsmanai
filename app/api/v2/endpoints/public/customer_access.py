@@ -79,7 +79,5 @@ def customer_access_design(
         share_status=share.status,
         share_comment=share.comment,
         public_token=share.public_token,
-        require_approval=share.require_approval,
-        allow_feedback=share.allow_feedback,    
-        allow_review_request=share.allow_review_request
+       
     )

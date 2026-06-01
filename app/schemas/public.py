@@ -45,9 +45,7 @@ class PublicDesignFullResponse(BaseModel):
     share_status: Optional[DesignShareStatus] = None
     share_comment: Optional[str] = None
     public_token: str
-    require_approval: bool
-    allow_feedback: bool
-    allow_review_request: bool
+    
 
 
 class PublicStatusUpdateRequest(BaseModel):

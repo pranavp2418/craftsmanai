@@ -107,9 +107,7 @@ class DesignShare(Base):
     public_token = Column(String(64), unique=True, nullable=False, index=True)
     status = Column(SqlEnum(DesignShareStatus, native_enum=False, length=32), nullable=False, default=DesignShareStatus.PENDING)
     comment = Column(Text, nullable=True)
-    allow_feedback = Column(Boolean, default=True, nullable=False)
-    allow_review_request = Column(Boolean, default=True, nullable=False)        
-    require_approval = Column(Boolean, default=False, nullable=False)
+    
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

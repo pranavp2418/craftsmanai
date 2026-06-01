@@ -18,9 +18,7 @@ class DesignShareRepository:
         customer_id: Optional[int] = None,
         status: DesignShareStatus = DesignShareStatus.PENDING,
         comment: Optional[str] = None,
-        require_approval: bool = False,
-        allow_feedback: bool = True,    
-        allow_review_request: bool = True
+        
     ) -> DesignShare:
         share = DesignShare(
             design_variant_id=design_variant_id,
@@ -28,9 +26,7 @@ class DesignShareRepository:
             public_token=public_token,
             status=status,
             comment=comment,
-            require_approval=require_approval,
-            allow_feedback=allow_feedback,
-            allow_review_request=allow_review_request
+          
         )
         self.db.add(share)
         self.db.commit()
