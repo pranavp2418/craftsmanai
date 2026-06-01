@@ -12,6 +12,8 @@ CELERY_ROUTES = {
     'app.tasks.email_tasks.send_signup_otp_email': {'queue': 'email'},
     'app.tasks.email_tasks.send_password_reset_email': {'queue': 'email'},
     'app.tasks.email_tasks.send_welcome_email': {'queue': 'email'},
+    'app.tasks.email_tasks.send_customer_share_email': {'queue': 'email'},
+    'app.tasks.email_tasks.send_manufacturer_share_email': {'queue': 'email'},
     
     # Cleanup tasks go to cleanup queue
     'app.tasks.cleanup_tasks.cleanup_expired_otps': {'queue': 'cleanup'},

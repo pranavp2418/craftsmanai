@@ -309,6 +309,112 @@ class EmailService:
             raise e
     
     @staticmethod
+    async def send_customer_share(to_email: str, customer_name: str, preview_url: str, designer_name: str):
+        """Send an email to a customer with a link to review a shared design."""
+        from app.models.email_log import EmailStatus
+        log_id = EmailService._create_email_log(
+            to_email=to_email,
+            template_name="customer_share",
+            subject=f"{designer_name} shared a design with you - Craftmen",
+            variables={"customer_name": customer_name, "preview_url": preview_url, "designer_name": designer_name}
+        )
+        try:
+            logger.info(f"SENDING CUSTOMER SHARE EMAIL: To={to_email}, URL={preview_url}")
+            
+            import smtplib
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.text import MIMEText
+            import asyncio
+            
+            subject = f"{designer_name} shared a design with you - Craftmen"
+            
+            text_body = f"Hi {customer_name},\n\n{designer_name} has shared a design with you.\n\nReview it here: {preview_url}\n\nBest regards,\nThe Craftmen Team"
+            html_content = f"<p>Hi {customer_name},</p><p>{designer_name} has shared a design with you.</p><p><a href='{preview_url}'>Click here to review the design</a></p><p>Best regards,<br>The Craftmen Team</p>"
+            
+            def sync_send():
+                msg = MIMEMultipart('alternative')
+                msg['Subject'] = subject
+                msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
+                msg['To'] = to_email
+                
+                msg.attach(MIMEText(text_body, 'plain'))
+                msg.attach(MIMEText(html_content, 'html'))
+                
+                with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+                    server.starttls()
+                    server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                    server.sendmail(settings.SMTP_USER, [to_email], msg.as_string())
+            
+            await asyncio.to_thread(sync_send)
+            logger.info(f"Successfully sent customer share email to {to_email}")
+            EmailService._update_email_log_status(
+                log_id=log_id,
+                status=EmailStatus.SENT,
+                smtp_response="Message sent successfully via SMTP"
+            )
+        except Exception as e:
+            logger.error(f"Failed to send customer share email to {to_email}: {str(e)}")
+            EmailService._update_email_log_status(
+                log_id=log_id,
+                status=EmailStatus.FAILED,
+                error_message=str(e)
+            )
+            raise e
+
+    @staticmethod
+    async def send_manufacturer_share(to_email: str, manufacturer_name: str, preview_url: str, designer_name: str):
+        """Send an email to a manufacturer with a link to review a shared design for quote."""
+        from app.models.email_log import EmailStatus
+        log_id = EmailService._create_email_log(
+            to_email=to_email,
+            template_name="manufacturer_share",
+            subject=f"Quote Request from {designer_name} - Craftmen",
+            variables={"manufacturer_name": manufacturer_name, "preview_url": preview_url, "designer_name": designer_name}
+        )
+        try:
+            logger.info(f"SENDING MANUFACTURER SHARE EMAIL: To={to_email}, URL={preview_url}")
+            
+            import smtplib
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.text import MIMEText
+            import asyncio
+            
+            subject = f"Quote Request from {designer_name} - Craftmen"
+            
+            text_body = f"Hi {manufacturer_name},\n\n{designer_name} has shared a design variant and requested a quote.\n\nReview it here: {preview_url}\n\nBest regards,\nThe Craftmen Team"
+            html_content = f"<p>Hi {manufacturer_name},</p><p>{designer_name} has shared a design variant and requested a quote.</p><p><a href='{preview_url}'>Click here to review the design and submit your quote</a></p><p>Best regards,<br>The Craftmen Team</p>"
+            
+            def sync_send():
+                msg = MIMEMultipart('alternative')
+                msg['Subject'] = subject
+                msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
+                msg['To'] = to_email
+                
+                msg.attach(MIMEText(text_body, 'plain'))
+                msg.attach(MIMEText(html_content, 'html'))
+                
+                with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+                    server.starttls()
+                    server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                    server.sendmail(settings.SMTP_USER, [to_email], msg.as_string())
+            
+            await asyncio.to_thread(sync_send)
+            logger.info(f"Successfully sent manufacturer share email to {to_email}")
+            EmailService._update_email_log_status(
+                log_id=log_id,
+                status=EmailStatus.SENT,
+                smtp_response="Message sent successfully via SMTP"
+            )
+        except Exception as e:
+            logger.error(f"Failed to send manufacturer share email to {to_email}: {str(e)}")
+            EmailService._update_email_log_status(
+                log_id=log_id,
+                status=EmailStatus.FAILED,
+                error_message=str(e)
+            )
+            raise e
+
+    @staticmethod
     async def send_welcome_email(to: str, user_name: str):
         """Send welcome email after successful verification"""
         from app.models.email_log import EmailStatus

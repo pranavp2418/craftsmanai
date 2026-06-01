@@ -70,4 +70,21 @@ def share_variant_with_manufacturer(
         shared_metal=shared_metal,
     )
 
+    # Queue an email to the manufacturer with the preview link
+    # We will get the manufacturer's email from the payload or from DB
+    from app.repositories.manufacturer import ManufacturerRepository
+    from app.tasks.email_tasks import send_manufacturer_share_email
+    from app.core.config import settings
+
+    manufacturer_repo = ManufacturerRepository(db)
+    manufacturer = manufacturer_repo.get_by_id(payload.manufacturer_id)
+    if manufacturer and manufacturer.email:
+        preview_url = f"{settings.FRONTEND_URL}/manufacturer/review/{share.public_token}"
+        send_manufacturer_share_email.delay(
+            to_email=manufacturer.email,
+            manufacturer_name=manufacturer.name,
+            preview_url=preview_url,
+            designer_name=current_user.full_name or current_user.username
+        )
+
     return share

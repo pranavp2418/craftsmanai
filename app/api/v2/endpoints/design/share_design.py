@@ -56,6 +56,38 @@ def share_design_variant(
         shared_metal=metal,
     )
 
+    # Queue email to customer if customer exists and has email
+    if payload.customer_id:
+        from app.repositories.customer import CustomerRepository
+        from app.tasks.email_tasks import send_customer_share_email
+        from app.core.config import settings
+
+        customer_repo = CustomerRepository(db)
+        customer = customer_repo.get_by_id(payload.customer_id)
+        
+        if customer and hasattr(customer, 'emails') and customer.emails:
+            import json
+            try:
+                emails_data = json.loads(customer.emails)
+                if isinstance(emails_data, list) and len(emails_data) > 0:
+                    primary_email = emails_data[0].get("email") if isinstance(emails_data[0], dict) else emails_data[0]
+                elif isinstance(emails_data, dict):
+                    primary_email = emails_data.get("email")
+                else:
+                    primary_email = str(emails_data)
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                # Fallback if it's stored differently
+                primary_email = str(customer.emails).split(',')[0].strip()
+            
+            if primary_email:
+                preview_url = f"{settings.FRONTEND_URL}/review/{share.public_token}"
+                send_customer_share_email.delay(
+                    to_email=primary_email,
+                    customer_name=customer.full_name or "Customer",
+                    preview_url=preview_url,
+                    designer_name=current_user.full_name or current_user.username
+                )
+
     return share
 
 

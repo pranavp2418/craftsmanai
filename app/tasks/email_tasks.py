@@ -117,6 +117,58 @@ def send_welcome_email(self, to: str, user_name: str):
         )
 
 
+@create_task(name="send_customer_share_email", max_retries=3)
+def send_customer_share_email(self, to_email: str, customer_name: str, preview_url: str, designer_name: str):
+    """
+    Send an email to a customer with a link to review a shared design.
+    """
+    task_name = "send_customer_share_email"
+    try:
+        logger.info(f"📧 Starting {task_name} for {to_email}")
+        
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            EmailService.send_customer_share(to_email, customer_name, preview_url, designer_name)
+        )
+        
+        logger.info(f"✅ {task_name} completed successfully for {to_email}")
+        return True
+    except Exception as exc:
+        logger.error(f"❌ {task_name} failed for {to_email}: {str(exc)}")
+        raise self.retry(
+            exc=exc, 
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3
+        )
+
+
+@create_task(name="send_manufacturer_share_email", max_retries=3)
+def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, preview_url: str, designer_name: str):
+    """
+    Send an email to a manufacturer with a link to review a shared design.
+    """
+    task_name = "send_manufacturer_share_email"
+    try:
+        logger.info(f"📧 Starting {task_name} for {to_email}")
+        
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            EmailService.send_manufacturer_share(to_email, manufacturer_name, preview_url, designer_name)
+        )
+        
+        logger.info(f"✅ {task_name} completed successfully for {to_email}")
+        return True
+    except Exception as exc:
+        logger.error(f"❌ {task_name} failed for {to_email}: {str(exc)}")
+        raise self.retry(
+            exc=exc, 
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3
+        )
+
+
 @create_task(name="send_team_invitation_email", max_retries=3)
 def send_team_invitation_email(self, to_email: str, team_name: str, variables: dict):
     """

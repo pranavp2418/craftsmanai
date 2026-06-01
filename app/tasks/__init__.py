@@ -7,7 +7,9 @@ Import tasks from here to ensure they're registered with Celery
 from .email_tasks import (
     send_signup_otp_email,
     send_password_reset_email, 
-    send_welcome_email
+    send_welcome_email,
+    send_customer_share_email,
+    send_manufacturer_share_email
 )
 
 # Cleanup tasks
@@ -42,6 +44,8 @@ __all__ = [
     "send_signup_otp_email",
     "send_password_reset_email", 
     "send_welcome_email",
+    "send_customer_share_email",
+    "send_manufacturer_share_email",
     
     # Cleanup tasks
     "cleanup_expired_otps",
