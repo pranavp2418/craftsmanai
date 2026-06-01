@@ -7,7 +7,11 @@ from pydantic import BaseModel, Field
 
 
 class ManufacturerVariantShareRequest(BaseModel):
-    """Request to share a design variant with a manufacturer for quoting."""
+    """Request to share a design variant with a manufacturer for quoting.
+
+    Note: The variant must be shared with a customer first. The manufacturer
+    will automatically see the same metal that was shared with the customer.
+    """
 
     manufacturer_id: int = Field(..., ge=1, description="ID of the manufacturer to share with")
 
@@ -21,6 +25,7 @@ class ManufacturerVariantShareResponse(BaseModel):
     cost_price: Optional[float] = None
     delivery_time_days: Optional[int] = None
     notes: Optional[str] = None
+    shared_metal: Optional[str] = None
     created_at: datetime
 
     class Config:

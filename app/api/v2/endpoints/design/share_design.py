@@ -50,7 +50,7 @@ def share_design_variant(
         design_variant_id=variant.id,
         customer_id=payload.customer_id,
         comment=payload.comment,
-       
+        shared_metal=payload.metal,
     )
 
     return share

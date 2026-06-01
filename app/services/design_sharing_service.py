@@ -25,6 +25,7 @@ class DesignSharingService:
         design_variant_id: int,
         customer_id: Optional[int] = None,
         comment: Optional[str] = None,
+        shared_metal: Optional[str] = None,
         require_approval: bool = False,
         allow_feedback: bool = True,
         allow_review_request: bool = True
@@ -38,13 +39,14 @@ class DesignSharingService:
             customer_id=customer_id,
             public_token=self._token(),
             comment=comment,
-            
+            shared_metal=shared_metal,
         )
         self.activity_repo.log(
             design_id=variant.design_id,
             action_type="DESIGN_SHARED",
-            message="Design shared with external stakeholder",
-            metadata={"share_id": share.id, "variant_id": design_variant_id, "customer_id": customer_id},
+            message=f"Design shared with external stakeholder"
+                    f"{f' (metal: {shared_metal})' if shared_metal else ''}",
+            metadata={"share_id": share.id, "variant_id": design_variant_id, "customer_id": customer_id, "shared_metal": shared_metal},
         )
         return share
 

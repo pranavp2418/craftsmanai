@@ -107,6 +107,12 @@ class DesignShare(Base):
     public_token = Column(String(64), unique=True, nullable=False, index=True)
     status = Column(SqlEnum(DesignShareStatus, native_enum=False, length=32), nullable=False, default=DesignShareStatus.PENDING)
     comment = Column(Text, nullable=True)
+    # The specific metal shared with the customer (e.g. "gold", "rose_gold", "silver")
+    # When set, further manufacturer shares of this variant will use the same metal.
+    shared_metal = Column(String(50), nullable=True, index=True)
+    allow_feedback = Column(Boolean, nullable=False, default=True)
+    allow_review_request = Column(Boolean, nullable=False, default=True)
+    require_approval = Column(Boolean, nullable=False, default=False)
     
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -136,6 +142,9 @@ class DesignVariantManufacturerShare(Base):
     cost_price = Column(Float, nullable=True)
     delivery_time_days = Column(Integer, nullable=True)
     notes = Column(Text, nullable=True)
+    # The specific metal shared with the manufacturer (e.g. "gold", "rose_gold", "silver")
+    # When set, the manufacturer view will only show images for this metal.
+    shared_metal = Column(String(50), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     design_variant = relationship("DesignVariant", back_populates="manufacturer_shares")

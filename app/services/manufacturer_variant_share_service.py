@@ -24,8 +24,17 @@ class DesignVariantManufacturerShareService:
         *,
         design_variant_id: int,
         manufacturer_id: int,
+        shared_metal: Optional[str] = None,
     ) -> DesignVariantManufacturerShare:
-        """Create a manufacturer share link for a design variant."""
+        """Create a manufacturer share link for a design variant.
+
+        Args:
+            design_variant_id: ID of the design variant to share.
+            manufacturer_id: ID of the manufacturer to share with.
+            shared_metal: Optional specific metal to share (e.g. "gold", "rose_gold").
+                         When set, the manufacturer view will only show images for this metal.
+                         This value is typically inherited from the customer share record.
+        """
         variant = self.variant_repo.get_by_id(design_variant_id)
         if not variant:
             raise ValueError(f"DesignVariant with id {design_variant_id} not found")
@@ -34,15 +43,18 @@ class DesignVariantManufacturerShareService:
             design_variant_id=design_variant_id,
             manufacturer_id=manufacturer_id,
             public_token=self._token(),
+            shared_metal=shared_metal,
         )
         self.activity_repo.log(
             design_id=variant.design_id,
             action_type="VARIANT_SHARED_WITH_MANUFACTURER",
-            message="Design variant shared with manufacturer for quoting",
+            message=f"Design variant shared with manufacturer for quoting"
+                    f"{f' (metal: {shared_metal})' if shared_metal else ''}",
             metadata={
                 "variant_id": design_variant_id,
                 "manufacturer_id": manufacturer_id,
                 "share_id": share.id,
+                "shared_metal": shared_metal,
             },
         )
         return share

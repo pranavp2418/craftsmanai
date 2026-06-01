@@ -55,15 +55,35 @@ def manufacturer_access_shared_variant(
             detail="Design not found",
         )
 
-    # Return only the shared variant
+    # ------------------------------------------------------------------
+    # If the share was created for a specific metal, filter the variant's
+    # metal_variations_json and angles_json to only include that metal.
+    # ------------------------------------------------------------------
+    shared_metal = share.shared_metal
+    filtered_metal_variations = variant.metal_variations_json
+    filtered_angles = variant.angles_json
+
+    if shared_metal:
+        # Only return the shared metal's variation
+        if isinstance(filtered_metal_variations, dict):
+            filtered_metal_variations = {
+                shared_metal: filtered_metal_variations.get(shared_metal)
+            }
+
+        # Only return angles for the shared metal
+        if isinstance(filtered_angles, dict):
+            filtered_angles = {
+                shared_metal: filtered_angles.get(shared_metal)
+            }
+
     variant_responses = [
         PublicDesignVariantResponse(
             id=variant.id,
             variant_name=variant.variant_name,
             version_number=variant.version_number,
             base_design_image_url=variant.base_design_image_url,
-            angles_json=variant.angles_json,
-            metal_variations_json=variant.metal_variations_json,
+            angles_json=filtered_angles,
+            metal_variations_json=filtered_metal_variations,
             is_selected=variant.is_selected,
             created_at=variant.created_at,
         )
