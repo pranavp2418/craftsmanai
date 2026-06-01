@@ -495,7 +495,7 @@ class TestCustomerEndpoints:
         finally:
             cleanup_user_by_email(email)
 
-    def test_get_customer_design_shares_includes_customer_details(self, client: TestClient):
+    def test_get_customer_design_shares_by_variant_includes_customer_details(self, client: TestClient):
         email = "customer_share_details@example.com"
         try:
             user = create_committed_user(email=email, username="custshare", full_name="Retailer Admin")
@@ -549,7 +549,7 @@ class TestCustomerEndpoints:
                 session.add(share)
                 session.commit()
 
-                response = client.get(f"/api/v2/customer/{customer.id}/design_shares", headers=headers)
+                response = client.get(f"/api/v2/customer/{variant.id}/design_shares", headers=headers)
                 assert response.status_code == 200
 
                 data = response.json()
