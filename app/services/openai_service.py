@@ -88,8 +88,13 @@ class OpenAIService:
         
         return ("image.png", buf, "image/png")
     
-    def _build_master_prompt(self, user_prompt: str) -> str:
+    def _build_master_prompt(self, user_prompt: str, jewellery_type: str = "") -> str:
         """Build the master prompt for base image generation."""
+        jewellery_hint = (
+            f"\n\nCRITICAL: This is a {jewellery_type} design. You MUST generate a {jewellery_type}. "
+            f"Do NOT change the jewelry type. Keep the {jewellery_type} structure intact."
+            if jewellery_type else ""
+        )
         return f"""
 ROLE
 
@@ -368,7 +373,7 @@ USER REQUIREMENTS
 ------------------------------------------------
 
 {user_prompt}
-
+{jewellery_hint}
 ------------------------------------------------
 OUTPUT
 ------------------------------------------------
@@ -383,8 +388,13 @@ The final design must:
 • look like a real luxury jewelry photograph
 """
     
-    def _build_angle_prompt(self, angle: str) -> str:
+    def _build_angle_prompt(self, angle: str, jewellery_type: str = "") -> str:
         """Build prompt for angle-specific generation."""
+        jewellery_hint = (
+            f"\n\nCRITICAL: This is a {jewellery_type} design. You MUST generate a {jewellery_type}. "
+            f"Do NOT change the jewelry type. Keep the {jewellery_type} structure intact."
+            if jewellery_type else ""
+        )
         return f"""
 ROLE
 
@@ -718,6 +728,7 @@ The final design must:
         self,
         image_source: str,
         user_prompt: str,
+        jewellery_type: str = "",
         size: str = "1024x1024"
     ) -> str:
         """
@@ -726,6 +737,7 @@ The final design must:
         Args:
             image_source: URL or local path of reference image
             user_prompt: User's design requirements
+            jewellery_type: Type of jewelry (ring, pendant, bracelet, etc.)
             size: Output image size (default: 1024x1024)
             
         Returns:
@@ -734,7 +746,7 @@ The final design must:
         logger.info("Generating base image")
         
         image_file = self._load_image_buffer_from_source(image_source)
-        prompt = self._build_master_prompt(user_prompt)
+        prompt = self._build_master_prompt(user_prompt, jewellery_type=jewellery_type)
         
         result = self._client.images.edit(
             model=self.model,
@@ -751,6 +763,7 @@ The final design must:
         self,
         base_image_source: str,
         angle_description: str = "rotate 90 degrees to the right, full side profile view, camera at same height",
+        jewellery_type: str = "",
         size: str = "1024x1024"
     ) -> str:
         """
@@ -759,6 +772,7 @@ The final design must:
         Args:
             base_image_source: URL or local path of base image
             angle_description: Description of the desired angle
+            jewellery_type: Type of jewelry (ring, pendant, bracelet, etc.)
             size: Output image size (default: 1024x1024)
             
         Returns:
@@ -767,7 +781,7 @@ The final design must:
         logger.info("Generating side view")
         
         image_file = self._load_image_buffer_from_source(base_image_source)
-        prompt = self._build_angle_prompt(angle_description)
+        prompt = self._build_angle_prompt(angle_description, jewellery_type=jewellery_type)
         
         result = self._client.images.edit(
             model=self.model,
@@ -784,6 +798,7 @@ The final design must:
         self,
         base_image_source: str,
         angle_description: str = "top-down view, camera positioned directly above at 90 degrees looking down",
+        jewellery_type: str = "",
         size: str = "1024x1024"
     ) -> str:
         """
@@ -792,6 +807,7 @@ The final design must:
         Args:
             base_image_source: URL or local path of base image
             angle_description: Description of the desired angle
+            jewellery_type: Type of jewelry (ring, pendant, bracelet, etc.)
             size: Output image size (default: 1024x1024)
             
         Returns:
@@ -800,7 +816,7 @@ The final design must:
         logger.info("Generating top view")
         
         image_file = self._load_image_buffer_from_source(base_image_source)
-        prompt = self._build_angle_prompt(angle_description)
+        prompt = self._build_angle_prompt(angle_description, jewellery_type=jewellery_type)
         
         result = self._client.images.edit(
             model=self.model,
@@ -817,6 +833,7 @@ The final design must:
         self,
         base_image_source: str,
         angle_description: str,
+        jewellery_type: str = "",
         size: str = "1024x1024"
     ) -> str:
         """
@@ -825,6 +842,7 @@ The final design must:
         Args:
             base_image_source: URL or local path of base image
             angle_description: Custom description of the desired angle
+            jewellery_type: Type of jewelry (ring, pendant, bracelet, etc.)
             size: Output image size (default: 1024x1024)
             
         Returns:
@@ -833,7 +851,7 @@ The final design must:
         logger.info(f"Generating custom angle: {angle_description}")
         
         image_file = self._load_image_buffer_from_source(base_image_source)
-        prompt = self._build_angle_prompt(angle_description)
+        prompt = self._build_angle_prompt(angle_description, jewellery_type=jewellery_type)
         
         result = self._client.images.edit(
             model=self.model,

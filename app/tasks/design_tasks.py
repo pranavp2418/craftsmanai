@@ -98,6 +98,7 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             final_image_bytes, validations = generate_jewelry_with_cross_agent(
                 base_image_source=reference_image_url,
                 user_request=prompt,
+                jewellery_type=design.jewellery_type or "pendant",
                 max_iterations=3,
                 progress_callback=_progress_callback,
             )
@@ -220,6 +221,11 @@ def refine_design_variant_image(
 
         reference_image_url = parent_variant.base_design_image_url
 
+        # Look up jewellery_type from the design
+        from app.models.design import Design as DesignModel
+        design = db.query(DesignModel).filter(DesignModel.id == design_id).first()
+        jewellery_type = design.jewellery_type if design else ""
+
         # Build a combined prompt incorporating style_tags and design_focus
         combined_prompt = prompt or ""
         if style_tags:
@@ -228,7 +234,7 @@ def refine_design_variant_image(
             combined_prompt = f"{combined_prompt}\nFocus on: {design_focus}"
 
         # Generate refined image via OpenAI
-        generated_item = openai_service.generate_base_image(reference_image_url, combined_prompt)
+        generated_item = openai_service.generate_base_image(reference_image_url, combined_prompt, jewellery_type=jewellery_type)
         image_bytes, content_type = _extract_generated_image_data(generated_item)
         _validate_image_bytes(image_bytes, content_type)
 

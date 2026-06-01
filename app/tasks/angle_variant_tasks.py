@@ -28,6 +28,7 @@ from typing import Any
 import requests
 
 from app.core.database import SessionLocal
+from app.models.design import Design
 from app.repositories.design_variant import DesignVariantRepository
 from app.repositories.activity_log import DesignActivityLogRepository
 from app.services.openai_service import openai_service
@@ -103,6 +104,10 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
         if not variant.base_design_image_url:
             raise ValueError(f"Variant {variant_id} has no base image URL")
 
+        # Look up jewellery_type from the associated Design
+        design = db.query(Design).filter(Design.id == variant.design_id).first()
+        jewellery_type = design.jewellery_type if design else ""
+
         # Build nested angles_json: keys are metal names, values are angle dicts
         existing_angles = variant.angles_json or {}
         generated_angles: dict[str, dict[str, str]] = {}
@@ -168,16 +173,19 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
                     generated_item = openai_service.generate_side_view(
                         base_image_source=variant.base_design_image_url,
                         angle_description=full_prompt,
+                        jewellery_type=jewellery_type,
                     )
                 elif angle_name == "top_view":
                     generated_item = openai_service.generate_top_view(
                         base_image_source=variant.base_design_image_url,
                         angle_description=full_prompt,
+                        jewellery_type=jewellery_type,
                     )
                 else:
                     generated_item = openai_service.generate_custom_angle(
                         base_image_source=variant.base_design_image_url,
                         angle_description=full_prompt,
+                        jewellery_type=jewellery_type,
                     )
 
                 image_bytes, content_type = _extract_image_data(generated_item)

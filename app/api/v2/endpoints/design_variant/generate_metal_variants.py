@@ -1,8 +1,10 @@
+import time
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_active_user
+from app.core.sse_manager import sse_manager
 from app.models.user import User
 from app.schemas.design_variant import DesignVariantMetalGenerationRequest, DesignVariantResponse
 from app.services.design_service import DesignService
@@ -46,17 +48,34 @@ def generate_metal_variants(
     already_existing = [m for m in payload.metals if m in existing_metal_variations and existing_metal_variations[m] is not None]
     missing_metals = [m for m in payload.metals if m not in already_existing]
 
+    channel = f"metal_variants:{variant_id}"
+
     if not missing_metals:
+        # Data already exists — publish via SSE after a short delay so the
+        # frontend has time to subscribe to the channel, then return.
+        time.sleep(2)
+        sse_manager.publish(
+            channel,
+            data={
+                "variant_id": variant.id,
+                "design_id": variant.design_id,
+                "status": "GENERATED",
+                "message": "All requested metals already exist. Returning existing data.",
+                "metal_variations": existing_metal_variations,
+                "from_cache": True,
+            },
+            event="metal_variants.generated",
+        )
+        sse_manager.publish_close(channel)
         return {
             "success": True,
-            "message": "All requested metals already exist. No generation needed.",
+            "message": "All requested metals already exist. Returning existing data via SSE.",
             "variant_id": variant.id,
             "metals": payload.metals,
             "already_existing": already_existing,
             "skipped": True,
+            "sse_channel": channel,
         }
-
-    channel = f"metal_variants:{variant_id}"
 
     # Dispatch the background Celery task with only the missing metals
     generate_metal_variant_images.delay(
