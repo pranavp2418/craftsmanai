@@ -42,8 +42,20 @@ class ManufacturerRepository:
     def get_by_token(self, token: str) -> Optional[Manufacturer]:
         return self.db.query(Manufacturer).filter(Manufacturer.public_token == token, Manufacturer.is_deleted == False).first()
 
-    def list_manufacturers(self, *, created_by_user_id: int, limit: int = 50, offset: int = 0, search: Optional[str] = None) -> List[Manufacturer]:
+    def list_manufacturers(
+        self,
+        *,
+        created_by_user_id: int,
+        limit: int = 50,
+        offset: int = 0,
+        search: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> List[Manufacturer]:
         query = self.db.query(Manufacturer).filter(Manufacturer.created_by_user_id == created_by_user_id, Manufacturer.is_deleted == False)
+        if status == "active":
+            query = query.filter(Manufacturer.is_active == True)
+        elif status == "inactive":
+            query = query.filter(Manufacturer.is_active == False)
         if search:
             query = query.filter(
                 (Manufacturer.name.ilike(f"%{search}%")) | (Manufacturer.emails.ilike(f"%{search}%"))
@@ -63,8 +75,12 @@ class ManufacturerRepository:
         self.db.refresh(manufacturer)
         return manufacturer
 
-    def count_manufacturers(self, *, created_by_user_id: int, search: Optional[str] = None) -> int:
+    def count_manufacturers(self, *, created_by_user_id: int, search: Optional[str] = None, status: Optional[str] = None) -> int:
         query = self.db.query(func.count(Manufacturer.id)).filter(Manufacturer.created_by_user_id == created_by_user_id, Manufacturer.is_deleted == False)
+        if status == "active":
+            query = query.filter(Manufacturer.is_active == True)
+        elif status == "inactive":
+            query = query.filter(Manufacturer.is_active == False)
         if search:
             query = query.filter(
                 (Manufacturer.name.ilike(f"%{search}%")) | (Manufacturer.emails.ilike(f"%{search}%"))

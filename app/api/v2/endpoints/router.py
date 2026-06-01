@@ -17,6 +17,8 @@ from .user_profile import router as user_profile_router
 from .Notification_settings import router as notification_settings_router
 from .ai import router as ai_router
 from .notification import router as notification_router
+from .production_sheet import router as production_sheet_router
+from .Analytics import router as analytics_router
 
 api_router = APIRouter()
 
@@ -37,6 +39,8 @@ api_router.include_router(team_settings_router)
 api_router.include_router(user_profile_router)
 api_router.include_router(notification_settings_router)
 api_router.include_router(notification_router)
+api_router.include_router(production_sheet_router)
+api_router.include_router(analytics_router, prefix="/analytics", tags=["analytics"])
 from .brand_settings import router as brand_settings_router
 api_router.include_router(brand_settings_router)
 
