@@ -1,4 +1,6 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
+
+from app.schemas.validations import NormalizedEmailStr
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -107,7 +109,7 @@ class TeamMemberDetailResponse(TeamMemberResponse):
 class TeamInvitationCreate(BaseModel):
     """Schema for creating a team invitation"""
     full_name: str = Field(..., min_length=1, max_length=255)
-    email: EmailStr
+    email: NormalizedEmailStr
     role: TeamRoleEnum = TeamRoleEnum.VIEWER
 
     class Config:

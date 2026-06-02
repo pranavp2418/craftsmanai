@@ -11,6 +11,8 @@ from app.models.user_device import UserDevice
 from app.models.notification_setting import NotificationSetting
 from app.models.brand_setting import BrandSetting
 from app.models.customer import Customer
+from app.models.design import Design, DesignVariant, DesignShare
+from app.models.order import Order, ManufacturerQuote, OrderActivityLog
 from app.models.manufacturer import Manufacturer
 from app.models.manufacturer import Manufacturer
 from app.repositories.user import UserRepository
@@ -28,6 +30,23 @@ def create_committed_user(email: str, username: str, full_name: str) -> User:
             session.query(OTP).filter(OTP.email == email).delete()
             session.query(RefreshToken).filter(RefreshToken.user_id == existing.id).delete()
             session.query(UserDevice).filter(UserDevice.user_id == existing.id).delete()
+            customer_ids = [row[0] for row in session.query(Customer.id).filter(Customer.created_by_user_id == existing.id).all()]
+            design_ids = [row[0] for row in session.query(Design.id).filter(Design.user_id == existing.id).all()]
+            variant_ids = []
+            if design_ids:
+                variant_ids = [row[0] for row in session.query(DesignVariant.id).filter(DesignVariant.design_id.in_(design_ids)).all()]
+            if customer_ids:
+                session.query(DesignShare).filter(DesignShare.customer_id.in_(customer_ids)).delete(synchronize_session=False)
+            if variant_ids:
+                session.query(DesignShare).filter(DesignShare.design_variant_id.in_(variant_ids)).delete(synchronize_session=False)
+            if design_ids:
+                order_ids = [row[0] for row in session.query(Order.id).filter(Order.design_id.in_(design_ids)).all()]
+                if order_ids:
+                    session.query(OrderActivityLog).filter(OrderActivityLog.order_id.in_(order_ids)).delete(synchronize_session=False)
+                    session.query(ManufacturerQuote).filter(ManufacturerQuote.order_id.in_(order_ids)).delete(synchronize_session=False)
+                    session.query(Order).filter(Order.id.in_(order_ids)).delete(synchronize_session=False)
+                session.query(DesignVariant).filter(DesignVariant.design_id.in_(design_ids)).delete(synchronize_session=False)
+                session.query(Design).filter(Design.id.in_(design_ids)).delete(synchronize_session=False)
             session.query(Customer).filter(Customer.created_by_user_id == existing.id).delete()
             session.query(Manufacturer).filter(Manufacturer.created_by_user_id == existing.id).delete()
             session.query(NotificationSetting).filter(NotificationSetting.user_id == existing.id).delete()
@@ -58,6 +77,23 @@ def cleanup_user_by_email(email: str):
             session.query(OTP).filter(OTP.email == email).delete()
             session.query(RefreshToken).filter(RefreshToken.user_id == user.id).delete()
             session.query(UserDevice).filter(UserDevice.user_id == user.id).delete()
+            customer_ids = [row[0] for row in session.query(Customer.id).filter(Customer.created_by_user_id == user.id).all()]
+            design_ids = [row[0] for row in session.query(Design.id).filter(Design.user_id == user.id).all()]
+            variant_ids = []
+            if design_ids:
+                variant_ids = [row[0] for row in session.query(DesignVariant.id).filter(DesignVariant.design_id.in_(design_ids)).all()]
+            if customer_ids:
+                session.query(DesignShare).filter(DesignShare.customer_id.in_(customer_ids)).delete(synchronize_session=False)
+            if variant_ids:
+                session.query(DesignShare).filter(DesignShare.design_variant_id.in_(variant_ids)).delete(synchronize_session=False)
+            if design_ids:
+                order_ids = [row[0] for row in session.query(Order.id).filter(Order.design_id.in_(design_ids)).all()]
+                if order_ids:
+                    session.query(OrderActivityLog).filter(OrderActivityLog.order_id.in_(order_ids)).delete(synchronize_session=False)
+                    session.query(ManufacturerQuote).filter(ManufacturerQuote.order_id.in_(order_ids)).delete(synchronize_session=False)
+                    session.query(Order).filter(Order.id.in_(order_ids)).delete(synchronize_session=False)
+                session.query(DesignVariant).filter(DesignVariant.design_id.in_(design_ids)).delete(synchronize_session=False)
+                session.query(Design).filter(Design.id.in_(design_ids)).delete(synchronize_session=False)
             session.query(Customer).filter(Customer.created_by_user_id == user.id).delete()
             session.query(Manufacturer).filter(Manufacturer.created_by_user_id == user.id).delete()
             session.query(NotificationSetting).filter(NotificationSetting.user_id == user.id).delete()
@@ -257,6 +293,40 @@ class TestCustomerEndpoints:
         finally:
             cleanup_user_by_email(email)
 
+    def test_get_customer_parses_legacy_email_list_string(self, client: TestClient):
+        email = "customer_legacy_emails@example.com"
+        try:
+            user = create_committed_user(email=email, username="custlegacyemails", full_name="Retailer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            session = TestingSessionLocal()
+            try:
+                customer = Customer(
+                    created_by_user_id=user.id,
+                    full_name="Legacy Email Client",
+                    emails="[{'label': 'work', 'email': 'nick@example.com'}]",
+                    phone_number="123456",
+                    tag="VIP Customer",
+                    location="Old City",
+                    public_token="legacy_email_token_123",
+                    is_active=True,
+                )
+                session.add(customer)
+                session.commit()
+                customer_id = customer.id
+            finally:
+                session.close()
+
+            response = client.get(f"/api/v2/customer/{customer_id}", headers=headers)
+            assert response.status_code == 200
+            data = response.json()
+            assert data["full_name"] == "Legacy Email Client"
+            assert len(data["emails"]) == 1
+            assert data["emails"][0]["email"] == "nick@example.com"
+        finally:
+            cleanup_user_by_email(email)
+
     def test_update_customer_with_ui_payload(self, client: TestClient):
         """Test updating a customer using new UI fields"""
         email = "customer_update@example.com"
@@ -302,6 +372,38 @@ class TestCustomerEndpoints:
             assert data["phone_number"] == "+9999"
             assert data["location"] == "Updated Loc"
             assert data["status"] == "Inactive"
+        finally:
+            cleanup_user_by_email(email)
+
+    def test_update_customer_with_flat_email_payload(self, client: TestClient):
+        """Test updating a customer with a single flat email field"""
+        email = "customer_update_flat_email@example.com"
+        try:
+            user = create_committed_user(email=email, username="custupdateflat", full_name="Retailer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            create_payload = {
+                "full_name": "Initial Name",
+                "emails": [{"label": "Work", "email": "initial@vip.com"}],
+                "phone_number": "+1000",
+                "location": "Initial Loc",
+                "status": "Active",
+            }
+            res_create = client.post("/api/v2/customer/", json=create_payload, headers=headers)
+            assert res_create.status_code == 201
+            customer_id = res_create.json()["id"]
+
+            update_payload = {
+                "email": "UPDATES@VIP.COM",
+                "status": "Active",
+            }
+            res_update = client.put(f"/api/v2/customer/{customer_id}", json=update_payload, headers=headers)
+            assert res_update.status_code == 200
+
+            data = res_update.json()
+            assert len(data["emails"]) == 1
+            assert data["emails"][0]["email"] == "updates@vip.com"
         finally:
             cleanup_user_by_email(email)
 
@@ -390,5 +492,77 @@ class TestCustomerEndpoints:
             assert res_list.status_code == 200
             assert res_list.json()["total"] == 0
             assert len(res_list.json()["items"]) == 0
+        finally:
+            cleanup_user_by_email(email)
+
+    def test_get_customer_design_shares_by_variant_includes_customer_details(self, client: TestClient):
+        email = "customer_share_details@example.com"
+        try:
+            user = create_committed_user(email=email, username="custshare", full_name="Retailer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            session = TestingSessionLocal()
+            try:
+                customer = Customer(
+                    created_by_user_id=user.id,
+                    full_name="Shared Customer",
+                    emails='[{"label": "Work", "email": "shared.customer@example.com"}]',
+                    phone_number="+14155550100",
+                    tag="VIP Customer",
+                    location="New York",
+                    public_token="shared_customer_token_001",
+                    is_active=True,
+                )
+                session.add(customer)
+                session.flush()
+
+                design = Design(
+                    user_id=user.id,
+                    created_by_user_id=user.id,
+                    design_code="CUS-001",
+                    sequence_number=1,
+                    name="Shared Pendant",
+                    jewellery_type="Pendant",
+                    user_prompt="Create a pendant",
+                    status="GENERATED",
+                )
+                session.add(design)
+                session.flush()
+
+                variant = DesignVariant(
+                    design_id=design.id,
+                    variant_name="Variant A",
+                    version_number=1,
+                    is_selected=True,
+                )
+                session.add(variant)
+                session.flush()
+
+                share = DesignShare(
+                    design_variant_id=variant.id,
+                    customer_id=customer.id,
+                    public_token="share_token_customer_details",
+                    status="PENDING",
+                    comment="Please review the finish",
+                )
+                session.add(share)
+                session.commit()
+
+                response = client.get(f"/api/v2/customer/{variant.id}/design_shares", headers=headers)
+                assert response.status_code == 200
+
+                data = response.json()
+                assert isinstance(data, list)
+                assert len(data) == 1
+
+                share_data = data[0]
+                assert share_data["customer_name"] == "Shared Customer"
+                assert share_data["email"] == "shared.customer@example.com"
+                assert share_data["customer_comment_or_feedback"] == "Please review the finish"
+                assert share_data["status"] == "PENDING"
+                assert share_data["shared_on"] is not None
+            finally:
+                session.close()
         finally:
             cleanup_user_by_email(email)

@@ -1,0 +1,80 @@
+from datetime import timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.core.dependencies import get_current_active_user
+from app.models.user import User
+from app.schemas.manufacturer_variant_share import VariantManufacturerSharesResponse
+from app.services.design_service import DesignService
+from app.services.design_variant_service import DesignVariantService
+from app.services.manufacturer_variant_share_service import DesignVariantManufacturerShareService
+
+
+router = APIRouter()
+
+
+@router.get("/variants/{variant_id}/manufacturer-shares", response_model=VariantManufacturerSharesResponse)
+def get_variant_manufacturer_shares(
+    variant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Return all manufacturer shares for a design variant.
+
+    The response includes the parent design details, the current design status,
+    and each shared manufacturer entry from ``design_variant_manufacturer_shares``.
+    """
+    design_service = DesignService(db)
+    variant_service = DesignVariantService(db)
+    share_service = DesignVariantManufacturerShareService(db)
+
+    variant = variant_service.get_variant(variant_id)
+    if not variant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variant not found")
+
+    design = design_service.get_design_for_team_member(design_id=variant.design_id, user=current_user)
+    if not design:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
+
+    shares = share_service.list_for_variant(variant.id)
+
+    share_items = []
+    for share in shares:
+        manufacturer = share.manufacturer
+        shared_date = share.created_at
+        estimated_delivery_date = (
+            shared_date + timedelta(days=share.delivery_time_days)
+            if shared_date and share.delivery_time_days is not None
+            else None
+        )
+        share_items.append(
+            {
+                "id": share.id,
+                "design_variant_id": share.design_variant_id,
+                "manufacturer_id": share.manufacturer_id,
+                "manufacturer": manufacturer if manufacturer else None,
+                "shared_date": shared_date,
+                "quoted_price": share.cost_price,
+                "estimated_delivery_days": share.delivery_time_days,
+                "estimated_delivery_date": estimated_delivery_date,
+                "manufacturer_notes": share.notes,
+                "status": share.status.value if hasattr(share.status, "value") else share.status,
+                "public_token": share.public_token,
+            }
+        )
+
+    return VariantManufacturerSharesResponse(
+        variant_id=variant.id,
+        variant_name=variant.variant_name,
+        version_number=variant.version_number,
+        design_id=design.id,
+        design_code=design.design_code,
+        design_name=design.name,
+        design_variant_status=design.status,
+        design_status=design.status,
+        total_shares=len(share_items),
+        shares=share_items,
+        share_details=share_items,
+    )

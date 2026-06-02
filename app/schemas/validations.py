@@ -1,10 +1,20 @@
 import json
 import re
-from typing import Iterable, Optional, Set, Type
+from typing import Annotated, Iterable, Optional, Set, Type
 
 from email_validator import EmailNotValidError, validate_email
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from pydantic import BeforeValidator, EmailStr
+
+
+def _normalize_email_value(value):
+    if value is None:
+        return value
+    return str(value).strip().lower()
+
+
+NormalizedEmailStr = Annotated[EmailStr, BeforeValidator(_normalize_email_value)]
 
 
 def normalize_emails(emails: Optional[str], *, validate: bool = False) -> Set[str]:
