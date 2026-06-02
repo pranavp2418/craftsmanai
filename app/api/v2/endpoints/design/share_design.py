@@ -56,14 +56,16 @@ def share_design_variant(
         shared_metal=metal,
     )
 
-    # Queue email to customer if customer exists and has email
+    # Queue email to customer if customer exists and has email/phone
     if payload.customer_id:
         from app.repositories.customer import CustomerRepository
-        from app.tasks.email_tasks import send_customer_share_email
+        from app.tasks.email_tasks import send_customer_share_email, send_customer_share_sms
         from app.core.config import settings
 
         customer_repo = CustomerRepository(db)
         customer = customer_repo.get_by_id(payload.customer_id)
+        
+        preview_url = f"{settings.FRONTEND_URL}/review/{share.public_token}"
         
         if customer and hasattr(customer, 'emails') and customer.emails:
             import json
@@ -80,13 +82,20 @@ def share_design_variant(
                 primary_email = str(customer.emails).split(',')[0].strip()
             
             if primary_email:
-                preview_url = f"{settings.FRONTEND_URL}/review/{share.public_token}"
                 send_customer_share_email.delay(
                     to_email=primary_email,
                     customer_name=customer.full_name or "Customer",
                     preview_url=preview_url,
                     designer_name=current_user.full_name or current_user.username
                 )
+                
+        if customer and hasattr(customer, 'phone_number') and customer.phone_number:
+            send_customer_share_sms.delay(
+                to_number=customer.phone_number,
+                customer_name=customer.full_name or "Customer",
+                preview_url=preview_url,
+                designer_name=current_user.full_name or current_user.username
+            )
 
     return share
 
