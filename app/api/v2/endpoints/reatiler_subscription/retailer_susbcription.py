@@ -13,9 +13,24 @@ from app.core.rate_limiter import limiter
 from app.models.user import User
 from app.models.subscription import SubscriptionPlan, UserSubscription, SubscriptionStatus, Payment, PaymentStatus
 from app.schemas.subscription import UserSubscription as UserSubscriptionSchema
+from app.services.invoice_service import generate_and_store_invoice
 
 logger = logging.getLogger(__name__)
 stripe.api_key = settings.STRIPE_API_KEY
+
+def create_invoice_for_payment(db: Session, payment: Payment) -> None:
+    """
+    Wrapper function that calls the centralized invoice generation service.
+    """
+    # Ensure full user/plan relationship models are eager-loaded for PDF generation
+    from sqlalchemy.orm import selectinload
+    payment_query = db.query(Payment).options(
+        selectinload(Payment.user),
+        selectinload(Payment.plan)
+    ).filter(Payment.id == payment.id).first()
+    
+    target_payment = payment_query or payment
+    generate_and_store_invoice(db, target_payment)
 
 router = APIRouter()
 
@@ -201,6 +216,7 @@ def verify_payment(
                 payment.status = PaymentStatus.PAID
                 payment.stripe_payment_intent_id = payment_intent_id
                 payment.payment_method = payment_method
+                create_invoice_for_payment(db, payment)
 
             if not plan:
                 db.rollback()
@@ -350,6 +366,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 payment.stripe_payment_intent_id = payment_intent_id
                 payment.payment_method = payment_method
                 payment.stripe_webhook_event_id = event_id
+                create_invoice_for_payment(db, payment)
 
                 db.commit()
                 logger.info(f"Payment {payment.id} status updated to PAID via webhook")

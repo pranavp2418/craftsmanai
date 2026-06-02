@@ -299,3 +299,11 @@ def upload_image_to_supabase(image: Union[str, bytes], bucket_path: str) -> str:
     image_bytes, content_type = _decode_image(image)
     _validate_image_bytes(image_bytes, content_type)
     return _upload_bytes_to_supabase(image_bytes, content_type, bucket_path)
+
+
+def upload_file_to_supabase(file_bytes: bytes, content_type: str, bucket_path: str) -> str:
+    """
+    Upload any file (like PDF invoices) to Supabase Storage and return the public URL.
+    """
+    return _upload_bytes_to_supabase(file_bytes, content_type, bucket_path)
+

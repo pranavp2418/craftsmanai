@@ -28,6 +28,7 @@ from .notification import Notification
 from .notification_setting import NotificationSetting
 from .brand_setting import BrandSetting
 from .subscription import SubscriptionPlan, UserSubscription, Payment, SubscriptionActivityLog
+from .invoice import Invoice
 from .production_sheet import ProductionSheet
 from .retailer_team import (
     RetailerTeam,
@@ -43,6 +44,7 @@ from .settings import SystemSettings, SystemSettingsLog
 __all__ = [
     "SystemSettings",
     "SystemSettingsLog",
+    "Invoice",
 
     "User",
     "OTP", 
