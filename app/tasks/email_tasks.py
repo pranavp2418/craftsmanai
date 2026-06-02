@@ -177,6 +177,40 @@ def send_customer_share_email(self, to_email: str, customer_name: str, preview_u
         )
 
 
+@create_task(name="send_manufacturer_share_sms", max_retries=3)
+def send_manufacturer_share_sms(self, to_number: str, manufacturer_name: str, preview_url: str, designer_name: str):
+    """
+    Send an SMS to a manufacturer with a link to review a shared design.
+    """
+    task_name = "send_manufacturer_share_sms"
+    try:
+        logger.info(f"📱 Starting {task_name} for {to_number}")
+        
+        from app.services.sms_service import sms_service
+        
+        if not sms_service.is_configured():
+            logger.warning(f"⚠️ {task_name}: SMS service not configured.")
+            return False
+            
+        message = f"Hi {manufacturer_name}, {designer_name} has shared a design variant with you for quoting! View it here: {preview_url}"
+        
+        success = sms_service.send_sms(to_number=to_number, message=message)
+        
+        if success:
+            logger.info(f"✅ {task_name} completed successfully for {to_number}")
+            return True
+        else:
+            raise Exception("Failed to send SMS via Twilio.")
+            
+    except Exception as exc:
+        logger.error(f"❌ {task_name} failed for {to_number}: {str(exc)}")
+        raise self.retry(
+            exc=exc, 
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3
+        )
+
+
 @create_task(name="send_manufacturer_share_email", max_retries=3)
 def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, preview_url: str, designer_name: str):
     """

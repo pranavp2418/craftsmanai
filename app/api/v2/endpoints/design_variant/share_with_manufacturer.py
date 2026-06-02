@@ -70,21 +70,46 @@ def share_variant_with_manufacturer(
         shared_metal=shared_metal,
     )
 
-    # Queue an email to the manufacturer with the preview link
-    # We will get the manufacturer's email from the payload or from DB
+    # Queue an email/SMS to the manufacturer with the preview link
+    # We will get the manufacturer's email/phone from the DB
     from app.repositories.manufacturer import ManufacturerRepository
-    from app.tasks.email_tasks import send_manufacturer_share_email
+    from app.tasks.email_tasks import send_manufacturer_share_email, send_manufacturer_share_sms
     from app.core.config import settings
 
     manufacturer_repo = ManufacturerRepository(db)
     manufacturer = manufacturer_repo.get_by_id(payload.manufacturer_id)
-    if manufacturer and manufacturer.email:
+    if manufacturer:
         preview_url = f"{settings.FRONTEND_URL}/manufacturer/review/{share.public_token}"
-        send_manufacturer_share_email.delay(
-            to_email=manufacturer.email,
-            manufacturer_name=manufacturer.name,
-            preview_url=preview_url,
-            designer_name=current_user.full_name or current_user.username
-        )
+        
+        # Manufacturer emails may be stored as a string or json in `emails`
+        primary_email = None
+        if hasattr(manufacturer, 'emails') and manufacturer.emails:
+            import json
+            try:
+                emails_data = json.loads(manufacturer.emails)
+                if isinstance(emails_data, list) and len(emails_data) > 0:
+                    primary_email = emails_data[0].get("email") if isinstance(emails_data[0], dict) else emails_data[0]
+                elif isinstance(emails_data, dict):
+                    primary_email = emails_data.get("email")
+                else:
+                    primary_email = str(emails_data)
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                primary_email = str(manufacturer.emails).split(',')[0].strip()
+        
+        if primary_email:
+            send_manufacturer_share_email.delay(
+                to_email=primary_email,
+                manufacturer_name=manufacturer.name,
+                preview_url=preview_url,
+                designer_name=current_user.full_name or current_user.username
+            )
+            
+        if hasattr(manufacturer, 'phone_number') and manufacturer.phone_number:
+            send_manufacturer_share_sms.delay(
+                to_number=manufacturer.phone_number,
+                manufacturer_name=manufacturer.name,
+                preview_url=preview_url,
+                designer_name=current_user.full_name or current_user.username
+            )
 
     return share
