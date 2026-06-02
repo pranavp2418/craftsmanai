@@ -20,7 +20,7 @@ router = APIRouter()
 async def create_design(
     name: str = Form(...),
     jewellery_type: str = Form(...),
-    user_prompt: str = Form(...),
+    user_prompt: str = Form(None),
     files: List[UploadFile] = File(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -49,7 +49,7 @@ async def create_design(
         user=current_user,
         name=name,
         jewellery_type=jewellery_type,
-        user_prompt=user_prompt,
+        user_prompt=user_prompt if user_prompt else None,
         input_image_url=reference_urls[0] if reference_urls else None,
         input_image_urls=reference_urls,
     )

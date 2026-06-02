@@ -301,6 +301,7 @@ class CustomerDesignShareItem(BaseModel):
     shared_on: datetime
     status: str
     customer_comment_or_feedback: Optional[str] = None
+    token: str
 
     class Config:
         from_attributes = True
