@@ -3,11 +3,13 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, model_validator
 
+from app.schemas.validations import NormalizedEmailStr
+
 
 class BrandSettingUpdateRequest(BaseModel):
     brand_name: Optional[str] = None
     logo_url: Optional[str] = None
-    business_email: Optional[str] = None
+    business_email: Optional[NormalizedEmailStr] = None
     phone_number: Optional[str] = None
     primary_color: Optional[str] = None
 

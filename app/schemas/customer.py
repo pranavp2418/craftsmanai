@@ -1,10 +1,56 @@
 from __future__ import annotations
 
 import json
+import ast
 from enum import Enum
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
+
+from app.schemas.validations import NormalizedEmailStr
+
+
+def _coerce_customer_emails(data: any) -> any:
+    if not isinstance(data, dict):
+        return data
+
+    email_value = data.get("emails")
+    if email_value is None and "email" in data:
+        email_value = data.get("email")
+
+    if email_value is None:
+        return data
+
+    if isinstance(email_value, str):
+        email_text = email_value.strip()
+        if not email_text:
+            data["emails"] = None
+            return data
+
+        try:
+            parsed = json.loads(email_text)
+        except Exception:
+            try:
+                parsed = ast.literal_eval(email_text)
+            except Exception:
+                parsed = email_text
+    else:
+        parsed = email_value
+
+    if isinstance(parsed, list):
+        normalized_emails = []
+        for value in parsed:
+            if isinstance(value, dict):
+                normalized_emails.append(value)
+            elif value is not None and str(value).strip():
+                normalized_emails.append({"label": "Work", "email": value})
+        data["emails"] = normalized_emails
+    elif isinstance(parsed, dict):
+        data["emails"] = [parsed]
+    elif parsed is not None:
+        data["emails"] = [{"label": "Work", "email": parsed}]
+
+    return data
 
 
 class CustomerTag(str, Enum):
@@ -16,7 +62,7 @@ class CustomerTag(str, Enum):
 
 class EmailAddressSchema(BaseModel):
     label: str = Field(default="Work")
-    email: EmailStr
+    email: NormalizedEmailStr
 
 
 class CustomerCreateRequest(BaseModel):
@@ -27,6 +73,11 @@ class CustomerCreateRequest(BaseModel):
     location: Optional[str] = None
     status: Optional[str] = Field(default="Active")  # "Active" or "Inactive"
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_email_payload(cls, data: any) -> any:
+        return _coerce_customer_emails(data)
+
 
 class CustomerUpdateRequest(BaseModel):
     full_name: Optional[str] = None
@@ -35,6 +86,11 @@ class CustomerUpdateRequest(BaseModel):
     phone_number: Optional[str] = None
     location: Optional[str] = None
     status: Optional[str] = None  # "Active" or "Inactive"
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_email_payload(cls, data: any) -> any:
+        return _coerce_customer_emails(data)
 
 
 class CustomerResponse(BaseModel):
@@ -78,13 +134,30 @@ class CustomerResponse(BaseModel):
             
             email_val = data.get("emails") or data.get("email")
             emails = []
-            if email_val:
+            if isinstance(email_val, list):
+                emails = [item for item in email_val if item is not None]
+            elif isinstance(email_val, dict):
+                emails = [email_val]
+            elif email_val:
                 try:
                     parsed = json.loads(email_val)
                     if isinstance(parsed, list):
                         emails = parsed
+                    elif isinstance(parsed, dict):
+                        emails = [parsed]
+                    else:
+                        emails = [{"label": "Work", "email": email_val}]
                 except Exception:
-                    emails = [{"label": "Work", "email": email_val}]
+                    try:
+                        parsed = ast.literal_eval(email_val)
+                        if isinstance(parsed, list):
+                            emails = parsed
+                        elif isinstance(parsed, dict):
+                            emails = [parsed]
+                        else:
+                            emails = [{"label": "Work", "email": email_val}]
+                    except Exception:
+                        emails = [{"label": "Work", "email": email_val}]
             data["emails"] = emails
             return data
             
@@ -106,13 +179,30 @@ class CustomerResponse(BaseModel):
         email_val = getattr(data, "emails", getattr(data, "email", None))
         
         emails = []
-        if email_val:
+        if isinstance(email_val, list):
+            emails = [item for item in email_val if item is not None]
+        elif isinstance(email_val, dict):
+            emails = [email_val]
+        elif email_val:
             try:
                 parsed = json.loads(email_val)
                 if isinstance(parsed, list):
                     emails = parsed
+                elif isinstance(parsed, dict):
+                    emails = [parsed]
+                else:
+                    emails = [{"label": "Work", "email": email_val}]
             except Exception:
-                emails = [{"label": "Work", "email": email_val}]
+                try:
+                    parsed = ast.literal_eval(email_val)
+                    if isinstance(parsed, list):
+                        emails = parsed
+                    elif isinstance(parsed, dict):
+                        emails = [parsed]
+                    else:
+                        emails = [{"label": "Work", "email": email_val}]
+                except Exception:
+                    emails = [{"label": "Work", "email": email_val}]
                 
         return {
             "id": getattr(data, "id"),
@@ -190,4 +280,77 @@ class CustomerDetailResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class SharedCustomerSummary(BaseModel):
+    id: int
+    full_name: str
+    emails: List[EmailAddressSchema] = Field(default=[])
+    phone_number: Optional[str] = None
+    location: Optional[str] = None
+    status: str
+    public_token: str
+
+    class Config:
+        from_attributes = True
+
+
+class CustomerDesignShareItem(BaseModel):
+    customer_name: str
+    email: Optional[str] = None
+    shared_on: datetime
+    status: str
+    customer_comment_or_feedback: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class VariantSummary(BaseModel):
+    id: int
+    variant_name: str
+    version_number: int
+    base_design_image_url: Optional[str] = None
+    is_selected: bool
+    design_focus: Optional[str] = None
+    style_tags: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DesignSummary(BaseModel):
+    id: int
+    design_code: str
+    name: str
+    jewellery_type: Optional[str] = None
+    user_prompt: Optional[str] = None
+    input_image_url: Optional[str] = None
+    input_image_urls: Optional[List[str]] = None
+    status: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ShareDetail(BaseModel):
+    share_id: int
+    public_token: str
+    share_status: str
+    share_comment: Optional[str] = None
+    share_reviewed_at: Optional[datetime] = None
+    shared_at: Optional[datetime] = None
+    share_created_at: Optional[datetime] = None
+    customer: SharedCustomerSummary
+    variant: VariantSummary
+    design: DesignSummary
+
+    class Config:
+        from_attributes = True
+
+
+CustomerDesignSharesResponse = List[CustomerDesignShareItem]
 

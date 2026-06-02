@@ -1,7 +1,9 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from datetime import datetime
 import re
+
+from app.schemas.validations import NormalizedEmailStr
 
 
 class DeviceInfo(BaseModel):
@@ -14,7 +16,7 @@ class DeviceInfo(BaseModel):
 
 
 class SignupRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmailStr
     password: str = Field(..., min_length=8)
     whatsapp_number: str
     remember_me: bool = False
@@ -23,8 +25,6 @@ class SignupRequest(BaseModel):
     @field_validator('email')
     @classmethod
     def validate_email(cls, v):
-        if not v or '@' not in v:
-            raise ValueError('Invalid email format')
         return v.lower()
     
     @field_validator('password')
@@ -59,7 +59,7 @@ class SignUpResponse(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmailStr
     password: str
     remember_me: bool = False
     device_info: Optional[DeviceInfo] = None
@@ -80,17 +80,17 @@ class LoginResponse(BaseModel):
 
 
 class OTPRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmailStr
 
 
 class OTPVerifyRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmailStr
     otp: str
     device_info: Optional[DeviceInfo] = None
 
 
 class ResendOTPRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmailStr
 
 
 class RefreshTokenRequest(BaseModel):
@@ -98,11 +98,11 @@ class RefreshTokenRequest(BaseModel):
 
 
 class PasswordResetRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmailStr
 
 
 class PasswordResetConfirm(BaseModel):
-    email: EmailStr
+    email: NormalizedEmailStr
     token: str
     new_password: str = Field(..., min_length=8)
     
@@ -135,7 +135,7 @@ class UserResponse(BaseModel):
 
 
 class UserCreate(BaseModel):
-    email: EmailStr
+    email: NormalizedEmailStr
     username: Optional[str] = None
     full_name: Optional[str] = None
     password: str
@@ -144,8 +144,6 @@ class UserCreate(BaseModel):
     @field_validator('email')
     @classmethod
     def validate_email(cls, v):
-        if not v or '@' not in v:
-            raise ValueError('Invalid email format')
         return v.lower()
     
     @field_validator('password')

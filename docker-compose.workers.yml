@@ -15,7 +15,7 @@ services:
       POSTGRES_DB: craftmen_db
       POSTGRES_USER: craftmen_user
       POSTGRES_PASSWORD: craftmen_password
-      POSTGRES_DB: craftmen_db
+      
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
