@@ -40,6 +40,37 @@ class ManufacturerQuoteService:
     def list_quotes(self, order_id: int) -> List[ManufacturerQuote]:
         return self.quote_repo.list_for_order(order_id)
 
+    def list_quotes_with_details(self, order_id: int) -> List[dict]:
+        quotes = self.quote_repo.list_for_order(order_id)
+        
+        result = []
+        for q in quotes:
+            # Get the manufacturer's name
+            m_name = None
+            if q.manufacturer:
+                m_name = q.manufacturer.name
+                
+            # Get the metal
+            # First check order share
+            metal = None
+            if q.order and q.order.share:
+                metal = q.order.share.shared_metal
+                
+            result.append({
+                "id": q.id,
+                "order_id": q.order_id,
+                "manufacturer_id": q.manufacturer_id,
+                "cost_price": q.cost_price,
+                "delivery_time_days": q.delivery_time_days,
+                "notes": q.notes,
+                "status": q.status,
+                "created_at": q.created_at,
+                "manufacturer_name": m_name,
+                "metal": metal,
+            })
+            
+        return result
+
     def update_status(
         self,
         quote: ManufacturerQuote,

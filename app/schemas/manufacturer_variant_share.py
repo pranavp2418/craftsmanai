@@ -47,6 +47,7 @@ class ManufacturerVariantShareDetailResponse(BaseModel):
     manufacturer_notes: Optional[str] = None
     status: str
     public_token: str
+    shared_metal: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -63,7 +64,6 @@ class VariantManufacturerSharesResponse(BaseModel):
     design_status: DesignStatus
     total_shares: int
     shares: list[ManufacturerVariantShareDetailResponse]
-    share_details: list[ManufacturerVariantShareDetailResponse] = Field(default_factory=list)
 
 
 class ManufacturerQuoteSubmitRequest(BaseModel):
