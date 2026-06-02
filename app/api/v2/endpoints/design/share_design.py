@@ -1,25 +1,65 @@
+import ast
+import json
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_active_user
+from app.models.customer import Customer
 from app.models.user import User
 from app.schemas.design import DesignShareCreateRequest, DesignShareResponse
 from app.services.design_service import DesignService
 from app.services.design_variant_service import DesignVariantService
 from app.services.design_sharing_service import DesignSharingService
+from app.tasks.email_tasks import send_design_review_email
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class UpdateShareVariantRequest(BaseModel):
     """Request to update the variant referenced by a share."""
     design_variant_id: int = Field(..., ge=1, description="ID of the new variant to link")
     comment: Optional[str] = Field(default=None, description="Optional comment about the update")
+
+
+def _extract_customer_email(customer: Customer) -> Optional[str]:
+    raw_emails = customer.emails
+    if not raw_emails:
+        return None
+
+    if isinstance(raw_emails, list):
+        parsed = raw_emails
+    else:
+        try:
+            parsed = json.loads(raw_emails)
+        except Exception:
+            try:
+                parsed = ast.literal_eval(raw_emails)
+            except Exception:
+                return str(raw_emails)
+
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+
+    if not isinstance(parsed, list):
+        return str(raw_emails)
+
+    for item in parsed:
+        if isinstance(item, dict):
+            email = item.get("email")
+            if email:
+                return str(email)
+        elif item:
+            return str(item)
+
+    return None
 
 
 @router.post("/variants/{variant_id}/share", response_model=DesignShareResponse, status_code=status.HTTP_201_CREATED)
@@ -52,6 +92,30 @@ def share_design_variant(
         comment=payload.comment,
        
     )
+
+    if payload.customer_id:
+        try:
+            customer = db.query(Customer).filter(Customer.id == payload.customer_id).first()
+            if customer:
+                recipient_email = _extract_customer_email(customer)
+                if recipient_email:
+                    review_url = (
+                        f"{settings.FRONTEND_URL.rstrip('/')}"
+                        f"/customer/review/{customer.public_token}?token={share.public_token}"
+                    )
+                    send_design_review_email.delay(
+                        recipient_email,
+                        customer.full_name,
+                        review_url,
+                        design.name,
+                        variant.variant_name,
+                    )
+        except Exception as exc:
+            logger.warning(
+                "Failed to queue design review email for share %s: %s",
+                share.id,
+                exc,
+            )
 
     return share
 

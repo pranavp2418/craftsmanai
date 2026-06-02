@@ -3,10 +3,12 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.design import DesignVariantManufacturerShare, ManufacturerShareStatus
 from app.repositories.manufacturer_variant_share import DesignVariantManufacturerShareRepository
 from app.repositories.design_variant import DesignVariantRepository
 from app.repositories.activity_log import DesignActivityLogRepository
+from app.repositories.manufacturer import ManufacturerRepository
 
 
 class DesignVariantManufacturerShareService:
@@ -15,9 +17,20 @@ class DesignVariantManufacturerShareService:
         self.share_repo = DesignVariantManufacturerShareRepository(db)
         self.variant_repo = DesignVariantRepository(db)
         self.activity_repo = DesignActivityLogRepository(db)
+        self.manufacturer_repo = ManufacturerRepository(db)
 
     def _token(self) -> str:
         return secrets.token_urlsafe(18)
+
+    def build_review_url(self, share: DesignVariantManufacturerShare) -> Optional[str]:
+        manufacturer = self.manufacturer_repo.get_by_id(share.manufacturer_id)
+        if not manufacturer:
+            return None
+
+        return (
+            f"{settings.FRONTEND_URL.rstrip('/')}"
+            f"/manufacturer/review/{manufacturer.public_token}?token={share.public_token}"
+        )
 
     def create_share(
         self,
@@ -35,6 +48,7 @@ class DesignVariantManufacturerShareService:
             manufacturer_id=manufacturer_id,
             public_token=self._token(),
         )
+        review_url = self.build_review_url(share)
         self.activity_repo.log(
             design_id=variant.design_id,
             action_type="VARIANT_SHARED_WITH_MANUFACTURER",
@@ -43,6 +57,7 @@ class DesignVariantManufacturerShareService:
                 "variant_id": design_variant_id,
                 "manufacturer_id": manufacturer_id,
                 "share_id": share.id,
+                **({"review_url": review_url} if review_url else {}),
             },
         )
         return share

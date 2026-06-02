@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     EMAILS_FROM_NAME: str = "CRAFTMEN"
     
     # Frontend URL
-    FRONTEND_URL: str = "http://localhost:3000"
+    FRONTEND_URL: str = "https://craftmenai.txogavideo.in/"
 
     @property
     def SMTP_FROM(self) -> Optional[str]:
