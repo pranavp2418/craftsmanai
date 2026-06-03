@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Invoice — CraftsmanAI</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body style="margin:0;padding:0;background-color:#08081a;font-family:'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#08081a;min-height:100vh;">
+    <tr>
+      <td align="center" class="outer-padding" style="padding:40px 16px;">
+        <table role="presentation" width="680" cellpadding="0" cellspacing="0" border="0" class="card-table" style="max-width:680px;width:100%;">
+          <tr><td style="padding:0;"><div style="height:4px;background:linear-gradient(90deg,#3b82f6 0%,#8b5cf6 50%,#ec4899 100%);border-radius:4px 4px 0 0;"></div></td></tr>
+        </table>
+        <table role="presentation" width="680" cellpadding="0" cellspacing="0" border="0" class="card-table" style="max-width:680px;width:100%;background-color:#0f0f2a;border:1px solid rgba(255,255,255,0.06);border-top:none;border-radius:0 0 16px 16px;overflow:hidden;">
+          <tr>
+            <td style="padding:40px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="two-col-table">
+                <tr>
+                  <!-- Left: Features -->
+                  <td width="45%" valign="top" class="invoice-two-col-left" style="padding-right:24px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                      <tr><td><img src="logo_icon.png" alt="CraftsmanAI" width="28" height="28" style="display:block;width:28px;height:28px;border-radius:4px;mix-blend-mode:lighten;" /></td></tr>
+                      <tr><td style="padding-top:12px;"><h2 style="margin:0;font-size:20px;font-weight:700;color:#ffffff;">Hosted Invoice Link</h2><p style="margin:6px 0 0 0;font-size:12px;color:#6b7280;word-break:break-all;">https://app.craftsmanai.app/billing/invoices/{{invoice_id}}</p></td></tr>
+                      <tr><td style="padding-top:28px;">
+                        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                          <tr><td style="padding:8px 0;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td valign="middle"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="10" fill="rgba(34,197,94,0.15)"/><path d="M6 10.5l2.5 2.5L14 7.5" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td><td class="action-item-text" style="padding-left:12px;font-size:13px;color:#d1d5db;font-weight:500;">Clean hosted invoice URL</td></tr></table></td></tr>
+                          <tr><td style="padding:8px 0;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td valign="middle"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="10" fill="rgba(34,197,94,0.15)"/><path d="M6 10.5l2.5 2.5L14 7.5" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td><td class="action-item-text" style="padding-left:12px;font-size:13px;color:#d1d5db;font-weight:500;">Downloadable PDF receipt</td></tr></table></td></tr>
+                          <tr><td style="padding:8px 0;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td valign="middle"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="10" fill="rgba(34,197,94,0.15)"/><path d="M6 10.5l2.5 2.5L14 7.5" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td><td class="action-item-text" style="padding-left:12px;font-size:13px;color:#d1d5db;font-weight:500;">Subscription or top-up line items</td></tr></table></td></tr>
+                          <tr><td style="padding:8px 0;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td valign="middle"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="10" fill="rgba(34,197,94,0.15)"/><path d="M6 10.5l2.5 2.5L14 7.5" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td><td class="action-item-text" style="padding-left:12px;font-size:13px;color:#d1d5db;font-weight:500;">Billing portal and support links</td></tr></table></td></tr>
+                        </table>
+                      </td></tr>
+                    </table>
+                  </td>
+                  <!-- Right: Invoice Card -->
+                  <td width="55%" valign="top" class="invoice-two-col-right">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.3);">
+                      <tr><td style="padding:16px 20px;border-bottom:1px solid #e5e7eb;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td valign="middle"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td><img src="logo_icon.png" alt="" width="20" height="20" style="display:block;width:20px;height:20px;border-radius:4px;" /></td><td style="padding-left:8px;"><p style="margin:0;font-size:14px;font-weight:700;color:#111827;">CraftsmanAI</p><p style="margin:1px 0 0 0;font-size:10px;color:#9ca3af;">Invoice {{invoice_id}}</p></td></tr></table></td><td align="right" valign="middle"><span style="display:inline-block;padding:3px 10px;border-radius:20px;background-color:#dcfce7;color:#16a34a;font-size:10px;font-weight:600;">PAID</span></td></tr></table></td></tr>
+                      <tr><td style="padding:14px 20px 8px 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td><p style="margin:0;font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Billed to</p><p style="margin:3px 0 0 0;font-size:13px;font-weight:600;color:#111827;">{{billed_to_name}}</p><p style="margin:1px 0 0 0;font-size:11px;color:#6b7280;">{{billed_to_email}}</p></td><td align="right" valign="top"><p style="margin:0;font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Payment date</p><p style="margin:3px 0 0 0;font-size:13px;font-weight:600;color:#111827;">{{payment_date}}</p></td></tr></table></td></tr>
+                      <tr><td style="padding:12px 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;"><tr style="background-color:#f9fafb;"><td style="padding:8px 12px;font-size:11px;color:#6b7280;font-weight:600;">Item</td><td align="right" style="padding:8px 12px;font-size:11px;color:#6b7280;font-weight:600;">Amount</td></tr><tr><td style="padding:12px;border-top:1px solid #e5e7eb;"><p style="margin:0;font-size:13px;font-weight:600;color:#111827;">{{line_item_name}}</p><p style="margin:2px 0 0 0;font-size:11px;color:#9ca3af;">{{line_item_description}}</p></td><td align="right" style="padding:12px;border-top:1px solid #e5e7eb;font-size:13px;font-weight:600;color:#111827;">{{line_item_amount}}</td></tr></table></td></tr>
+                      <tr><td style="padding:4px 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:3px 0;font-size:12px;color:#9ca3af;">Subtotal</td><td align="right" style="padding:3px 0;font-size:12px;color:#374151;">{{subtotal}}</td></tr><tr><td style="padding:3px 0;font-size:12px;color:#9ca3af;">Tax</td><td align="right" style="padding:3px 0;font-size:12px;color:#374151;">{{tax}}</td></tr></table></td></tr>
+                      <tr><td style="padding:12px 20px 16px 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:linear-gradient(135deg,rgba(124,58,237,0.06),rgba(168,85,247,0.06));border:1px solid rgba(139,92,246,0.15);border-radius:8px;"><tr><td style="padding:12px 16px;font-size:14px;color:#374151;font-weight:600;">Total paid</td><td align="right" class="receipt-total-amount" style="padding:12px 16px;font-size:24px;font-weight:700;color:#7c3aed;">{{total_amount}}</td></tr></table></td></tr>
+                      <tr><td style="padding:0 20px 20px 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td width="48%" style="padding-right:8px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="border-radius:50px;background:linear-gradient(135deg,#7c3aed 0%,#a855f7 50%,#ec4899 100%);"><a href="{{pdf_url}}" class="cta-button" style="display:inline-block;padding:11px 16px;font-size:13px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:50px;width:100%;text-align:center;box-sizing:border-box;">Download PDF</a></td></tr></table></td><td width="48%" style="padding-left:8px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="border-radius:50px;border:1px solid #d1d5db;"><a href="{{billing_url}}" class="cta-button" style="display:inline-block;padding:10px 16px;font-size:13px;font-weight:600;color:#374151;text-decoration:none;border-radius:50px;width:100%;text-align:center;box-sizing:border-box;">Manage Billing</a></td></tr></table></td></tr></table></td></tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+  <!-- Footer -->
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#08081a;">
+    <tr>
+      <td align="center" style="padding:24px 16px 40px 16px;">
+        <p style="margin:0;font-size:12px;color:#4b5563;">&copy; 2026 CraftsmanAI. All rights reserved. &bull; support@craftsmanai.app</p>
+      </td>
+    </tr>
+  </table>
+  <script>
+    // Dynamic preview mode defaults
+    document.addEventListener("DOMContentLoaded", function() {
+      const defaults = {
+        "invoice_id": "INV-2026-8942",
+        "billed_to_name": "Acme Corporation",
+        "billed_to_email": "billing@acme.com",
+        "payment_date": "June 3, 2026",
+        "line_item_name": "CraftsmanAI Platform Subscription",
+        "line_item_description": "Enterprise Pro Plan - Annual seat licensing",
+        "line_item_amount": "$2,400.00",
+        "subtotal": "$2,400.00",
+        "tax": "$0.00",
+        "total_amount": "$2,400.00",
+        "pdf_url": "#",
+        "billing_url": "#"
+      };
+      
+      function replacePlaceholders(node) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          let text = node.nodeValue;
+          let replaced = false;
+          for (const [key, val] of Object.entries(defaults)) {
+            const placeholder = `{{${key}}}`;
+            if (text.includes(placeholder)) {
+              text = text.replaceAll(placeholder, val);
+              replaced = true;
+            }
+          }
+          if (replaced) node.nodeValue = text;
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+          for (let i = 0; i < node.attributes.length; i++) {
+            let attr = node.attributes[i];
+            for (const [key, val] of Object.entries(defaults)) {
+              const placeholder = `{{${key}}}`;
+              if (attr.value.includes(placeholder)) {
+                attr.value = attr.value.replaceAll(placeholder, val);
+              }
+            }
+          }
+          node.childNodes.forEach(replacePlaceholders);
+        }
+      }
+      
+      if (document.body.innerHTML.includes("{{")) {
+        replacePlaceholders(document.body);
+      }
+    });
+  </script>
+</body>
+</html>
