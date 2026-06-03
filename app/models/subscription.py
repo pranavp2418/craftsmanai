@@ -105,6 +105,7 @@ class Payment(Base):
     # Relationships
     user = relationship("User", back_populates="payments")
     plan = relationship("SubscriptionPlan", back_populates="payments")
+    invoice = relationship("Invoice", back_populates="payment", uselist=False, cascade="all, delete-orphan")
 
 
 class SubscriptionEventType(str, enum.Enum):

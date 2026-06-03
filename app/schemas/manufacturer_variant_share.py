@@ -10,7 +10,11 @@ from app.schemas.manufacturer import ManufacturerResponse
 
 
 class ManufacturerVariantShareRequest(BaseModel):
-    """Request to share a design variant with a manufacturer for quoting."""
+    """Request to share a design variant with a manufacturer for quoting.
+
+    Note: The variant must be shared with a customer first. The manufacturer
+    will automatically see the same metal that was shared with the customer.
+    """
 
     manufacturer_id: int = Field(..., ge=1, description="ID of the manufacturer to share with")
 
@@ -25,6 +29,7 @@ class ManufacturerVariantShareResponse(BaseModel):
     cost_price: Optional[float] = None
     delivery_time_days: Optional[int] = None
     notes: Optional[str] = None
+    shared_metal: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -43,6 +48,7 @@ class ManufacturerVariantShareDetailResponse(BaseModel):
     manufacturer_notes: Optional[str] = None
     status: str
     public_token: str
+    shared_metal: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -59,7 +65,6 @@ class VariantManufacturerSharesResponse(BaseModel):
     design_status: DesignStatus
     total_shares: int
     shares: list[ManufacturerVariantShareDetailResponse]
-    share_details: list[ManufacturerVariantShareDetailResponse] = Field(default_factory=list)
 
 
 class ManufacturerQuoteSubmitRequest(BaseModel):

@@ -12,6 +12,7 @@ from app.core.dependencies import get_current_active_user
 from app.models.manufacturer import Manufacturer
 from app.models.user import User
 from app.models.email_log import EmailLog, EmailStatus
+from app.repositories.design_share import DesignShareRepository
 from app.schemas.manufacturer_variant_share import (
     ManufacturerVariantShareRequest,
     ManufacturerVariantShareResponse,
@@ -75,10 +76,15 @@ def share_variant_with_manufacturer(
     Creates a share link that the manufacturer can use to view the variant
     and submit a quote.  The returned ``public_token`` should be sent to the
     manufacturer.
+
+    This endpoint requires the variant to be first shared with a customer.
+    The manufacturer will automatically see the same metal that was shared
+    with the customer.
     """
     design_service = DesignService(db)
     variant_service = DesignVariantService(db)
     share_service = DesignVariantManufacturerShareService(db)
+    share_repo = DesignShareRepository(db)
 
     variant = variant_service.get_variant(variant_id)
     if not variant:
@@ -92,72 +98,65 @@ def share_variant_with_manufacturer(
     manufacturer = db.query(Manufacturer).filter(Manufacturer.id == payload.manufacturer_id).first()
     if not manufacturer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Manufacturer not found")
+    # ── Check if variant was shared with a customer first ──────────────
+    customer_shares = share_repo.list_for_design_variant(variant.id)
+    if not customer_shares:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Design variant must be shared with a customer before sharing with a manufacturer. "
+                   "Please share this variant with a customer first via POST /variants/{id}/share",
+        )
+
+    # Use the metal from the customer share (latest one), or None if not set
+    latest_customer_share = customer_shares[0]
+    shared_metal = latest_customer_share.shared_metal
 
     share = share_service.create_share(
         design_variant_id=variant.id,
         manufacturer_id=payload.manufacturer_id,
+        shared_metal=shared_metal,
     )
 
-    review_url = share_service.build_review_url(share)
-    email_log_id = None
-    
-    # Send email to manufacturer if they have an email configured
-    try:
-        recipient_email = _extract_manufacturer_email(manufacturer)
-        if recipient_email:
-            # Create email log
-            subject = f"Review your Craftmen design: {design.name}"
-            email_log = EmailLog(
-                to_email=recipient_email,
-                template_name="design_review",
-                subject=subject,
-                template_variables=json.dumps({
-                    "customer_name": manufacturer.name,
-                    "review_url": review_url,
-                    "design_name": design.name,
-                    "variant_name": variant.variant_name,
-                }),
-                status=EmailStatus.PENDING,
-                retry_count=0,
+    # Queue an email/SMS to the manufacturer with the preview link
+    # We will get the manufacturer's email/phone from the DB
+    from app.repositories.manufacturer import ManufacturerRepository
+    from app.tasks.email_tasks import send_manufacturer_share_email, send_manufacturer_share_sms
+    from app.core.config import settings
+
+    manufacturer_repo = ManufacturerRepository(db)
+    manufacturer = manufacturer_repo.get_by_id(payload.manufacturer_id)
+    if manufacturer:
+        preview_url = f"{settings.FRONTEND_URL}/manufacturer/review/{share.public_token}"
+        
+        # Manufacturer emails may be stored as a string or json in `emails`
+        primary_email = None
+        if hasattr(manufacturer, 'emails') and manufacturer.emails:
+            import json
+            try:
+                emails_data = json.loads(manufacturer.emails)
+                if isinstance(emails_data, list) and len(emails_data) > 0:
+                    primary_email = emails_data[0].get("email") if isinstance(emails_data[0], dict) else emails_data[0]
+                elif isinstance(emails_data, dict):
+                    primary_email = emails_data.get("email")
+                else:
+                    primary_email = str(emails_data)
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                primary_email = str(manufacturer.emails).split(',')[0].strip()
+        
+        if primary_email:
+            send_manufacturer_share_email.delay(
+                to_email=primary_email,
+                manufacturer_name=manufacturer.name,
+                preview_url=preview_url,
+                designer_name=current_user.full_name or current_user.username
             )
-            db.add(email_log)
-            db.commit()
-            db.refresh(email_log)
-            email_log_id = str(email_log.id)
             
-            send_design_review_email.delay(
-                recipient_email,
-                manufacturer.name,
-                review_url,
-                design.name,
-                variant.variant_name,
-                email_log_id,
+        if hasattr(manufacturer, 'phone_number') and manufacturer.phone_number:
+            send_manufacturer_share_sms.delay(
+                to_number=manufacturer.phone_number,
+                manufacturer_name=manufacturer.name,
+                preview_url=preview_url,
+                designer_name=current_user.full_name or current_user.username
             )
-    except Exception as exc:
-        logger.warning(
-            "Failed to queue design review email for manufacturer share %s: %s",
-            share.id,
-            exc,
-        )
 
-    if review_url:
-        logger.info(
-            "Created manufacturer share %s for variant %s and manufacturer %s: %s",
-            share.id,
-            share.design_variant_id,
-            share.manufacturer_id,
-            review_url,
-        )
-
-    return {
-        "id": share.id,
-        "design_variant_id": share.design_variant_id,
-        "manufacturer_id": share.manufacturer_id,
-        "public_token": share.public_token,
-        "review_url": review_url,
-        "status": share.status.value if hasattr(share.status, "value") else share.status,
-        "cost_price": share.cost_price,
-        "delivery_time_days": share.delivery_time_days,
-        "notes": share.notes,
-        "created_at": share.created_at,
-    }
+    return share

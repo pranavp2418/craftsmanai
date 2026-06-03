@@ -69,6 +69,7 @@ def get_customer_design_shares(
             "shared_on": share.created_at,
             "status": status_val,
             "customer_comment": share.comment,
+            "token": share.public_token,
         })
 
     return shares

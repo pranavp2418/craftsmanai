@@ -72,8 +72,20 @@ class ManufacturerQuoteResponse(BaseModel):
         from_attributes = True
 
 
+class ManufacturerQuoteDetailResponse(ManufacturerQuoteResponse):
+    manufacturer_name: Optional[str]
+    metal: Optional[str]
+    
+    class Config:
+        from_attributes = True
+
+
 class ManufacturerQuoteListResponse(BaseModel):
     items: List[ManufacturerQuoteResponse]
+
+
+class ManufacturerQuoteDetailListResponse(BaseModel):
+    items: List[ManufacturerQuoteDetailResponse]
 
 
 class OrderActivityLogEntry(BaseModel):

@@ -86,35 +86,55 @@ def share_design_variant(
     if not design:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
 
+    # Normalize metal to lowercase for consistent lookup
+    metal = payload.metal.lower() if payload.metal else None
+
     share = sharing_service.create_share(
         design_variant_id=variant.id,
         customer_id=payload.customer_id,
         comment=payload.comment,
-       
+        shared_metal=metal,
     )
 
+    # Queue email to customer if customer exists and has email/phone
     if payload.customer_id:
-        try:
-            customer = db.query(Customer).filter(Customer.id == payload.customer_id).first()
-            if customer:
-                recipient_email = _extract_customer_email(customer)
-                if recipient_email:
-                    review_url = (
-                        f"{settings.FRONTEND_URL.rstrip('/')}"
-                        f"/customer/review/{customer.public_token}?token={share.public_token}"
-                    )
-                    send_design_review_email.delay(
-                        recipient_email,
-                        customer.full_name,
-                        review_url,
-                        design.name,
-                        variant.variant_name,
-                    )
-        except Exception as exc:
-            logger.warning(
-                "Failed to queue design review email for share %s: %s",
-                share.id,
-                exc,
+        from app.repositories.customer import CustomerRepository
+        from app.tasks.email_tasks import send_customer_share_email, send_customer_share_sms
+        from app.core.config import settings
+
+        customer_repo = CustomerRepository(db)
+        customer = customer_repo.get_by_id(payload.customer_id)
+        
+        preview_url = f"{settings.FRONTEND_URL}/review/{share.public_token}"
+        
+        if customer and hasattr(customer, 'emails') and customer.emails:
+            import json
+            try:
+                emails_data = json.loads(customer.emails)
+                if isinstance(emails_data, list) and len(emails_data) > 0:
+                    primary_email = emails_data[0].get("email") if isinstance(emails_data[0], dict) else emails_data[0]
+                elif isinstance(emails_data, dict):
+                    primary_email = emails_data.get("email")
+                else:
+                    primary_email = str(emails_data)
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                # Fallback if it's stored differently
+                primary_email = str(customer.emails).split(',')[0].strip()
+            
+            if primary_email:
+                send_customer_share_email.delay(
+                    to_email=primary_email,
+                    customer_name=customer.full_name or "Customer",
+                    preview_url=preview_url,
+                    designer_name=current_user.full_name or current_user.username
+                )
+                
+        if customer and hasattr(customer, 'phone_number') and customer.phone_number:
+            send_customer_share_sms.delay(
+                to_number=customer.phone_number,
+                customer_name=customer.full_name or "Customer",
+                preview_url=preview_url,
+                designer_name=current_user.full_name or current_user.username
             )
 
     return share

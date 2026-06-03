@@ -61,7 +61,11 @@ class DesignShareCreateRequest(BaseModel):
 
     customer_id: Optional[int] = None
     comment: Optional[str] = None
-    
+    metal: Optional[str] = Field(
+        default=None,
+        description="Specific metal to share with the customer (e.g. 'gold', 'rose_gold', 'silver'). "
+                    "When set, further manufacturer shares will use the same metal.",
+    )
 
 
 class DesignShareResponse(BaseModel):
@@ -71,6 +75,7 @@ class DesignShareResponse(BaseModel):
     public_token: str
     status: DesignShareStatus
     comment: Optional[str]
+    shared_metal: Optional[str] = None
     reviewed_at: Optional[datetime]
     created_at: datetime
    
