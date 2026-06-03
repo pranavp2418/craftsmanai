@@ -158,50 +158,49 @@ _ALLOWED_CONTENT_TYPES = {
 MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 
 
+from io import BytesIO
+from PIL import Image
+
 def _validate_image_bytes(image_bytes: bytes, content_type: str) -> None:
-    """Validate image bytes for size, type, and content."""
     if not image_bytes:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=400,
             detail="Image data is empty.",
         )
 
     if len(image_bytes) > MAX_IMAGE_SIZE_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=400,
             detail=f"Image exceeds maximum size of {MAX_IMAGE_SIZE_BYTES // 1024 // 1024} MB.",
         )
 
-    actual_type = imghdr.what(None, image_bytes)
-    if actual_type == "jpeg":
-        actual_content_type = "image/jpeg"
-    elif actual_type == "png":
-        actual_content_type = "image/png"
-    elif actual_type == "gif":
-        actual_content_type = "image/gif"
-    elif actual_type == "webp":
-        actual_content_type = "image/webp"
-    else:
+    try:
+        img = Image.open(BytesIO(image_bytes))
+        img.verify()
+
+        format_map = {
+            "JPEG": "image/jpeg",
+            "PNG": "image/png",
+            "GIF": "image/gif",
+            "WEBP": "image/webp",
+        }
+
+        actual_content_type = format_map.get(img.format)
+
+    except Exception:
         actual_content_type = None
 
     if actual_content_type is None:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=400,
             detail="Unsupported or invalid image format.",
         )
 
     if actual_content_type not in _ALLOWED_CONTENT_TYPES:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=400,
             detail=f"Unsupported image type: {actual_content_type}",
         )
-
-    if content_type not in _ALLOWED_CONTENT_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported declared image MIME type: {content_type}",
-        )
-
 
 def _upload_bytes_to_supabase(image_bytes: bytes, content_type: str, bucket_path: str) -> str:
     """Upload raw image bytes to Supabase, with fallback to local storage on failure."""

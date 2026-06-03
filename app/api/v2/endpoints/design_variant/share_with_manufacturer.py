@@ -62,7 +62,7 @@ def _extract_manufacturer_email(manufacturer: Manufacturer) -> Optional[str]:
 
 @router.post(
     "/variants/{variant_id}/share-with-manufacturer",
-    response_model=ManufacturerVariantShareResponse,
+    response_model=list[ManufacturerVariantShareResponse],
     status_code=status.HTTP_201_CREATED,
 )
 def share_variant_with_manufacturer(
@@ -71,14 +71,14 @@ def share_variant_with_manufacturer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Share a design variant with a manufacturer for quoting.
+    """Share a design variant with multiple manufacturers for quoting.
 
-    Creates a share link that the manufacturer can use to view the variant
-    and submit a quote.  The returned ``public_token`` should be sent to the
-    manufacturer.
+    Creates share links that the manufacturers can use to view the variant
+    and submit quotes. The returned list contains details for each share,
+    including the ``public_token`` for each manufacturer.
 
     This endpoint requires the variant to be first shared with a customer.
-    The manufacturer will automatically see the same metal that was shared
+    The manufacturers will automatically see the same metal that was shared
     with the customer.
     """
     design_service = DesignService(db)
@@ -127,40 +127,50 @@ def share_variant_with_manufacturer(
     from app.core.config import settings
 
     manufacturer_repo = ManufacturerRepository(db)
-    manufacturer = manufacturer_repo.get_by_id(payload.manufacturer_id)
-    if manufacturer:
-        preview_url = f"{settings.FRONTEND_URL}/manufacturer/review/{share.public_token}"
-        
-        # Manufacturer emails may be stored as a string or json in `emails`
-        primary_email = None
-        if hasattr(manufacturer, 'emails') and manufacturer.emails:
-            import json
-            try:
-                emails_data = json.loads(manufacturer.emails)
-                if isinstance(emails_data, list) and len(emails_data) > 0:
-                    primary_email = emails_data[0].get("email") if isinstance(emails_data[0], dict) else emails_data[0]
-                elif isinstance(emails_data, dict):
-                    primary_email = emails_data.get("email")
-                else:
-                    primary_email = str(emails_data)
-            except (json.JSONDecodeError, TypeError, AttributeError):
-                primary_email = str(manufacturer.emails).split(',')[0].strip()
-        
-        if primary_email:
-            send_manufacturer_share_email.delay(
-                to_email=primary_email,
-                manufacturer_name=manufacturer.name,
-                preview_url=preview_url,
-                designer_name=current_user.full_name or current_user.username
-            )
+
+    for m_id in payload.manufacturer_ids:
+        share = share_service.create_share(
+            design_variant_id=variant.id,
+            manufacturer_id=m_id,
+            shared_metal=shared_metal,
+        )
+        shares.append(share)
+
+        # Queue an email/SMS to the manufacturer with the preview link
+        manufacturer = manufacturer_repo.get_by_id(m_id)
+        if manufacturer:
+            preview_url = f"{settings.FRONTEND_URL}/manufacturer/review/{share.public_token}"
             
-        if hasattr(manufacturer, 'phone_number') and manufacturer.phone_number:
-            send_manufacturer_share_sms.delay(
-                to_number=manufacturer.phone_number,
-                manufacturer_name=manufacturer.name,
-                preview_url=preview_url,
-                designer_name=current_user.full_name or current_user.username
-            )
+            # Manufacturer emails may be stored as a string or json in `emails`
+            primary_email = None
+            if hasattr(manufacturer, 'emails') and manufacturer.emails:
+                import json
+                try:
+                    emails_data = json.loads(manufacturer.emails)
+                    if isinstance(emails_data, list) and len(emails_data) > 0:
+                        primary_email = emails_data[0].get("email") if isinstance(emails_data[0], dict) else emails_data[0]
+                    elif isinstance(emails_data, dict):
+                        primary_email = emails_data.get("email")
+                    else:
+                        primary_email = str(emails_data)
+                except (json.JSONDecodeError, TypeError, AttributeError):
+                    primary_email = str(manufacturer.emails).split(',')[0].strip()
+            
+            if primary_email:
+                send_manufacturer_share_email.delay(
+                    to_email=primary_email,
+                    manufacturer_name=manufacturer.name,
+                    preview_url=preview_url,
+                    designer_name=current_user.full_name or current_user.username
+                )
+                
+            if hasattr(manufacturer, 'phone_number') and manufacturer.phone_number:
+                send_manufacturer_share_sms.delay(
+                    to_number=manufacturer.phone_number,
+                    manufacturer_name=manufacturer.name,
+                    preview_url=preview_url,
+                    designer_name=current_user.full_name or current_user.username
+                )
 
     # Return response with review_url included
     response_data = {

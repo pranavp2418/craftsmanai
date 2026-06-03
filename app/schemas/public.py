@@ -39,12 +39,16 @@ class PublicDesignVariantResponse(BaseModel):
         from_attributes = True
 
 
+from app.schemas.production_sheet import ProductionSheetResponse
+
 class PublicDesignFullResponse(BaseModel):
     design: PublicDesignAccessResponse
     variants: List[PublicDesignVariantResponse]
     share_status: Optional[DesignShareStatus] = None
     share_comment: Optional[str] = None
     public_token: str
+    production_sheet: Optional[ProductionSheetResponse] = None
+
     
 
 

@@ -108,12 +108,17 @@ def manufacturer_access_shared_variant(
         status=design.status,
     )
 
+    # Fetch production sheet details using the design variant id
+    from app.models.production_sheet import ProductionSheet
+    production_sheet = db.query(ProductionSheet).filter(ProductionSheet.variant_id == variant.id).first()
+
     return PublicDesignFullResponse(
         design=design_response,
         variants=variant_responses,
-        share_status=None,  # Manufacturer share uses its own status
+        share_status=share.status,  # Manufacturer share uses its own status
         share_comment=share.notes,
         public_token=share.public_token,
+        production_sheet=production_sheet,
     )
 
 

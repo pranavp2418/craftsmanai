@@ -97,6 +97,7 @@ class DesignShareStatus(str, Enum):
     REJECTED = "REJECTED"
     NEEDS_REFINEMENT = "NEEDS_REFINEMENT"
     Customer_Approved = "CUSTOMER_APPROVED"
+    Quoted = "QUOTED"
 
 
 class DesignShare(Base):
