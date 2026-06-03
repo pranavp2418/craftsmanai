@@ -65,6 +65,7 @@ def _extract_manufacturer_email(manufacturer: Manufacturer) -> Optional[str]:
     response_model=list[ManufacturerVariantShareResponse],
     status_code=status.HTTP_201_CREATED,
 )
+    
 def share_variant_with_manufacturer(
     variant_id: int,
     payload: ManufacturerVariantShareRequest,
@@ -80,7 +81,7 @@ def share_variant_with_manufacturer(
     This endpoint requires the variant to be first shared with a customer.
     The manufacturers will automatically see the same metal that was shared
     with the customer.
-    """
+    """  
     design_service = DesignService(db)
     variant_service = DesignVariantService(db)
     share_service = DesignVariantManufacturerShareService(db)
@@ -111,6 +112,13 @@ def share_variant_with_manufacturer(
     latest_customer_share = customer_shares[0]
     shared_metal = latest_customer_share.shared_metal
 
+    if not payload.manufacturer_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one manufacturer ID must be provided."
+        )
+    
+    shares=[]
     share = share_service.create_share(
         design_variant_id=variant.id,
         manufacturer_id=payload.manufacturer_id,
