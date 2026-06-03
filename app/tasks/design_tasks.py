@@ -12,7 +12,7 @@ import requests
 from app.core.database import SessionLocal
 from app.models.design import Design
 from app.services.ai_workflow_service import AIGenerationWorkflowService
-from app.services.ai_workflow_v5_service import generate_jewelry_with_cross_agent
+
 from app.services.design_variant_service import DesignVariantService
 from app.services.openai_service import openai_service
 from app.services.storage_service import _validate_image_bytes, upload_image_to_supabase
@@ -76,37 +76,35 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
         if not design:
             raise ValueError(f"Design with id {design_id} not found")
 
-        # Resolve reference image URL
-        reference_image_url = _resolve_reference_image_url(design) if (
-            (design.input_image_urls and isinstance(design.input_image_urls, list) and design.input_image_urls)
-            or design.input_image_url
-        ) else None
+        # Resolve reference image source (can be a list of URLs or single URL)
+        reference_image_source = None
+        if design.input_image_urls and isinstance(design.input_image_urls, list) and design.input_image_urls:
+            reference_image_source = design.input_image_urls
+        elif design.input_image_url:
+            reference_image_source = design.input_image_url
 
-        if reference_image_url:
-            # ── V5 Cross-Agent Pipeline ──────────────────────────────
-            # Build a progress callback that publishes SSE events at each stage
-            def _progress_callback(stage: str, data: dict):
-                sse_data = {
+        if reference_image_source:
+            # Publish initial stage events
+            _publish_sse(
+                channel,
+                data={
                     "design_id": design.id,
                     "design_code": design.design_code,
-                    "stage": stage,
-                    "message": data.get("message", ""),
-                }
-                _publish_sse(channel, data=sse_data, event=f"design.{stage}")
-
-            # Run the cross-agent iterative refinement pipeline
-            final_image_bytes, validations = generate_jewelry_with_cross_agent(
-                base_image_source=reference_image_url,
-                user_request=prompt,
-                jewellery_type=design.jewellery_type or "pendant",
-                max_iterations=3,
-                progress_callback=_progress_callback,
+                    "stage": "generating",
+                    "message": "Generating jewelry render with Gemini...",
+                },
+                event="design.generating",
             )
 
-            if final_image_bytes is None:
-                raise ValueError("Cross-agent generation pipeline failed to produce a final image.")
+            # Use the newly migrated Gemini high-fidelity pipeline (Primary + Fallback + QA Checks)
+            generated_item = openai_service.generate_base_image(
+                image_source=reference_image_source,
+                user_prompt=prompt,
+                jewellery_type=design.jewellery_type or "pendant",
+            )
 
-            _validate_image_bytes(final_image_bytes, "image/png")
+            final_image_bytes, content_type = _extract_generated_image_data(generated_item)
+            _validate_image_bytes(final_image_bytes, content_type)
 
             # Upload final refined image to Supabase
             bucket_path = f"generated/base/{design.design_code}"

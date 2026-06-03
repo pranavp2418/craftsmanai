@@ -31,8 +31,8 @@ async def create_design(
 
     # Read uploaded file bytes and pass them to standard validation/upload flow
     if files:
-        if files.__len__() > 1:
-            raise HTTPException(status_code=400, detail="Only 1 reference images allowed.")
+        if files.__len__() > 2:
+            raise HTTPException(status_code=400, detail="Only up to 2 reference images allowed.")
         file_bytes_list = []
         for file in files:
             content = await file.read()

@@ -41,6 +41,7 @@ class DesignResponse(BaseModel):
     status: DesignStatus
     created_at: datetime
     updated_at: Optional[datetime]
+    base_image_url: Optional[str] = None
 
     class Config:
         from_attributes = True

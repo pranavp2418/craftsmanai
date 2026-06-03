@@ -10,13 +10,13 @@ from app.schemas.manufacturer import ManufacturerResponse
 
 
 class ManufacturerVariantShareRequest(BaseModel):
-    """Request to share a design variant with a manufacturer for quoting.
+    """Request to share a design variant with a list of manufacturers for quoting.
 
-    Note: The variant must be shared with a customer first. The manufacturer
+    Note: The variant must be shared with a customer first. The manufacturers
     will automatically see the same metal that was shared with the customer.
     """
 
-    manufacturer_id: int = Field(..., ge=1, description="ID of the manufacturer to share with")
+    manufacturer_ids: list[int] = Field(..., min_length=1, description="List of IDs of the manufacturers to share with")
 
 
 class ManufacturerVariantShareResponse(BaseModel):
