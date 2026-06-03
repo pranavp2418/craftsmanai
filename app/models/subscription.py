@@ -5,6 +5,7 @@ from sqlalchemy.orm import relationship
 from app.core.database import Base
 import enum
 import uuid
+from typing import Optional
 
 class SubscriptionStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
@@ -82,6 +83,10 @@ class UserSubscription(Base):
     # Relationships
     user = relationship("User", back_populates="subscriptions")
     plan = relationship("SubscriptionPlan", back_populates="subscriptions")
+
+    @property
+    def plan_name(self) -> Optional[str]:
+        return self.plan.name if self.plan else None
 
 
 class Payment(Base):

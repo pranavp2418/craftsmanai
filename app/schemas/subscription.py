@@ -69,7 +69,8 @@ class UserSubscriptionInDBBase(UserSubscriptionBase):
     model_config = ConfigDict(from_attributes=True)
 
 class UserSubscription(UserSubscriptionInDBBase):
-    pass
+    plan_name: Optional[str] = None
+    plan: Optional[SubscriptionPlan] = None
 
 # Payment Schemas
 class PaymentBase(BaseModel):

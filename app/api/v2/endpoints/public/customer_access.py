@@ -104,11 +104,15 @@ def customer_access_design(
     )
 
 
+    from app.repositories.brand_setting import BrandSettingRepository
+    brand_setting = BrandSettingRepository(db).get_by_user_id(design.user_id)
+
     return PublicDesignFullResponse(
         design=design_response,
         variants=variant_responses,
         share_status=share.status,
         share_comment=share.comment,
         public_token=share.public_token,
-       
+        brand_logo_url=brand_setting.logo_url if brand_setting else None,
+        brand_primary_color=brand_setting.primary_color if brand_setting else "#6366F1",
     )

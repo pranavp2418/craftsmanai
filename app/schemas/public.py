@@ -48,6 +48,8 @@ class PublicDesignFullResponse(BaseModel):
     share_comment: Optional[str] = None
     public_token: str
     production_sheet: Optional[ProductionSheetResponse] = None
+    brand_logo_url: Optional[str] = None
+    brand_primary_color: Optional[str] = None
 
     
 

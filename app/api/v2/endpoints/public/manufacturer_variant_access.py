@@ -112,6 +112,9 @@ def manufacturer_access_shared_variant(
     from app.models.production_sheet import ProductionSheet
     production_sheet = db.query(ProductionSheet).filter(ProductionSheet.variant_id == variant.id).first()
 
+    from app.repositories.brand_setting import BrandSettingRepository
+    brand_setting = BrandSettingRepository(db).get_by_user_id(design.user_id)
+
     return PublicDesignFullResponse(
         design=design_response,
         variants=variant_responses,
@@ -119,6 +122,8 @@ def manufacturer_access_shared_variant(
         share_comment=share.notes,
         public_token=share.public_token,
         production_sheet=production_sheet,
+        brand_logo_url=brand_setting.logo_url if brand_setting else None,
+        brand_primary_color=brand_setting.primary_color if brand_setting else "#6366F1",
     )
 
 

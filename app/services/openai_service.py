@@ -1703,7 +1703,7 @@ def generate_with_fallback(
                         ssim_score = calculate_ssim_similarity(local_ref_path, local_gen_path)
                         logger.info(f"[ATTEMPT {attempt}] HASH SIMILARITY: {hash_score}, SSIM SIMILARITY: {ssim_score}")
                         
-                        similarity_passed = (ssim_score >= 50.0 and hash_score >= 80)
+                        similarity_passed = (60.0 <= ssim_score <= 65.0 and hash_score >= 40)
                     finally:
                         if gen_temp_cleanup and os.path.exists(gen_temp_cleanup):
                             try:
@@ -1725,10 +1725,16 @@ def generate_with_fallback(
 
         # If we completed all attempts and have some candidates but none passed both checks perfectly
         if candidates:
-            # Sort by overall score descending
-            candidates.sort(key=lambda x: x[3], reverse=True)
+            # Sort by ssim distance to [60.0, 65.0] range (ascending), and tie-break by hash score (descending)
+            def get_distance_to_60_65(c):
+                ssim = c[1]
+                if 60.0 <= ssim <= 65.0:
+                    return 0.0
+                return min(abs(ssim - 60.0), abs(ssim - 65.0))
+
+            candidates.sort(key=lambda x: (get_distance_to_60_65(x), -x[2]))
             best_candidate = candidates[0]
-            logger.info(f"All attempts completed. None passed all checks. Returning highest similarity image (Attempt with HASH: {best_candidate[2]}, SSIM: {best_candidate[1]})")
+            logger.info(f"All attempts completed. None passed all checks. Returning closest similarity image (Attempt with HASH: {best_candidate[2]}, SSIM: {best_candidate[1]})")
             return best_candidate[0]
 
         # =====================================================
