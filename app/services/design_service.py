@@ -1,8 +1,9 @@
 from typing import List, Optional, Tuple
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
-from app.models.design import Design, DesignStatus
+from app.models.design import Design, DesignStatus, DesignVariant, DesignShare
+from app.models.customer import Customer
 from app.models.user import User
 from app.repositories.design import DesignRepository
 from app.repositories.activity_log import DesignActivityLogRepository
@@ -104,6 +105,63 @@ class DesignService:
             return self.design_repo.get_by_id_for_user(design_id, user.id)
         return self.design_repo.get_by_id_for_team_member(design_id, user.id, user.team_owner_id)
 
+    def _enrich_with_variants(self, design: Design) -> Design:
+        """Eagerly load variants for a design."""
+        return self.db.query(Design).options(
+            joinedload(Design.variants)
+        ).filter(Design.id == design.id).first() or design
+
+    def _get_variants_for_design(self, design_id: int) -> List[DesignVariant]:
+        """Get the first (most recent) non-archived, non-deleted variant for a design."""
+        variant = (
+            self.db.query(DesignVariant)
+            .filter(
+                DesignVariant.design_id == design_id,
+                DesignVariant.is_archived.is_(False),
+                DesignVariant.is_deleted.is_(False),
+            )
+            .order_by(DesignVariant.created_at.desc())
+            .first()
+        )
+        return [variant] if variant else []
+
+    def _get_shared_customers_for_design(self, design_id: int) -> Optional[dict]:
+        """Get the customer a design's variant has been shared to (max one per design)."""
+        # Find all variant IDs for this design
+        variant_ids = [
+            v[0] for v in self.db.query(DesignVariant.id)
+            .filter(
+                DesignVariant.design_id == design_id,
+                DesignVariant.is_deleted.is_(False),
+            )
+            .all()
+        ]
+        if not variant_ids:
+            return None
+
+        # Get the most recent share with customer info (a design variant is shared to at most one customer)
+        share = (
+            self.db.query(DesignShare, Customer)
+            .join(Customer, DesignShare.customer_id == Customer.id)
+            .filter(
+                DesignShare.design_variant_id.in_(variant_ids),
+                DesignShare.customer_id.isnot(None),
+            )
+            .order_by(DesignShare.created_at.desc())
+            .first()
+        )
+
+        if not share:
+            return None
+
+        share_row, customer = share
+        return {
+            "customer_name": customer.full_name,
+            "public_token": share_row.public_token,
+            "share_status": share_row.status,
+            "share_comment": share_row.comment,
+        }
+
     def list_designs(
         self,
         *,
@@ -129,6 +187,13 @@ class DesignService:
             # Regular user or team owner: see all designs where user_id matches
             items = self.design_repo.list_by_user(user.id, status=status, limit=limit, offset=offset)
             total = self.design_repo.count_by_user(user.id, status=status)
+
+        # Attach variants and shared customer info to each design
+        for design in items:
+            # Set variants as a transient attribute (not persisted)
+            design._variants = self._get_variants_for_design(design.id)
+            design._shared_customer = self._get_shared_customers_for_design(design.id)
+
         return items, total
 
     def list_archived_designs(self, *, limit: int = 50, offset: int = 0):
@@ -136,6 +201,14 @@ class DesignService:
 
     def count_archived_designs(self) -> int:
         return self.design_repo.count_archived()
+
+    def get_design_with_relations(self, design_id: int) -> Optional[Design]:
+        """Get a single design with variants and shared customers loaded."""
+        design = self.design_repo.get_by_id(design_id)
+        if design:
+            design._variants = self._get_variants_for_design(design.id)
+            design._shared_customer = self._get_shared_customers_for_design(design.id)
+        return design
 
     def update_design(
         self,

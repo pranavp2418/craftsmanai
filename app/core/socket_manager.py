@@ -205,9 +205,9 @@ def _build_connect_init_notification(
     elif recent_count > 0:
         title = f"You have {recent_count} recent notification(s)"
         message = "Loaded your recent notifications. New ones will arrive in real-time."
-    else:
-        title = "No notifications"
-        message = "You have no previous notifications. New ones will arrive in real-time."
+    # else:
+    #     title = "No notifications"
+    #     message = "You have no previous notifications. New ones will arrive in real-time."
 
     return {
         "type": "init",

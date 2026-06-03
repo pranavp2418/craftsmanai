@@ -66,7 +66,7 @@ def get_customer_design_shares(
         shares.append({
             "customer_name": customer.full_name if customer else "Unknown Customer",
             "email": customer_email,
-            "shared_on": share.created_at,
+            "shared_on": share.created_at if share.created_at else None,
             "status": status_val,
             "customer_comment": share.comment,
             "token": share.public_token,

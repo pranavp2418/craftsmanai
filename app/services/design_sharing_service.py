@@ -34,6 +34,12 @@ class DesignSharingService:
         if not variant:
             raise ValueError(f"DesignVariant with id {design_variant_id} not found")
 
+        # If this variant has already been shared, return the existing share
+        # to reuse the same public_token instead of generating a new one.
+        existing_shares = self.share_repo.list_for_design_variant(design_variant_id)
+        if existing_shares:
+            return existing_shares[0]
+
         share = self.share_repo.create_share(
             design_variant_id=design_variant_id,
             customer_id=customer_id,

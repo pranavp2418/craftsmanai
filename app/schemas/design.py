@@ -27,6 +27,40 @@ class DesignUpdateRequest(DesignBase):
     status: Optional[DesignStatus] = None
 
 
+class DesignVariantListItem(BaseModel):
+    """Lightweight variant representation for design list responses."""
+    # id: int
+    # design_id: int
+    # parent_variant_id: Optional[int] = None
+    # variant_name: str
+    # version_number: int
+    base_design_image_url: Optional[str] = None
+    # angles_json: Optional[Dict[str, Any]] = None
+    # metal_variations_json: Optional[Dict[str, Any]] = None
+    # prompt_used: Optional[str] = None
+    # model_used: Optional[str] = None
+    # is_selected: bool = False
+    # is_archived: bool = False
+    # design_focus: Optional[str] = None
+    # style_tags: Optional[str] = None
+    # created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SharedCustomerInfo(BaseModel):
+    """Customer information when a design variant has been shared to a customer.
+    A design variant can only be shared to one customer, so only a single entry is returned."""
+    customer_name: str
+    public_token: str
+    share_status: DesignShareStatus
+    share_comment: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class DesignResponse(BaseModel):
     id: int
     user_id: int
@@ -42,6 +76,8 @@ class DesignResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
     base_image_url: Optional[str] = None
+    variants: List[DesignVariantListItem] = Field(default=[], description="First (most recent) non-archived variant of this design")
+    shared_customer: Optional[SharedCustomerInfo] = Field(default=None, description="Customer info if this design's variant has been shared (max one)")
 
     class Config:
         from_attributes = True

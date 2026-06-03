@@ -56,6 +56,11 @@ def share_design_variant(
         shared_metal=metal,
     )
 
+    # Update the design status to SHARED when shared with a customer
+    from app.models.design import DesignStatus
+    if design.status != DesignStatus.SHARED:
+        design_service.update_design(design, status=DesignStatus.SHARED)
+
     # Queue email to customer if customer exists and has email/phone
     if payload.customer_id:
         from app.repositories.customer import CustomerRepository
