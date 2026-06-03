@@ -20,6 +20,9 @@ from app.models.order import Order, ManufacturerQuote, OrderStatus
 router = APIRouter()
 
 
+from app.models.design import DesignVariantManufacturerShare
+
+
 @router.get("/{manufacturer_id}", response_model=ManufacturerDetailResponse)
 def get_manufacturer(
     manufacturer_id: int,
@@ -31,28 +34,34 @@ def get_manufacturer(
     if not manufacturer:
         raise HTTPException(status_code=404, detail="Manufacturer not found")
 
-    # 1. Fetch orders linked to this manufacturer
-    orders = db.query(Order).filter(Order.current_manufacturer_id == manufacturer.id).all()
+    # 1. Fetch manufacturer shares linked to this manufacturer
+    shares = db.query(DesignVariantManufacturerShare).filter(
+        DesignVariantManufacturerShare.manufacturer_id == manufacturer.id
+    ).all()
 
     # 2. Build sent requests
     sent_requests = []
-    for order in orders:
-        design = order.design
+    for share in shares:
+        variant = share.design_variant
+        design = variant.design if variant else None
         if design:
             status_str = "Pending"
-            if order.status == OrderStatus.COMPLETED or getattr(order.status, "value", None) == "COMPLETED":
-                status_str = "Completed"
-            elif order.status == OrderStatus.IN_PRODUCTION or getattr(order.status, "value", None) == "IN_PRODUCTION":
-                status_str = "In Production"
+            share_status = share.status.value if hasattr(share.status, "value") else str(share.status)
+            if share_status == "ACCEPTED":
+                status_str = "Accepted"
+            elif share_status == "REJECTED":
+                status_str = "Rejected"
+            elif share_status == "QUOTED":
+                status_str = "Quoted"
                 
             sent_requests.append(
                 SentRequest(
-                    id=order.id,
+                    id=share.id,
                     design_code=design.design_code,
                     name=design.name,
                     jewellery_type=design.jewellery_type,
                     status=status_str,
-                    created_at=order.created_at,
+                    created_at=share.created_at,
                     thumbnail_url=design.input_image_url,
                 )
             )
@@ -61,61 +70,66 @@ def get_manufacturer(
     production_timeline = []
     activity_dates = [manufacturer.created_at]
 
-    for order in orders:
-        design = order.design
+    for share in shares:
+        variant = share.design_variant
+        design = variant.design if variant else None
         if not design:
             continue
             
         # Request Sent step
         production_timeline.append(
             ProductionStep(
-                id=order.id,
+                id=share.id,
                 action_type="Request Sent",
                 message=f"Request for {design.design_code} {design.jewellery_type or 'Design'} sent to manufacturer",
-                created_at=order.created_at,
+                created_at=share.created_at,
             )
         )
-        activity_dates.append(order.created_at)
+        activity_dates.append(share.created_at)
 
         # Quotes/Approved steps
-        for quote in order.quotes:
+        share_status = share.status.value if hasattr(share.status, "value") else str(share.status)
+        if share_status in ("QUOTED", "ACCEPTED"):
             production_timeline.append(
                 ProductionStep(
-                    id=1000 + quote.id,
+                    id=1000 + share.id,
                     action_type="Quote Submitted",
-                    message=f"Cost quote of ${quote.cost_price or 0:,.2f} submitted",
-                    created_at=quote.created_at,
+                    message=f"Cost quote of ${share.cost_price or 0:,.2f} submitted",
+                    created_at=share.created_at,
                 )
             )
-            activity_dates.append(quote.created_at)
+            activity_dates.append(share.created_at)
             
-            if quote.status.value == "ACCEPTED" or quote.status == "ACCEPTED":
+            if share_status == "ACCEPTED":
                 production_timeline.append(
                     ProductionStep(
-                        id=2000 + quote.id,
+                        id=2000 + share.id,
                         action_type="Approved",
                         message="Quote approved, entered active production phase",
-                        created_at=quote.created_at,
+                        created_at=share.created_at,
                     )
                 )
-                activity_dates.append(quote.created_at)
+                activity_dates.append(share.created_at)
 
     # Sort production timeline by created_at descending
     production_timeline.sort(key=lambda x: x.created_at, reverse=True)
 
     # 4. Compute statistics
-    total_requests = len(orders)
+    total_requests = len(shares)
     completed_requests = len([
-        o for o in orders 
-        if o.status == OrderStatus.COMPLETED or getattr(o.status, "value", None) == "COMPLETED"
+        s for s in shares 
+        if (s.status.value if hasattr(s.status, "value") else str(s.status)) == "ACCEPTED"
     ])
-    pending_requests = total_requests - completed_requests
+    pending_requests = len([
+        s for s in shares 
+        if (s.status.value if hasattr(s.status, "value") else str(s.status)) in ("PENDING", "QUOTED")
+    ])
 
     total_profit = 0.0
-    for order in orders:
-        for quote in order.quotes:
-            if quote.status.value == "ACCEPTED" or quote.status == "ACCEPTED":
-                total_profit += (quote.cost_price or 0.0)
+    for s in shares:
+        s_status = s.status.value if hasattr(s.status, "value") else str(s.status)
+        if s_status == "ACCEPTED":
+            total_profit += (s.cost_price or 0.0)
 
     last_activity = max(activity_dates) if activity_dates else manufacturer.created_at
 

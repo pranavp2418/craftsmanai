@@ -44,6 +44,15 @@ class BrandSettingService:
                     detail=f"The following settings are exclusive to the Business plan: {', '.join(unsupported_fields)}. Please upgrade your plan."
                 )
 
+        # Process base64 logo_url upload if necessary
+        logo_url = kwargs.get("logo_url")
+        if logo_url:
+            if logo_url.startswith("data:image/") or ";base64," in logo_url or len(logo_url) > 1000:
+                from app.services.storage_service import upload_image_to_supabase
+                bucket_path = f"brand_logos/user_{user.id}/logo"
+                public_url = upload_image_to_supabase(logo_url, bucket_path)
+                kwargs["logo_url"] = public_url
+
         # 3. Retrieve settings and apply update
         setting = self.repository.get_by_user_id(user.id)
         return self.repository.update_brand_settings(setting, **kwargs)

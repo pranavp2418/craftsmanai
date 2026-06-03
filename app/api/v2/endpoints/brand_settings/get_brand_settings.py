@@ -14,4 +14,5 @@ def get_brand_settings(
     current_user: User = Depends(get_current_user)
 ):
     service = BrandSettingService(db)
-    return service.get_brand_settings(current_user.id)
+    setting = service.get_brand_settings(current_user.id)
+    return BrandSettingResponse.model_validate(setting)

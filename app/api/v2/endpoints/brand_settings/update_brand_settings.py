@@ -28,4 +28,5 @@ def update_brand_settings(
     if request.primary_color is not None:
         update_data["primary_color"] = request.primary_color
 
-    return service.update_brand_settings(current_user, **update_data)
+    setting = service.update_brand_settings(current_user, **update_data)
+    return BrandSettingResponse.model_validate(setting)

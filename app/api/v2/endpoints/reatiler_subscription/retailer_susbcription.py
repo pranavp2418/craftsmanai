@@ -531,6 +531,9 @@ def get_my_subscriptions(
     """
     Get all active and past subscriptions for current retailer.
     """
-    subs = db.query(UserSubscription).filter(UserSubscription.user_id == current_user.id).all()
+    from sqlalchemy.orm import joinedload
+    subs = db.query(UserSubscription).filter(
+        UserSubscription.user_id == current_user.id
+    ).options(joinedload(UserSubscription.plan)).all()
     return subs
 

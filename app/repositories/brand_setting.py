@@ -10,7 +10,8 @@ class BrandSettingRepository:
 
     def get_by_user_id(self, user_id: int) -> BrandSetting:
         """Fetch brand settings for a user, auto-creating with defaults if they don't exist"""
-        setting = self.db.query(BrandSetting).filter(BrandSetting.user_id == user_id).first()
+        from sqlalchemy.orm import joinedload
+        setting = self.db.query(BrandSetting).options(joinedload(BrandSetting.user)).filter(BrandSetting.user_id == user_id).first()
         if not setting:
             user = self.db.query(User).filter(User.id == user_id).first()
             email = user.email if user else None
