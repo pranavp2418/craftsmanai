@@ -59,12 +59,14 @@ class CustomerRepository:
     def get_by_token(self, token: str) -> Optional[Customer]:
         return self.db.query(Customer).filter(Customer.public_token == token, Customer.is_deleted == False).first()
 
-    def list_customers(self, *, created_by_user_id: int, limit: int = 50, offset: int = 0, search: Optional[str] = None) -> List[Customer]:
+    def list_customers(self, *, created_by_user_id: int, limit: int = 50, offset: int = 0, search: Optional[str] = None, is_active: Optional[bool] = None) -> List[Customer]:
         query = self.db.query(Customer).filter(Customer.created_by_user_id == created_by_user_id, Customer.is_deleted == False)
         if search:
             query = query.filter(
                 (Customer.full_name.ilike(f"%{search}%")) | (Customer.emails.ilike(f"%{search}%"))
             )
+        if is_active is not None:
+            query = query.filter(Customer.is_active == is_active)
         return (
             query.order_by(Customer.created_at.desc())
             .offset(offset)
@@ -80,12 +82,14 @@ class CustomerRepository:
         self.db.refresh(customer)
         return customer
 
-    def count_customers(self, *, created_by_user_id: int, search: Optional[str] = None) -> int:
+    def count_customers(self, *, created_by_user_id: int, search: Optional[str] = None, is_active: Optional[bool] = None) -> int:
         query = self.db.query(func.count(Customer.id)).filter(Customer.created_by_user_id == created_by_user_id, Customer.is_deleted == False)
         if search:
             query = query.filter(
                 (Customer.full_name.ilike(f"%{search}%")) | (Customer.emails.ilike(f"%{search}%"))
             )
+        if is_active is not None:
+            query = query.filter(Customer.is_active == is_active)
         return (
             query.scalar()
             or 0

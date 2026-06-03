@@ -44,8 +44,8 @@ class CustomerService:
     def get_by_token(self, token: str) -> Optional[Customer]:
         return self.customer_repo.get_by_token(token)
 
-    def list_customers(self, *, created_by_user_id: int, limit: int = 50, offset: int = 0, search: Optional[str] = None) -> List[Customer]:
-        return self.customer_repo.list_customers(created_by_user_id=created_by_user_id, limit=limit, offset=offset, search=search)
+    def list_customers(self, *, created_by_user_id: int, limit: int = 50, offset: int = 0, search: Optional[str] = None, is_active: Optional[bool] = None) -> List[Customer]:
+        return self.customer_repo.list_customers(created_by_user_id=created_by_user_id, limit=limit, offset=offset, search=search, is_active=is_active)
 
 
     def update_customer(self, customer: Customer, **kwargs) -> Customer:

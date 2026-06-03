@@ -35,6 +35,7 @@ class DesignVariantListItem(BaseModel):
     # variant_name: str
     # version_number: int
     base_design_image_url: Optional[str] = None
+    reference_images_json: Optional[List[str]] = None
     # angles_json: Optional[Dict[str, Any]] = None
     # metal_variations_json: Optional[Dict[str, Any]] = None
     # prompt_used: Optional[str] = None

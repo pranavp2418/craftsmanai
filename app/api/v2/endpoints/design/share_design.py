@@ -46,6 +46,22 @@ def share_design_variant(
     if not design:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
 
+    # Check if customer exists and is active before sharing
+    if payload.customer_id:
+        from app.repositories.customer import CustomerRepository
+        customer_repo = CustomerRepository(db)
+        customer = customer_repo.get_by_id(payload.customer_id)
+        if not customer:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Customer not found",
+            )
+        if not customer.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid customer",
+            )
+
     # Normalize metal to lowercase for consistent lookup
     metal = payload.metal.lower() if payload.metal else None
 
@@ -63,11 +79,9 @@ def share_design_variant(
 
     # Queue email to customer if customer exists and has email/phone
     if payload.customer_id:
-        from app.repositories.customer import CustomerRepository
         from app.tasks.email_tasks import send_customer_share_email, send_customer_share_sms
         from app.core.config import settings
 
-        customer_repo = CustomerRepository(db)
         customer = customer_repo.get_by_id(payload.customer_id)
         
         preview_url = f"{settings.FRONTEND_URL}/review/{share.public_token}"

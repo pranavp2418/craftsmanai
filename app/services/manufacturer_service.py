@@ -24,6 +24,7 @@ class ManufacturerService:
         emails: Optional[str] = None,
         phone_number: Optional[str] = None,
         location: Optional[str] = None,
+        is_active: bool = True,
     ) -> Manufacturer:
         token = self._generate_token()
         return self.manufacturer_repo.create_manufacturer(
@@ -34,6 +35,7 @@ class ManufacturerService:
             phone_number=phone_number,
             location=location,
             public_token=token,
+            is_active=is_active,
         )
 
     def get_manufacturer(self, manufacturer_id: int) -> Optional[Manufacturer]:

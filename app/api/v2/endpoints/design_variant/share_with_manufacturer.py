@@ -77,6 +77,20 @@ def share_variant_with_manufacturer(
 
     manufacturer_repo = ManufacturerRepository(db)
 
+    # Validate all manufacturers before creating shares
+    for m_id in payload.manufacturer_ids:
+        manufacturer = manufacturer_repo.get_by_id(m_id)
+        if not manufacturer:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Manufacturer {m_id} not found"
+            )
+        if not manufacturer.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid manufacturer"
+            )
+
     for m_id in payload.manufacturer_ids:
         share = share_service.create_share(
             design_variant_id=variant.id,

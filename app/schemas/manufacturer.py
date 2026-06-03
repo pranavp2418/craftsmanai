@@ -26,6 +26,7 @@ class ManufacturerCreateRequest(BaseModel):
     emails: Optional[List[EmailAddressSchema]] = None
     phone_number: Optional[str] = None
     location: Optional[str] = None
+    is_active: Optional[bool] = True
 
 
 class ManufacturerUpdateRequest(BaseModel):

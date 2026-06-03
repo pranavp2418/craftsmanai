@@ -83,6 +83,7 @@ class   DesignVariant(Base):
     is_deleted = Column(Boolean, nullable=False, default=False)
     design_focus = Column(String(100), nullable=True)
     style_tags = Column(String(255), nullable=True)
+    reference_images_json = Column(JSON, nullable=True, doc="List of reference image URLs used as input for refinement")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     design = relationship("Design", back_populates="variants")

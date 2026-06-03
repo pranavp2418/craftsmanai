@@ -76,6 +76,9 @@ class DesignVariantResponse(BaseModel):
     model_used: Optional[str]
     is_selected: bool
     is_archived: bool
+    design_focus: Optional[str] = None
+    style_tags: Optional[str] = None
+    reference_images_json: Optional[List[str]] = None
     created_at: datetime
 
 

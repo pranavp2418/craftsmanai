@@ -29,4 +29,5 @@ def create_manufacturer(
         emails=emails_str,
         phone_number=request.phone_number,
         location=request.location,
+        is_active=request.is_active if request.is_active is not None else True,
     )

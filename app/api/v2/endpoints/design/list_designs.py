@@ -37,6 +37,7 @@ def _build_design_response(design) -> dict:
             is_archived=v.is_archived,
             design_focus=v.design_focus,
             style_tags=v.style_tags,
+            reference_images_json=v.reference_images_json,
             created_at=v.created_at,
         ))
 
