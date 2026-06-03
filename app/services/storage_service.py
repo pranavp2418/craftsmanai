@@ -137,8 +137,8 @@ def _save_to_local_storage(image_bytes: bytes, content_type: str, bucket_path: s
         with open(local_path, "wb") as f:
             f.write(image_bytes)
         logger.info(f"Image saved to local storage: {local_path}")
-        # Return a local file URL or path
-        return f"file://{os.path.abspath(local_path)}"
+        # Return a local file path (without file:// prefix)
+        return os.path.abspath(local_path)
     except Exception as e:
         logger.error(f"Failed to save to local storage: {e}")
         raise HTTPException(

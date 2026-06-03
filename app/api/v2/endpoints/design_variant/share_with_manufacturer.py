@@ -116,6 +116,9 @@ def share_variant_with_manufacturer(
         manufacturer_id=payload.manufacturer_id,
         shared_metal=shared_metal,
     )
+    
+    # Build review URL for response
+    review_url = share_service.build_review_url(share)
 
     # Queue an email/SMS to the manufacturer with the preview link
     # We will get the manufacturer's email/phone from the DB
@@ -159,4 +162,18 @@ def share_variant_with_manufacturer(
                 designer_name=current_user.full_name or current_user.username
             )
 
-    return share
+    # Return response with review_url included
+    response_data = {
+        "id": share.id,
+        "design_variant_id": share.design_variant_id,
+        "manufacturer_id": share.manufacturer_id,
+        "public_token": share.public_token,
+        "review_url": review_url,
+        "status": share.status.value,
+        "cost_price": share.cost_price,
+        "delivery_time_days": share.delivery_time_days,
+        "notes": share.notes,
+        "shared_metal": share.shared_metal,
+        "created_at": share.created_at,
+    }
+    return response_data

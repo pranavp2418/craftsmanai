@@ -38,6 +38,8 @@ email-validator==2.1.0
 
 requests==2.31.0
 
+reportlab==4.0.7
+
 ## The following requirements were added by pip freeze:
 
 amqp==5.3.1

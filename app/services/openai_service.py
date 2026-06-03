@@ -77,6 +77,9 @@ class OpenAIService:
             resp = requests.get(source)
             img = Image.open(BytesIO(resp.content))
         else:
+            # Strip file:// prefix if present for local file paths
+            if source.startswith("file://"):
+                source = source[7:]
             img = Image.open(source)
         
         img = img.convert("RGBA")
