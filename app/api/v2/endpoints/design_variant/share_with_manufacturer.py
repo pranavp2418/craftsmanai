@@ -12,6 +12,7 @@ from app.schemas.manufacturer_variant_share import (
 from app.services.design_service import DesignService
 from app.services.design_variant_service import DesignVariantService
 from app.services.manufacturer_variant_share_service import DesignVariantManufacturerShareService
+from app.models.design import DesignShareStatus
 
 
 router = APIRouter()
@@ -56,12 +57,20 @@ def share_variant_with_manufacturer(
     if not customer_shares:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Design variant must be shared with a customer before sharing with a manufacturer. "
-                   "Please share this variant with a customer first via POST /variants/{id}/share",
+            detail="Design is not shared or approved by customer"
+            # detail="Design variant must be shared with a customer before sharing with a manufacturer. "
+                #    "Please share this variant with a customer first via POST /variants/{variant_id}/share",
         )
 
     # Use the metal from the customer share (latest one), or None if not set
     latest_customer_share = customer_shares[0]
+
+    if latest_customer_share.status != DesignShareStatus.ACCEPTED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Design is not shared or approved by customer"
+        )
+
     shared_metal = latest_customer_share.shared_metal
 
     if not payload.manufacturer_ids:
