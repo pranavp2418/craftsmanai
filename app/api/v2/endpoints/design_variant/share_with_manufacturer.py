@@ -23,6 +23,7 @@ from app.services.manufacturer_variant_share_service import DesignVariantManufac
 from app.models.design import DesignShareStatus
 from app.tasks.email_tasks import send_design_review_email
 
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,15 @@ def share_variant_with_manufacturer(
     from app.core.config import settings
 
     manufacturer_repo = ManufacturerRepository(db)
+    
+    # Pre-verify all manufacturers exist
+    for m_id in payload.manufacturer_ids:
+        manufacturer = manufacturer_repo.get_by_id(m_id)
+        if not manufacturer:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Manufacturer with ID {m_id} not found"
+            )
 
     # Validate all manufacturers before creating shares
     for m_id in payload.manufacturer_ids:
@@ -150,6 +160,7 @@ def share_variant_with_manufacturer(
                 detail="Invalid manufacturer"
             )
 
+    shares_response = []
     for m_id in payload.manufacturer_ids:
         share = share_service.create_share(
             design_variant_id=variant.id,
