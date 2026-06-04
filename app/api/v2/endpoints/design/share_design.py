@@ -122,19 +122,49 @@ def share_design_variant(
                 primary_email = str(customer.emails).split(',')[0].strip()
             
             if primary_email:
+                # Get brand settings for retailer name
+                from app.repositories.brand_setting import BrandSettingRepository
+                brand_repo = BrandSettingRepository(db)
+                brand_setting = brand_repo.get_by_user_id(current_user.id)
+                
+                retailer_name = brand_setting.brand_name if brand_setting else (current_user.full_name or current_user.username)
+                render_image_url = variant.base_design_image_url or ""
+                jewelry_type = design.jewellery_type or "Custom Jewelry"
+                version = f"v{variant.version_number}.{variant.version_number}" if variant.version_number else "v1.0"
+                version_label = f"Version {variant.version_number}" if variant.version_number else "Version 1"
+                
                 send_customer_share_email.delay(
                     to_email=primary_email,
                     customer_name=customer.full_name or "Customer",
                     preview_url=preview_url,
-                    designer_name=current_user.full_name or current_user.username
+                    designer_name=current_user.full_name or current_user.username,
+                    retailer_name=retailer_name,
+                    render_image_url=render_image_url,
+                    design_code=design.design_code,
+                    jewelry_type=jewelry_type,
+                    version=version,
+                    version_label=version_label
                 )
                 
         if customer and hasattr(customer, 'phone_number') and customer.phone_number:
+            # Get brand settings for retailer contact info
+            from app.repositories.brand_setting import BrandSettingRepository
+            brand_repo = BrandSettingRepository(db)
+            brand_setting = brand_repo.get_by_user_id(current_user.id)
+            
+            retailer_phone = brand_setting.phone_number if brand_setting else current_user.whatsapp_number
+            retailer_email = brand_setting.business_email if brand_setting else current_user.email
+            retailer_address = ""  # Address not currently stored in brand settings
+            
             send_customer_share_sms.delay(
                 to_number=customer.phone_number,
                 customer_name=customer.full_name or "Customer",
                 preview_url=preview_url,
-                designer_name=current_user.full_name or current_user.username
+                designer_name=current_user.full_name or current_user.username,
+                design_code=design.design_code,
+                retailer_phone=retailer_phone or "",
+                retailer_email=retailer_email or "",
+                retailer_address=retailer_address
             )
 
     return share

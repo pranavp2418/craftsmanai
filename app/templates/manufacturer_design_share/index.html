@@ -74,6 +74,7 @@
     </tr>
   </table>
   <script>
+    {% raw %}
     // Dynamic preview mode defaults
     document.addEventListener("DOMContentLoaded", function() {
       const defaults = {
@@ -90,7 +91,7 @@
           let text = node.nodeValue;
           let replaced = false;
           for (const [key, val] of Object.entries(defaults)) {
-            const placeholder = `{{${key}}}`;
+            const placeholder = "{{" + key + "}}";
             if (text.includes(placeholder)) {
               text = text.replaceAll(placeholder, val);
               replaced = true;
@@ -101,7 +102,7 @@
           for (let i = 0; i < node.attributes.length; i++) {
             let attr = node.attributes[i];
             for (const [key, val] of Object.entries(defaults)) {
-              const placeholder = `{{${key}}}`;
+              const placeholder = "{{" + key + "}}";
               if (attr.value.includes(placeholder)) {
                 attr.value = attr.value.replaceAll(placeholder, val);
               }
@@ -115,6 +116,7 @@
         replacePlaceholders(document.body);
       }
     });
+    {% endraw %}
   </script>
 </body>
 </html>

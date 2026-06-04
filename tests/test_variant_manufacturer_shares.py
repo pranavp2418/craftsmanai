@@ -123,6 +123,8 @@ def test_share_with_manufacturer_returns_review_url_and_logs_metadata(
     design_repo = DesignRepository(db_session)
     variant_repo = DesignVariantRepository(db_session)
     manufacturer_repo = ManufacturerRepository(db_session)
+    from app.repositories.design_share import DesignShareRepository
+    share_repo = DesignShareRepository(db_session)
 
     design = design_repo.create_design(
         user_id=owner.id,
@@ -141,6 +143,13 @@ def test_share_with_manufacturer_returns_review_url_and_logs_metadata(
         is_selected=True,
     )
 
+    # Share with customer first to satisfy constraint
+    share_repo.create_share(
+        design_variant_id=variant.id,
+        public_token=f"cust-{uuid.uuid4().hex}",
+        shared_metal="Gold",
+    )
+
     manufacturer = manufacturer_repo.create_manufacturer(
         created_by_user_id=owner.id,
         name="North Star Manufacturing",
@@ -155,22 +164,25 @@ def test_share_with_manufacturer_returns_review_url_and_logs_metadata(
     try:
         response = client.post(
             f"/api/v2/design-variant/variants/{variant.id}/share-with-manufacturer",
-            json={"manufacturer_id": manufacturer.id},
+            json={"manufacturer_ids": [manufacturer.id]},
         )
     finally:
         client.app.dependency_overrides.clear()
 
     assert response.status_code == 201, response.text
     payload = response.json()
+    assert isinstance(payload, list)
+    assert len(payload) == 1
+    share_data = payload[0]
 
     expected_review_url = (
         f"{settings.FRONTEND_URL.rstrip('/')}"
-        f"/manufacturer/review/{manufacturer.public_token}?token={payload['public_token']}"
+        f"/manufacturer/review/{manufacturer.public_token}?token={share_data['public_token']}"
     )
 
-    assert payload["design_variant_id"] == variant.id
-    assert payload["manufacturer_id"] == manufacturer.id
-    assert payload["review_url"] == expected_review_url
+    assert share_data["design_variant_id"] == variant.id
+    assert share_data["manufacturer_id"] == manufacturer.id
+    assert share_data["review_url"] == expected_review_url
 
     log_entry = (
         db_session.query(DesignActivityLog)

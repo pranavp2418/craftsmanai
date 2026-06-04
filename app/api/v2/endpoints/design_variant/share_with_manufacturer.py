@@ -95,10 +95,13 @@ def share_variant_with_manufacturer(
     if not design:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
 
-    # Verify manufacturer exists
-    manufacturer = db.query(Manufacturer).filter(Manufacturer.id == payload.manufacturer_id).first()
-    if not manufacturer:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Manufacturer not found")
+    # Verify manufacturer IDs
+    if not payload.manufacturer_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one manufacturer ID must be provided."
+        )
+
     # ── Check if variant was shared with a customer first ──────────────
     customer_shares = share_repo.list_for_design_variant(variant.id)
     if not customer_shares:
@@ -111,44 +114,36 @@ def share_variant_with_manufacturer(
     # Use the metal from the customer share (latest one), or None if not set
     latest_customer_share = customer_shares[0]
     shared_metal = latest_customer_share.shared_metal
-
-    if not payload.manufacturer_ids:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one manufacturer ID must be provided."
-        )
     
-    shares=[]
-    share = share_service.create_share(
-        design_variant_id=variant.id,
-        manufacturer_id=payload.manufacturer_id,
-        shared_metal=shared_metal,
-    )
-    
-    # Build review URL for response
-    review_url = share_service.build_review_url(share)
-
-    # Queue an email/SMS to the manufacturer with the preview link
-    # We will get the manufacturer's email/phone from the DB
     from app.repositories.manufacturer import ManufacturerRepository
     from app.tasks.email_tasks import send_manufacturer_share_email, send_manufacturer_share_sms
     from app.core.config import settings
 
     manufacturer_repo = ManufacturerRepository(db)
+    
+    # Pre-verify all manufacturers exist
+    for m_id in payload.manufacturer_ids:
+        manufacturer = manufacturer_repo.get_by_id(m_id)
+        if not manufacturer:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Manufacturer with ID {m_id} not found"
+            )
 
+    shares_response = []
     for m_id in payload.manufacturer_ids:
         share = share_service.create_share(
             design_variant_id=variant.id,
             manufacturer_id=m_id,
             shared_metal=shared_metal,
         )
-        shares.append(share)
+        
+        # Build review URL using share service logic
+        review_url = share_service.build_review_url(share)
+        manufacturer = manufacturer_repo.get_by_id(m_id)
 
         # Queue an email/SMS to the manufacturer with the preview link
-        manufacturer = manufacturer_repo.get_by_id(m_id)
         if manufacturer:
-            preview_url = f"{settings.FRONTEND_URL}/manufacturer/review/{share.public_token}"
-            
             # Manufacturer emails may be stored as a string or json in `emails`
             primary_email = None
             if hasattr(manufacturer, 'emails') and manufacturer.emails:
@@ -165,33 +160,63 @@ def share_variant_with_manufacturer(
                     primary_email = str(manufacturer.emails).split(',')[0].strip()
             
             if primary_email:
+                # Get brand settings for retailer info
+                from app.repositories.brand_setting import BrandSettingRepository
+                brand_repo = BrandSettingRepository(db)
+                brand_setting = brand_repo.get_by_user_id(current_user.id)
+                
+                retailer_name = brand_setting.brand_name if brand_setting else (current_user.full_name or current_user.username)
+                render_image_url = variant.base_design_image_url or ""
+                jewelry_type = design.jewellery_type or "Custom Jewelry"
+                metal = shared_metal or "Not specified"
+                
                 send_manufacturer_share_email.delay(
                     to_email=primary_email,
                     manufacturer_name=manufacturer.name,
-                    preview_url=preview_url,
-                    designer_name=current_user.full_name or current_user.username
+                    preview_url=review_url,
+                    designer_name=current_user.full_name or current_user.username,
+                    retailer_name=retailer_name,
+                    render_image_url=render_image_url,
+                    design_code=design.design_code,
+                    jewelry_type=jewelry_type,
+                    metal=metal
                 )
                 
             if hasattr(manufacturer, 'phone_number') and manufacturer.phone_number:
+                # Get brand settings for retailer contact info
+                from app.repositories.brand_setting import BrandSettingRepository
+                brand_repo = BrandSettingRepository(db)
+                brand_setting = brand_repo.get_by_user_id(current_user.id)
+                
+                retailer_name = brand_setting.brand_name if brand_setting else (current_user.full_name or current_user.username)
+                retailer_phone = brand_setting.phone_number if brand_setting else current_user.whatsapp_number
+                retailer_email = brand_setting.business_email if brand_setting else current_user.email
+                retailer_address = ""  # Address not currently stored in brand settings
+                
                 send_manufacturer_share_sms.delay(
                     to_number=manufacturer.phone_number,
                     manufacturer_name=manufacturer.name,
-                    preview_url=preview_url,
-                    designer_name=current_user.full_name or current_user.username
+                    preview_url=review_url,
+                    designer_name=current_user.full_name or current_user.username,
+                    retailer_name=retailer_name,
+                    design_code=design.design_code,
+                    retailer_phone=retailer_phone or "",
+                    retailer_email=retailer_email or "",
+                    retailer_address=retailer_address
                 )
 
-    # Return response with review_url included
-    response_data = {
-        "id": share.id,
-        "design_variant_id": share.design_variant_id,
-        "manufacturer_id": share.manufacturer_id,
-        "public_token": share.public_token,
-        "review_url": review_url,
-        "status": share.status.value,
-        "cost_price": share.cost_price,
-        "delivery_time_days": share.delivery_time_days,
-        "notes": share.notes,
-        "shared_metal": share.shared_metal,
-        "created_at": share.created_at,
-    }
-    return response_data
+        shares_response.append({
+            "id": share.id,
+            "design_variant_id": share.design_variant_id,
+            "manufacturer_id": share.manufacturer_id,
+            "public_token": share.public_token,
+            "review_url": review_url,
+            "status": share.status.value,
+            "cost_price": share.cost_price,
+            "delivery_time_days": share.delivery_time_days,
+            "notes": share.notes,
+            "shared_metal": share.shared_metal,
+            "created_at": share.created_at,
+        })
+
+    return shares_response

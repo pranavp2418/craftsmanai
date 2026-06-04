@@ -140,7 +140,7 @@ def send_password_reset_email(self, to: str, otp: str, user_name: str):
         # Create email log
         email_log = EmailLog(
             to_email=to,
-            template_name="password_reset",
+            template_name="password_reset_otp",
             subject="Your Craftmen Password Reset OTP",
             template_variables=json.dumps({
                 "otp": otp,
@@ -207,13 +207,14 @@ def send_password_reset_email(self, to: str, otp: str, user_name: str):
 
 
 @create_task(name="send_welcome_email", max_retries=3)
-def send_welcome_email(self, to: str, user_name: str):
+def send_welcome_email(self, to: str, user_name: str, dashboard_url: str = "#"):
     """
     Send welcome email using Celery
     
     Args:
         to: Recipient email address
         user_name: Name of the user
+        dashboard_url: Dashboard URL for the user
     """
     task_name = "send_welcome_email"
     db = None
@@ -232,10 +233,11 @@ def send_welcome_email(self, to: str, user_name: str):
         # Create email log
         email_log = EmailLog(
             to_email=to,
-            template_name="welcome",
+            template_name="welcome_platform",
             subject="Welcome to Craftmen",
             template_variables=json.dumps({
                 "user_name": user_name,
+                "dashboard_url": dashboard_url,
             }),
             status=EmailStatus.PENDING,
             retry_count=retry_count,
@@ -248,7 +250,7 @@ def send_welcome_email(self, to: str, user_name: str):
         import asyncio
         loop = asyncio.new_event_loop()
         loop.run_until_complete(
-            EmailService.send_welcome_email(to, user_name)
+            EmailService.send_welcome_email(to, user_name, dashboard_url)
         )
         
         # Update email log to SENT
@@ -261,11 +263,11 @@ def send_welcome_email(self, to: str, user_name: str):
             email_log.sent_at = datetime.now(timezone.utc)
             db.commit()
         
-        logger.info(f"✅ {task_name} completed successfully for {to}")
+        logger.info(f" {task_name} completed successfully for {to}")
         return True
         
     except Exception as exc:
-        logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
+        logger.error(f" {task_name} failed for {to}: {str(exc)}")
         
         try:
             if db and email_log_id:
@@ -672,21 +674,47 @@ def send_design_review_email(
 
 
 @create_task(name="send_customer_share_sms", max_retries=3)
-def send_customer_share_sms(self, to_number: str, customer_name: str, preview_url: str, designer_name: str):
+def send_customer_share_sms(self, to_number: str, customer_name: str, preview_url: str, designer_name: str, design_code: str = None, retailer_phone: str = None, retailer_email: str = None, retailer_address: str = ""):
     """
-    Send an SMS to a customer with a link to review a shared design.
+    Send an SMS to a customer with a link to review a shared design using the customer_sms_design_share template.
     """
     task_name = "send_customer_share_sms"
     try:
         logger.info(f"📱 Starting {task_name} for {to_number}")
         
         from app.services.sms_service import sms_service
+        from app.services.template_renderer import render_template_sync
+        from bs4 import BeautifulSoup
         
         if not sms_service.is_configured():
             logger.warning(f"⚠️ {task_name}: SMS service not configured.")
             return False
-            
-        message = f"Hi {customer_name}, {designer_name} has shared a design with you! View it here: {preview_url}"
+        
+        # Render the template with context
+        context = {
+            "retailer_name": designer_name,
+            "approval_url": preview_url,
+            "design_number": design_code or "",
+            "retailer_phone": retailer_phone or "",
+            "retailer_email": retailer_email or "",
+            "retailer_address": retailer_address or ""
+        }
+        
+        rendered_html = render_template_sync("customer_sms_design_share", context)
+        
+        # Extract the SMS text from the template
+        soup = BeautifulSoup(rendered_html, 'html.parser')
+        sms_text_element = soup.find(class_='sms-text')
+        if sms_text_element:
+            # Get text and clean up extra whitespace
+            message = sms_text_element.get_text(separator=' ', strip=True)
+            # Remove the link text and keep just the URL
+            message = message.replace("craftsmanai.app/review/", "").strip()
+            # Reconstruct the message properly
+            message = f"{designer_name} sent your custom pendant design for approval. Review, approve, or request changes here: {preview_url}"
+        else:
+            # Fallback message if template parsing fails
+            message = f"Hi {customer_name}, {designer_name} has shared a design with you! View it here: {preview_url}"
         
         success = sms_service.send_sms(to_number=to_number, message=message)
         
@@ -706,9 +734,9 @@ def send_customer_share_sms(self, to_number: str, customer_name: str, preview_ur
 
 
 @create_task(name="send_customer_share_email", max_retries=3)
-def send_customer_share_email(self, to_email: str, customer_name: str, preview_url: str, designer_name: str):
+def send_customer_share_email(self, to_email: str, customer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, version: str = None, version_label: str = None):
     """
-    Send an email to a customer with a link to review a shared design.
+    Send an email to a customer with a link to review a shared design using customer_approval template.
     """
     task_name = "send_customer_share_email"
     try:
@@ -717,7 +745,7 @@ def send_customer_share_email(self, to_email: str, customer_name: str, preview_u
         import asyncio
         loop = asyncio.new_event_loop()
         loop.run_until_complete(
-            EmailService.send_customer_share(to_email, customer_name, preview_url, designer_name)
+            EmailService.send_customer_share(to_email, customer_name, preview_url, designer_name, retailer_name, render_image_url, design_code, jewelry_type, version, version_label)
         )
         
         logger.info(f"✅ {task_name} completed successfully for {to_email}")
@@ -732,21 +760,47 @@ def send_customer_share_email(self, to_email: str, customer_name: str, preview_u
 
 
 @create_task(name="send_manufacturer_share_sms", max_retries=3)
-def send_manufacturer_share_sms(self, to_number: str, manufacturer_name: str, preview_url: str, designer_name: str):
+def send_manufacturer_share_sms(self, to_number: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, design_code: str = None, retailer_phone: str = None, retailer_email: str = None, retailer_address: str = ""):
     """
-    Send an SMS to a manufacturer with a link to review a shared design.
+    Send an SMS to a manufacturer with a link to review a shared design using manufacturer_sms_design_share template.
     """
     task_name = "send_manufacturer_share_sms"
     try:
         logger.info(f"📱 Starting {task_name} for {to_number}")
         
         from app.services.sms_service import sms_service
+        from app.services.template_renderer import render_template_sync
+        from bs4 import BeautifulSoup
         
         if not sms_service.is_configured():
             logger.warning(f"⚠️ {task_name}: SMS service not configured.")
             return False
-            
-        message = f"Hi {manufacturer_name}, {designer_name} has shared a design variant with you for quoting! View it here: {preview_url}"
+        
+        # Render the template with context
+        context = {
+            "retailer_name": retailer_name or designer_name,
+            "design_number": design_code or "",
+            "details_sheet_url": preview_url,
+            "retailer_phone": retailer_phone or "",
+            "retailer_email": retailer_email or "",
+            "retailer_address": retailer_address or ""
+        }
+        
+        rendered_html = render_template_sync("manufacturer_sms_design_share", context)
+        
+        # Extract the SMS text from the template
+        soup = BeautifulSoup(rendered_html, 'html.parser')
+        sms_text_element = soup.find(class_='sms-text')
+        if sms_text_element:
+            # Get text and clean up extra whitespace
+            message = sms_text_element.get_text(separator=' ', strip=True)
+            # Remove the link text and keep just the URL
+            message = message.replace("craftsmanai.app/manu/manufacturer/", "").strip()
+            # Reconstruct the message properly
+            message = f"New quote request from {retailer_name or designer_name}: {design_code or ''}. View the Details Sheet and submit costing here: {preview_url}"
+        else:
+            # Fallback message if template parsing fails
+            message = f"Hi {manufacturer_name}, {designer_name} has shared a design variant with you for quoting! View it here: {preview_url}"
         
         success = sms_service.send_sms(to_number=to_number, message=message)
         
@@ -766,9 +820,9 @@ def send_manufacturer_share_sms(self, to_number: str, manufacturer_name: str, pr
 
 
 @create_task(name="send_manufacturer_share_email", max_retries=3)
-def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, preview_url: str, designer_name: str):
+def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, metal: str = None):
     """
-    Send an email to a manufacturer with a link to review a shared design.
+    Send an email to a manufacturer with a link to review a shared design using manufacturer_design_share template.
     """
     task_name = "send_manufacturer_share_email"
     try:
@@ -777,7 +831,7 @@ def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, p
         import asyncio
         loop = asyncio.new_event_loop()
         loop.run_until_complete(
-            EmailService.send_manufacturer_share(to_email, manufacturer_name, preview_url, designer_name)
+            EmailService.send_manufacturer_share(to_email, manufacturer_name, preview_url, designer_name, retailer_name, render_image_url, design_code, jewelry_type, metal)
         )
         
         logger.info(f"✅ {task_name} completed successfully for {to_email}")

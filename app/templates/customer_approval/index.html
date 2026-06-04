@@ -68,7 +68,7 @@
           let text = node.nodeValue;
           let replaced = false;
           for (const [key, val] of Object.entries(defaults)) {
-            const placeholder = `{{${key}}}`;
+            const placeholder = `{% raw %}{{${key}}}{% endraw %}`;
             if (text.includes(placeholder)) {
               text = text.replaceAll(placeholder, val);
               replaced = true;
@@ -79,7 +79,7 @@
           for (let i = 0; i < node.attributes.length; i++) {
             let attr = node.attributes[i];
             for (const [key, val] of Object.entries(defaults)) {
-              const placeholder = `{{${key}}}`;
+              const placeholder = `{% raw %}{{${key}}}{% endraw %}`;
               if (attr.value.includes(placeholder)) {
                 attr.value = attr.value.replaceAll(placeholder, val);
               }
@@ -89,7 +89,7 @@
         }
       }
       
-      if (document.body.innerHTML.includes("{{")) {
+      if (document.body.innerHTML.includes("{% raw %}{{{% endraw %}")) {
         replacePlaceholders(document.body);
       }
     });
