@@ -86,3 +86,31 @@ def get_email_template_by_key(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve email template"
         )
+
+from fastapi.responses import HTMLResponse
+from app.services.template_renderer import render_template
+
+@router.get("/email-templates/preview/{template_name}", response_class=HTMLResponse)
+async def preview_email_template(
+    template_name: str,
+):
+    """
+    Preview an email template by rendering it with dummy data.
+    """
+    try:
+        # Dummy context for the template
+        context = {
+            "username": "Test User",
+            "code": "123456",
+            "expires_minutes": 10,
+            "verify_url": "https://example.com/verify"
+        }
+        
+        rendered_html = await render_template(template_name, context)
+        return HTMLResponse(content=rendered_html)
+    except Exception as e:
+        logger.error(f"Failed to preview email template: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to preview email template: {str(e)}"
+        )

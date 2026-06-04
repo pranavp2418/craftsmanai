@@ -11,6 +11,7 @@ from .complete_design import router as complete_design_router
 from .archive_design import router as archive_design_router
 from .restore_design import router as restore_design_router
 from .list_archived_designs import router as list_archived_designs_router
+from .download_render import router as download_render_router
 
 
 router = APIRouter(prefix="/design", tags=["design"])
@@ -25,3 +26,4 @@ router.include_router(update_design_router)
 router.include_router(delete_design_router)
 router.include_router(share_design_router)
 router.include_router(complete_design_router)
+router.include_router(download_render_router)

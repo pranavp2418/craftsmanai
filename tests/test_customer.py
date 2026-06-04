@@ -1,5 +1,6 @@
 import json
 import pytest
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -11,7 +12,7 @@ from app.models.user_device import UserDevice
 from app.models.notification_setting import NotificationSetting
 from app.models.brand_setting import BrandSetting
 from app.models.customer import Customer
-from app.models.design import Design, DesignVariant, DesignShare
+from app.models.design import Design, DesignVariant, DesignShare, DesignActivityLog
 from app.models.order import Order, ManufacturerQuote, OrderActivityLog
 from app.models.manufacturer import Manufacturer
 from app.models.manufacturer import Manufacturer
@@ -40,6 +41,7 @@ def create_committed_user(email: str, username: str, full_name: str) -> User:
             if variant_ids:
                 session.query(DesignShare).filter(DesignShare.design_variant_id.in_(variant_ids)).delete(synchronize_session=False)
             if design_ids:
+                session.query(DesignActivityLog).filter(DesignActivityLog.design_id.in_(design_ids)).delete(synchronize_session=False)
                 order_ids = [row[0] for row in session.query(Order.id).filter(Order.design_id.in_(design_ids)).all()]
                 if order_ids:
                     session.query(OrderActivityLog).filter(OrderActivityLog.order_id.in_(order_ids)).delete(synchronize_session=False)
@@ -87,6 +89,7 @@ def cleanup_user_by_email(email: str):
             if variant_ids:
                 session.query(DesignShare).filter(DesignShare.design_variant_id.in_(variant_ids)).delete(synchronize_session=False)
             if design_ids:
+                session.query(DesignActivityLog).filter(DesignActivityLog.design_id.in_(design_ids)).delete(synchronize_session=False)
                 order_ids = [row[0] for row in session.query(Order.id).filter(Order.design_id.in_(design_ids)).all()]
                 if order_ids:
                     session.query(OrderActivityLog).filter(OrderActivityLog.order_id.in_(order_ids)).delete(synchronize_session=False)
@@ -141,6 +144,89 @@ class TestCustomerEndpoints:
             assert data["status"] == "Active"
             assert "public_token" in data
         finally:
+            cleanup_user_by_email(email)
+
+    def test_share_design_variant_queues_review_email_with_public_token_link(self, client: TestClient):
+        email = "share_review_email_test@example.com"
+        try:
+            user = create_committed_user(email=email, username="sharereview", full_name="Retailer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            session = TestingSessionLocal()
+            try:
+                customer = Customer(
+                    created_by_user_id=user.id,
+                    full_name="Review Customer",
+                    emails='[{"label": "Work", "email": "review.customer@example.com"}]',
+                    phone_number="+14155550123",
+                    tag="VIP Customer",
+                    location="Los Angeles",
+                    public_token="review_customer_public_token",
+                    is_active=True,
+                )
+                session.add(customer)
+                session.flush()
+
+                design = Design(
+                    user_id=user.id,
+                    created_by_user_id=user.id,
+                    design_code="REV-001",
+                    sequence_number=1,
+                    name="Review Ring",
+                    jewellery_type="Ring",
+                    user_prompt="Create a review ring",
+                    status="GENERATED",
+                )
+                session.add(design)
+                session.flush()
+
+                variant = DesignVariant(
+                    design_id=design.id,
+                    variant_name="Variant Review A",
+                    version_number=1,
+                    is_selected=True,
+                )
+                session.add(variant)
+                session.commit()
+
+                with patch("app.api.v2.endpoints.design.share_design.send_design_review_email") as mock_send_review_email:
+                    response = client.post(
+                        f"/api/v2/design/variants/{variant.id}/share",
+                        json={
+                            "customer_id": customer.id,
+                            "comment": "Please review this design",
+                        },
+                        headers=headers,
+                    )
+
+                assert response.status_code == 201, response.text
+                payload = response.json()
+                assert payload["public_token"]
+
+                mock_send_review_email.delay.assert_called_once()
+                queued_args = mock_send_review_email.delay.call_args.args
+                assert queued_args[0] == "review.customer@example.com"
+                assert queued_args[1] == "Review Customer"
+                assert queued_args[2] == (
+                    f"http://localhost:3000/customer/review/{customer.public_token}"
+                    f"?token={payload['public_token']}"
+                )
+                assert queued_args[3] == design.name
+                assert queued_args[4] == variant.variant_name
+            finally:
+                session.close()
+        finally:
+            cleanup_session = TestingSessionLocal()
+            try:
+                from app.models.design import DesignActivityLog
+
+                design_ids = [row[0] for row in cleanup_session.query(Design.id).filter(Design.user_id == user.id).all()]
+                if design_ids:
+                    cleanup_session.query(DesignActivityLog).filter(DesignActivityLog.design_id.in_(design_ids)).delete(synchronize_session=False)
+                    cleanup_session.commit()
+            finally:
+                cleanup_session.close()
             cleanup_user_by_email(email)
 
     def test_create_customer_rejects_duplicate_email(self, client: TestClient):

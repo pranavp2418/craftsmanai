@@ -586,6 +586,7 @@ def build_class_ring_prompt(params: Dict[str, Any]) -> str:
 
     refinement_lock_block = ""
     if mode == "refine":
+        previous_fixes_text = f"\n\nPrevious fixes already applied (DO NOT undo):\n{previous_fixes}" if previous_fixes else ""
         refinement_lock_block = f"""
 REFINEMENT LOCK (mandatory):
 - The FIRST attached image is the LATEST APPROVED DRAFT — treat it as the absolute base
@@ -593,7 +594,9 @@ REFINEMENT LOCK (mandatory):
 - Do NOT restart from the original logo reference, do NOT regenerate from scratch
 - Apply ONLY the requested delta on top of the latest draft
 - Preserve every previous successful fix
-- If the request is ambiguous, under-edit rather than changing extra regions{f"\n\nPrevious fixes already applied (DO NOT undo):\n{previous_fixes}" if previous_fixes else ""}"""
+- If the request is ambiguous, under-edit rather than changing extra regions{previous_fixes_text}"""
+
+    refinement_note_text = f"Refinement target regions: {regions}\nRefinement request: {note}" if mode == "refine" else (f"User note: {note}" if note else "")
 
     return f"""You are Craftsman.ai's APPROVAL-RENDER engine for custom jewellery.
 Your job is NOT a beautiful fantasy image. Your job is a manufacturable, approval-ready jewellery render.
@@ -650,7 +653,7 @@ TEXT & LOGO PRECISION:
 Design subject: {subject}
 Metal tone: {metal}
 Locked elements: {locked_elements}
-{f"Refinement target regions: {regions}\nRefinement request: {note}" if mode == "refine" else (f"User note: {note}" if note else "")}
+{refinement_note_text}
 {SHARED_RULES}
 
 Generate ONE front-facing hero render of this CLASS / SIGNET RING — planar face, symmetrical shoulders, premium {metal}, clean background, approval-ready."""
@@ -767,7 +770,12 @@ def build_focused_refinement_prompt(intent: Dict[str, Any], base_fallback: str, 
 
     retry_rewrite = f"\n\nForceful rewrite: {intent.get('retry_prompt_if_failed')}" if attempt > 1 and intent.get("retry_prompt_if_failed") else ""
     qa_list = "\n".join([f"- {c}" for c in intent.get("qa_checks") or []])
+    default_qa_text = (
+    "- The requested change is visibly applied to the target component\n"
+    "- All non-target regions remain identical"
+)
 
+    qa_text = qa_list or default_qa_text
     return f"""REFINEMENT INTELLIGENCE — TARGETED EDIT (attempt {attempt})
 
 The FIRST attached image is the CURRENT APPROVED RENDER. Treat it as your only master visual truth.
@@ -799,7 +807,7 @@ Do NOT add, remove, resize, recolor, or alter any non-target component.
 Do NOT change subtype. Do NOT introduce new decorative elements. Keep the same jewelry type, same camera angle, same composition, same lighting, same background.
 
 VISUAL QA CHECKLIST the output MUST satisfy:
-{qa_list or "- The requested change is visibly applied to the target component\n- All non-target regions remain identical"}
+{qa_text}
 
 The output must look like a premium CAD-style jewelry render, physically plausible and production-friendly.
 
@@ -964,11 +972,12 @@ def build_prompt_from_dummy(params: Dict[str, Any]) -> str:
 
     stone_block = ""
     if stone_presence != "unknown":
+        stone_row_text = f"- Row count: {stone_row_count} rows (MUST be respected — reduce stone size to fit if needed)" if stone_row_count else ""
         stone_block = f"""
 Stone details:
 - Presence: {stone_presence}, Coverage: {stone_coverage}, Layout: {stone_layout}
 - Size class: {stone_size_class} (default small-to-mid — do NOT use chunky large stones unless explicitly requested)
-{f"- Row count: {stone_row_count} rows (MUST be respected — reduce stone size to fit if needed)" if stone_row_count else ""}
+{stone_row_text}
 - Arrangement: {stone_arrangement} (prefer staggered/honeycomb over naive grids)
 - Setting family: {setting_family} (keep uniform per region)"""
 
@@ -1114,6 +1123,7 @@ Output goal:
 Return a refined CAD-styled jewelry render with ONLY the requested updates applied, while keeping the rest of the piece stable and faithful to the previous version.
 =================================================="""
 
+        previous_fixes_appendage = "\n\nPrevious fixes already applied (preserve all of these):\n" + previous_fixes if previous_fixes else ""
         refinement_lock_block = f"""
 REFINEMENT MODE — THE FIRST ATTACHED IMAGE IS THE DESIGN:
 - Think like an image editor, not a designer
@@ -1124,7 +1134,7 @@ REFINEMENT MODE — THE FIRST ATTACHED IMAGE IS THE DESIGN:
 - Same silhouette, same proportions, same stones, same text, same layout, same angle, same composition.
 - Do NOT regenerate from scratch. Do NOT reinterpret the design.
 - If unsure, preserve more and change less.
-- The output must be visually identical to the input EXCEPT for the requested change.{(f"\n\nPrevious fixes already applied (preserve all of these):\n{previous_fixes}" if previous_fixes else "")}"""
+- The output must be visually identical to the input EXCEPT for the requested change.{previous_fixes_appendage}"""
 
         preservation_block = """
 PRESERVATION-FIRST RULES:
@@ -1847,6 +1857,9 @@ class OpenAIService:
             resp = requests.get(source)
             img = Image.open(BytesIO(resp.content))
         else:
+            # Strip file:// prefix if present for local file paths
+            if source.startswith("file://"):
+                source = source[7:]
             img = Image.open(source)
         
         img = img.convert("RGBA")

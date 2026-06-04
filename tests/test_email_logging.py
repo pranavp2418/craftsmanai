@@ -1,8 +1,12 @@
+import smtplib
+import uuid
+
 import pytest
 from unittest.mock import patch, MagicMock
 from tests.conftest import override_get_db
 from app.models.email_log import EmailLog, EmailStatus
 from app.services.email_service import EmailService
+from app.tasks.email_tasks import send_design_review_email
 
 @pytest.fixture
 def anyio_backend():
@@ -75,3 +79,82 @@ class TestEmailLogging:
             assert log_record.sent_at is None
         finally:
             db.close()
+
+    @patch("app.tasks.email_tasks.send_design_review_email.retry")
+    @patch("app.tasks.email_tasks.smtplib.SMTP")
+    def test_send_design_review_email_logs_retrying_status(self, mock_smtp, mock_retry):
+        """Test that design review email logs a retrying status and preserves the log id."""
+        mock_server = MagicMock()
+        mock_server.login.side_effect = Exception("SMTP Connection Timeout")
+        mock_smtp.return_value.__enter__.return_value = mock_server
+        mock_retry.side_effect = Exception("Retry queued")
+
+        unique_email = f"design-review-log-{uuid.uuid4().hex}@example.com"
+
+        with pytest.raises(Exception) as excinfo:
+            send_design_review_email(
+                unique_email,
+                "Log Test Customer",
+                "http://localhost:3000/customer/review/public-token?token=share-token",
+                "Review Ring",
+                "Variant A",
+            )
+
+        assert "Retry queued" in str(excinfo.value)
+
+        db = next(override_get_db())
+        try:
+            log_record = db.query(EmailLog).filter(
+                EmailLog.to_email == unique_email,
+                EmailLog.template_name == "design_review",
+            ).order_by(EmailLog.created_at.desc()).first()
+
+            assert log_record is not None, "Design review EmailLog record was not created"
+            assert log_record.status == EmailStatus.RETRYING
+            assert log_record.retry_count == 1
+            assert "SMTP Connection Timeout" in log_record.error_message
+            assert "SMTP Connection Timeout" in (log_record.smtp_response or "")
+            assert log_record.sent_at is None
+        finally:
+            db.close()
+
+        assert mock_retry.called
+        retry_kwargs = mock_retry.call_args.kwargs["kwargs"]
+        assert retry_kwargs["email_log_id"] == str(log_record.id)
+
+    @patch("app.tasks.email_tasks.send_design_review_email.retry")
+    @patch("app.tasks.email_tasks.smtplib.SMTP")
+    def test_send_design_review_email_marks_auth_failure_without_retry(self, mock_smtp, mock_retry):
+        """Test that SMTP authentication errors are logged as failed without retrying."""
+        mock_server = MagicMock()
+        mock_server.login.side_effect = smtplib.SMTPAuthenticationError(535, b"Authentication Failed")
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        unique_email = f"design-review-auth-{uuid.uuid4().hex}@example.com"
+
+        with pytest.raises(smtplib.SMTPAuthenticationError):
+            send_design_review_email(
+                unique_email,
+                "Auth Test Customer",
+                "http://localhost:3000/customer/review/public-token?token=share-token",
+                "Review Pendant",
+                "Variant B",
+            )
+
+        db = next(override_get_db())
+        try:
+            log_record = db.query(EmailLog).filter(
+                EmailLog.to_email == unique_email,
+                EmailLog.template_name == "design_review",
+            ).order_by(EmailLog.created_at.desc()).first()
+
+            assert log_record is not None, "Design review EmailLog record was not created"
+            assert log_record.status == EmailStatus.FAILED
+            assert log_record.retry_count == 1
+            assert "Authentication Failed" in log_record.error_message
+            assert "535" in (log_record.smtp_response or "")
+            assert log_record.sent_at is None
+        finally:
+            db.close()
+
+        mock_retry.assert_not_called()

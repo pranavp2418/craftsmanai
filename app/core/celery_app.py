@@ -11,7 +11,6 @@ celery_app = Celery(
         "app.tasks.cleanup_tasks",
         "app.tasks.design_tasks",
         "app.tasks.metal_variant_tasks",
-        "app.tasks.angle_variant_tasks",
     ]
 )
 

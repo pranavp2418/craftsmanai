@@ -24,6 +24,7 @@ class ManufacturerVariantShareResponse(BaseModel):
     design_variant_id: int
     manufacturer_id: int
     public_token: str
+    review_url: Optional[str] = None
     status: str
     cost_price: Optional[float] = None
     delivery_time_days: Optional[int] = None
