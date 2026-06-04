@@ -132,7 +132,7 @@ def share_design_variant(
 
         customer = customer_repo.get_by_id(payload.customer_id)
         
-        preview_url = f"{settings.FRONTEND_URL}/review/{share.public_token}"
+        preview_url = f"{settings.FRONTEND_URL}/customer/review/{share.public_token}"
         
         if customer and hasattr(customer, 'emails') and customer.emails:
             import json
