@@ -14,8 +14,12 @@ class DesignVariantService:
         self.activity_repo = DesignActivityLogRepository(db)
 
     def _next_version(self, design_id: int) -> int:
-        variants = self.variant_repo.list_for_design(design_id)
-        return (max((variant.version_number for variant in variants), default=-1) + 1)
+        versions = [
+            v[0] for v in self.db.query(DesignVariant.version_number)
+            .filter(DesignVariant.design_id == design_id)
+            .all()
+        ]
+        return max(versions, default=-1) + 1
 
     def get_variant(self, variant_id: int) -> Optional[DesignVariant]:
         return self.variant_repo.get_by_id(variant_id)

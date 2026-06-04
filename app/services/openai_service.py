@@ -173,11 +173,11 @@ Rings (Band, Bust Down, Signet, Statement, Wedding, Engagement, Custom Shape) ·
 """
 
 OUTPUT_CONTRACT = """
-OUTPUT: Exactly ONE image. Front-facing hero angle. CAD-styled approval render on a clean white background. Centered piece, no environment.
+OUTPUT: Exactly ONE image. Front-facing hero angle. CAD-styled approval render on a clean white background. Centered piece, no environment. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece.
 """
 
 HOUSE_STYLE = """
-STYLE: Clean CAD-styled jewelry approval render. Isolated piece on a clean white/very light neutral background — no body, hands, props, or environment. Front-facing hero angle, centered, crisp edges, premium feel, manufacturable look. Realistic metal and stones. No cinematic atmosphere or heavy shadows.
+STYLE: Clean CAD-styled jewelry approval render. Isolated piece on a pure, solid, clean white background (#FFFFFF) — no body, hands, props, or environment. Front-facing hero angle, centered, crisp edges, premium feel, manufacturable look. Realistic metal and stones. No cinematic atmosphere or heavy shadows. Always ignore the background of any reference image and render the piece on pure solid white.
 """
 
 STONE_RULES = """
@@ -199,6 +199,7 @@ HARD NEGATIVE CONSTRAINTS (mandatory — never violate):
 - Do NOT create unrealistic proportions or non-manufacturable structures
 - Do NOT alter unchanged parts during refinement
 - Do NOT creatively reinterpret the piece beyond the prompt
+- Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output image must contain ONLY the single new/modified jewelry design on a solid white background.
 """
 
 SHARED_RULES = f"""{SUPPORTED_TAXONOMY}
@@ -236,6 +237,7 @@ Unless the user EXPLICITLY requests a change to one of these, freeze them exactl
 - negative space (open windows, cutouts, gaps between letters)
 - camera angle (front-facing hero unless specifically requested)
 - composition and centering
+- (EXCEPTION: Do NOT preserve the reference image's background, lighting environment, props, or hands. The background MUST be pure, solid white (#FFFFFF) for every render).
 """
 
 REFINEMENT_INTERPRETER_SYSTEM = """You are CraftsmanAI's refinement interpreter. Jewelry retailers write casual, mixed, sometimes misspelled English. Convert their short prompt into a precise structured edit intent.
@@ -364,6 +366,10 @@ def normalize_retailer_language(note: str) -> List[str]:
         directives.append("Bail should be a puffy heart-shaped bail only; do not alter the rest of the piece unless requested.")
     if any(x in lower for x in ["flooded", "bust down", "fully iced", "full ice"]):
         directives.append("Increase stone coverage and density while keeping arrangement clean, practical, and region-appropriate.")
+    if any(x in lower for x in ["2 steps", "2 step", "two steps", "two step"]):
+        directives.append(
+            "For a fully iced 3D 2-step design: Both the primary/front layer and the secondary/backing layer must be fully covered with diamonds or stones. The secondary layer should be visibly raised and extend beyond the primary layer to create a pronounced three-dimensional two-tier effect with clear depth, thickness, and separation between layers. No plain metal borders, outlines, backing, exposed metal edges, or polished metal surfaces should be visible from the front. The design must showcase a bold, luxury, fully iced 3D stacked construction."
+        )
     if "border only" in lower:
         directives.append("Limit stone coverage to the border/frame region only.")
     if "top only" in lower:
@@ -895,11 +901,19 @@ def build_prompt_from_dummy(params: Dict[str, Any]) -> str:
         if not user_specifies_type or not user_specifies_metal:
             item_type = pd.get("item_type")
 
-    if not user_specifies_metal and image_count:
-        if pd.get("metal_tone"):
-            metal_tone = pd.get("metal_tone")
+    # If the user didn't mention a metal:
+    # 1. If the reference image is jewelry, default to the reference image metal fully.
+    # 2. If it's not jewelry (or no reference image), default to gold.
+    source_kind = pd.get("source_kind", "unknown")
+    is_jewelry_ref = source_kind in ("jewelry_reference", "cad_render", "existing_jewelry")
+    if not user_specifies_metal:
+        if image_count and is_jewelry_ref:
+            if pd.get("metal_tone"):
+                metal_tone = pd.get("metal_tone")
+            else:
+                metal_tone = "same as the attached reference image"
         else:
-            metal_tone = "same as the attached reference image"
+            metal_tone = "yellow gold"
     intent = pd.get("request_intent", "render_as_is")
     source_kind = pd.get("source_kind", "unknown")
     gen_mode = pd.get("generation_mode", "BASE_RENDER")
@@ -1354,9 +1368,9 @@ def build_prompt(
 
     is_refine = mode == "refine"
     system_preamble = (
-        "REFINEMENT MODE. The first attached image is the CURRENT RENDER and is the only master visual truth. Apply ONLY the change described. Everything not mentioned must remain IDENTICAL: silhouette, proportions, stones, text, metal, angle, composition. If unsure, change less. Output front-facing, centered, on white/very light background. Never refuse."
+        "REFINEMENT MODE. The first attached image is the CURRENT RENDER. Apply ONLY the change described. Keep the design structure identical, BUT you MUST render the piece isolated and centered on a pure, solid, clean white background (#FFFFFF). Do NOT copy the background, shadows, lighting environment, hands, or props from the reference. The background must be solid white. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece."
         if is_refine
-        else "JEWELRY RENDER. If reference image(s) are attached, the FIRST is the master reference. Reproduce it as faithfully as possible unless the note explicitly overrides. For text_only, the text is authority. Output front-facing, centered, on white/very light background. Preserve untouched structure exactly. If unsure, preserve rather than invent. Never refuse."
+        else "JEWELRY RENDER. If reference image(s) are attached, the FIRST is the master reference. Reproduce the design structure as faithfully as possible, BUT render it isolated and centered on a pure, solid, clean white background (#FFFFFF). Do NOT copy the background, environment, lighting, hands, or props from the reference. The background must be solid white. Never refuse. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece."
     )
 
     resolved_item_type = str(pd.get("item_type") or infer_item_type_from_prompt(note)).lower()
@@ -1703,7 +1717,10 @@ def generate_with_fallback(
                         ssim_score = calculate_ssim_similarity(local_ref_path, local_gen_path)
                         logger.info(f"[ATTEMPT {attempt}] HASH SIMILARITY: {hash_score}, SSIM SIMILARITY: {ssim_score}")
                         
-                        similarity_passed = (60.0 <= ssim_score <= 65.0 and hash_score >= 40)
+                        if selected_mode == "refine":
+                            similarity_passed = (ssim_score >= 60.0 and hash_score >= 40)
+                        else:
+                            similarity_passed = (60.0 <= ssim_score <= 65.0 and hash_score >= 40)
                     finally:
                         if gen_temp_cleanup and os.path.exists(gen_temp_cleanup):
                             try:
@@ -1725,17 +1742,28 @@ def generate_with_fallback(
 
         # If we completed all attempts and have some candidates but none passed both checks perfectly
         if candidates:
-            # Sort by ssim distance to [60.0, 65.0] range (ascending), and tie-break by hash score (descending)
-            def get_distance_to_60_65(c):
-                ssim = c[1]
-                if 60.0 <= ssim <= 65.0:
-                    return 0.0
-                return min(abs(ssim - 60.0), abs(ssim - 65.0))
+            if selected_mode == "refine":
+                # For refinements, we prefer higher SSIM similarity to keep the base structure.
+                # Sort by ssim (descending), and tie-break by hash score (descending)
+                candidates.sort(key=lambda x: (-x[1], -x[2]))
+                best_candidate = candidates[0]
+                logger.info(f"All attempts completed. None passed all checks. Returning highest similarity image (Attempt with HASH: {best_candidate[2]}, SSIM: {best_candidate[1]})")
+                return best_candidate[0]
+            else:
+                # Sort by ssim distance to [60.0, 65.0] range (ascending), and tie-break by hash score (descending)
+                def get_distance_to_60_65(c):
+                    ssim = c[1]
+                    if 60.0 <= ssim <= 65.0:
+                        return 0.0
+                    return min(abs(ssim - 60.0), abs(ssim - 65.0))
 
-            candidates.sort(key=lambda x: (get_distance_to_60_65(x), -x[2]))
-            best_candidate = candidates[0]
-            logger.info(f"All attempts completed. None passed all checks. Returning closest similarity image (Attempt with HASH: {best_candidate[2]}, SSIM: {best_candidate[1]})")
-            return best_candidate[0]
+                candidates.sort(key=lambda x: (get_distance_to_60_65(x), -x[2]))
+                best_candidate = candidates[0]
+                if best_candidate[1] <= 70.0 or not local_ref_path:
+                    logger.info(f"All attempts completed. None passed all checks. Returning closest similarity image (Attempt with HASH: {best_candidate[2]}, SSIM: {best_candidate[1]})")
+                    return best_candidate[0]
+                else:
+                    logger.info(f"All candidates had SSIM above 70% (lazy copy of reference/background). Discarding candidates and triggering fallback generation.")
 
         # =====================================================
         # GEMINI FALLBACK
@@ -1867,6 +1895,7 @@ class OpenAIService:
         result = generate_with_fallback(
             image_source=image_source,
             user_prompt=user_prompt,
+            parsed_data={"item_type": jewellery_type} if jewellery_type else None,
             metal_tone="yellow_gold",
             mode=selected_mode
         )
@@ -1888,6 +1917,7 @@ class OpenAIService:
         result = generate_with_fallback(
             image_source=base_image_source,
             user_prompt=angle_description,
+            parsed_data={"item_type": jewellery_type} if jewellery_type else None,
             metal_tone="yellow_gold",
             mode="initial"
         )
@@ -1908,6 +1938,7 @@ class OpenAIService:
         result = generate_with_fallback(
             image_source=base_image_source,
             user_prompt=angle_description,
+            parsed_data={"item_type": jewellery_type} if jewellery_type else None,
             metal_tone="yellow_gold",
             mode="initial"
         )
@@ -1928,6 +1959,7 @@ class OpenAIService:
         result = generate_with_fallback(
             image_source=base_image_source,
             user_prompt=angle_description,
+            parsed_data={"item_type": jewellery_type} if jewellery_type else None,
             metal_tone="yellow_gold",
             mode="initial"
         )
