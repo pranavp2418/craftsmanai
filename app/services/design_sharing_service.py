@@ -123,4 +123,61 @@ class DesignSharingService:
             message=comment,
             metadata={"share_id": share.id, "variant_id": share.design_variant_id, "status": status.value},
         )
+
+        # Trigger notification to the retailer (the user who created this customer or design)
+        recipient_user_id = None
+        if share.customer:
+            recipient_user_id = share.customer.created_by_user_id
+        if not recipient_user_id and variant and variant.design:
+            recipient_user_id = variant.design.user_id
+
+        if recipient_user_id:
+            try:
+                from app.services.notification_service import NotificationService
+                notification_service = NotificationService(self.db)
+                
+                customer_name = share.customer.full_name if share.customer else "A customer"
+                design_name = variant.design.name if (variant and variant.design) else "design"
+                variant_name = variant.variant_name if variant else ""
+                
+                notification_title = ""
+                notification_message = ""
+                notification_type = "general"
+                
+                if status == DesignShareStatus.ACCEPTED:
+                    notification_title = "Design Approved"
+                    notification_message = f"Customer '{customer_name}' approved variant '{variant_name}' of design '{design_name}'."
+                    notification_type = "design_approved"
+                elif status == DesignShareStatus.NEEDS_REFINEMENT:
+                    notification_title = "Refinement Requested"
+                    notification_message = f"Customer '{customer_name}' requested refinement on variant '{variant_name}' of design '{design_name}'."
+                    if comment:
+                        notification_message += f" Note: {comment}"
+                    notification_type = "refinement_requested"
+                elif status == DesignShareStatus.REJECTED:
+                    notification_title = "Design Rejected"
+                    notification_message = f"Customer '{customer_name}' rejected variant '{variant_name}' of design '{design_name}'."
+                    if comment:
+                        notification_message += f" Note: {comment}"
+                    notification_type = "design_rejected"
+
+                if notification_title and notification_message:
+                    notification_service.send_notification(
+                        user_id=recipient_user_id,
+                        type=notification_type,
+                        title=notification_title,
+                        message=notification_message,
+                        source="design_share",
+                        reference_id=share.id,
+                        data={
+                            "share_id": share.id,
+                            "design_id": design_id,
+                            "variant_id": share.design_variant_id,
+                            "status": status.value,
+                        }
+                    )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to send customer access notification: {str(e)}")
+
         return updated
