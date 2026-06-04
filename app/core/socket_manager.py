@@ -195,6 +195,8 @@ def _build_connect_init_notification(
 ) -> dict[str, Any]:
     """Build user-friendly init notification payload for first socket connect."""
     recent_count = len(recent_notifications)
+    title = ""
+    message = ""
 
     if unread_count > 0:
         title = f"You have {unread_count} unread notification(s)"
@@ -205,9 +207,6 @@ def _build_connect_init_notification(
     elif recent_count > 0:
         title = f"You have {recent_count} recent notification(s)"
         message = "Loaded your recent notifications. New ones will arrive in real-time."
-    # else:
-    #     title = "No notifications"
-    #     message = "You have no previous notifications. New ones will arrive in real-time."
 
     return {
         "type": "init",
@@ -322,12 +321,13 @@ async def connect(sid: str, environ: dict, auth: Optional[dict]) -> bool:
 
     unread_count, recent_notifications = await _load_recent_notifications(user_id)
 
-    # Emit connection-init notification with context-sensitive copy.
-    await sio.emit(
-        "notification",
-        _build_connect_init_notification(unread_count, recent_notifications),
-        to=sid,
-    )
+    # Emit connection-init notification with context-sensitive copy only if there are notifications.
+    if unread_count > 0 or recent_notifications:
+        await sio.emit(
+            "notification",
+            _build_connect_init_notification(unread_count, recent_notifications),
+            to=sid,
+        )
 
     return True
 
