@@ -21,7 +21,7 @@ from app.services.design_service import DesignService
 from app.services.design_variant_service import DesignVariantService
 from app.services.manufacturer_variant_share_service import DesignVariantManufacturerShareService
 from app.models.design import DesignShareStatus
-
+from app.tasks.email_tasks import send_design_review_email
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
