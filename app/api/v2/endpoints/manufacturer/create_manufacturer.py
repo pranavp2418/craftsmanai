@@ -17,6 +17,55 @@ def create_manufacturer(
 ):
     service = ManufacturerService(db)
     
+    # Validate against current user's email/phone
+    user_email = current_user.email.lower().strip() if current_user.email else None
+    user_phone = current_user.whatsapp_number.strip() if current_user.whatsapp_number else None
+    
+    if request.emails:
+        for e in request.emails:
+            req_email = e.email.lower().strip() if getattr(e, 'email', None) else ""
+            if user_email and req_email == user_email:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot use your own email address for a manufacturer.")
+                
+    if request.phone_number and user_phone and request.phone_number.strip() == user_phone:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot use your own phone number for a manufacturer.")
+
+    # Validate against customers
+    from app.models.customer import Customer
+    import json
+    
+    if request.phone_number:
+        customer_with_phone = db.query(Customer).filter(
+            Customer.phone_number == request.phone_number.strip(),
+            Customer.is_deleted == False
+        ).first()
+        if customer_with_phone:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This phone number belongs to a customer.")
+            
+    if request.emails:
+        req_emails = [e.email.lower().strip() for e in request.emails if getattr(e, 'email', None)]
+        customers = db.query(Customer).filter(
+            Customer.emails.isnot(None),
+            Customer.is_deleted == False
+        ).all()
+        
+        for c in customers:
+            try:
+                c_emails_data = json.loads(c.emails)
+                if isinstance(c_emails_data, list):
+                    for c_email_obj in c_emails_data:
+                        c_email = (c_email_obj.get("email") if isinstance(c_email_obj, dict) else str(c_email_obj)).lower().strip()
+                        if c_email in req_emails:
+                            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address belongs to a customer.")
+                elif isinstance(c_emails_data, dict):
+                    c_email = str(c_emails_data.get("email", "")).lower().strip()
+                    if c_email in req_emails:
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address belongs to a customer.")
+            except (json.JSONDecodeError, TypeError):
+                c_email = str(c.emails).split(',')[0].strip().lower()
+                if c_email in req_emails:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address belongs to a customer.")
+
     # Serialize emails list to JSON string
     emails_str = None
     if request.emails:
@@ -29,4 +78,5 @@ def create_manufacturer(
         emails=emails_str,
         phone_number=request.phone_number,
         location=request.location,
+        is_active=request.is_active if request.is_active is not None else True,
     )

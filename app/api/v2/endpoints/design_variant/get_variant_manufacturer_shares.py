@@ -38,63 +38,46 @@ def get_variant_manufacturer_shares(
     if not design:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
 
-    from app.repositories.manufacturer import ManufacturerRepository
-    manufacturer_repo = ManufacturerRepository(db)
-    
-    # Get all active manufacturers for the current user
-    all_manufacturers = manufacturer_repo.list_manufacturers(created_by_user_id=current_user.id)
-    
     # Get shares for the variant
     shares = share_service.list_for_variant(variant.id)
     
-    # Map shares by manufacturer_id for easy lookup
-    shares_by_manufacturer = {share.manufacturer_id: share for share in shares}
+    if not shares:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Design not shared to manufacturer yet",
+        )
 
+    from app.repositories.manufacturer import ManufacturerRepository
+    manufacturer_repo = ManufacturerRepository(db)
+    
     share_items = []
-    for manufacturer in all_manufacturers:
-        share = shares_by_manufacturer.get(manufacturer.id)
-        
-        if share:
-            shared_date = share.created_at
-            estimated_delivery_date = (
-                shared_date + timedelta(days=share.delivery_time_days)
-                if shared_date and share.delivery_time_days is not None
-                else None
-            )
-            share_items.append(
-                {
-                    "id": share.id,
-                    "design_variant_id": share.design_variant_id,
-                    "manufacturer_id": manufacturer.id,
-                    "manufacturer": manufacturer,
-                    "shared_date": shared_date,
-                    "quoted_price": share.cost_price,
-                    "estimated_delivery_days": share.delivery_time_days,
-                    "estimated_delivery_date": estimated_delivery_date,
-                    "manufacturer_notes": share.notes,
-                    "status": share.status.value if hasattr(share.status, "value") else share.status,
-                    "public_token": share.public_token,
-                    "shared_metal": share.shared_metal,
-                }
-            )
-        else:
-            # Manufacturer has not been shared with yet
-            share_items.append(
-                {
-                    "id": 0,  # Dummy ID
-                    "design_variant_id": variant.id,
-                    "manufacturer_id": manufacturer.id,
-                    "manufacturer": manufacturer,
-                    "shared_date": None,
-                    "quoted_price": None,
-                    "estimated_delivery_days": None,
-                    "estimated_delivery_date": None,
-                    "manufacturer_notes": None,
-                    "status": "NOT_SHARED",
-                    "public_token": "",
-                    "shared_metal": None,
-                }
-            )
+    for share in shares:
+        manufacturer = manufacturer_repo.get_by_id(share.manufacturer_id)
+        if not manufacturer:
+            continue
+            
+        shared_date = share.created_at
+        estimated_delivery_date = (
+            shared_date + timedelta(days=share.delivery_time_days)
+            if shared_date and share.delivery_time_days is not None
+            else None
+        )
+        share_items.append(
+            {
+                "id": share.id,
+                "design_variant_id": share.design_variant_id,
+                "manufacturer_id": manufacturer.id,
+                "manufacturer": manufacturer,
+                "shared_date": shared_date,
+                "quoted_price": share.cost_price,
+                "estimated_delivery_days": share.delivery_time_days,
+                "estimated_delivery_date": estimated_delivery_date,
+                "manufacturer_notes": share.notes,
+                "status": share.status.value if hasattr(share.status, "value") else share.status,
+                "public_token": share.public_token,
+                "shared_metal": share.shared_metal,
+            }
+        )
 
     return VariantManufacturerSharesResponse(
         variant_id=variant.id,

@@ -20,7 +20,7 @@ from app.schemas.manufacturer_variant_share import (
 from app.services.design_service import DesignService
 from app.services.design_variant_service import DesignVariantService
 from app.services.manufacturer_variant_share_service import DesignVariantManufacturerShareService
-from app.tasks.email_tasks import send_design_review_email
+from app.models.design import DesignShareStatus
 
 
 router = APIRouter()
@@ -107,30 +107,49 @@ def share_variant_with_manufacturer(
     if not customer_shares:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Design variant must be shared with a customer before sharing with a manufacturer. "
-                   "Please share this variant with a customer first via POST /variants/{id}/share",
+            detail="Design is not shared or approved by customer"
+            # detail="Design variant must be shared with a customer before sharing with a manufacturer. "
+                #    "Please share this variant with a customer first via POST /variants/{variant_id}/share",
         )
 
     # Use the metal from the customer share (latest one), or None if not set
     latest_customer_share = customer_shares[0]
+
+    if latest_customer_share.status != DesignShareStatus.ACCEPTED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Design is not shared or approved by customer"
+        )
+
     shared_metal = latest_customer_share.shared_metal
-    
+
+    if not payload.manufacturer_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one manufacturer ID must be provided."
+        )
+
+    shares = []
     from app.repositories.manufacturer import ManufacturerRepository
     from app.tasks.email_tasks import send_manufacturer_share_email, send_manufacturer_share_sms
     from app.core.config import settings
 
     manufacturer_repo = ManufacturerRepository(db)
-    
-    # Pre-verify all manufacturers exist
+
+    # Validate all manufacturers before creating shares
     for m_id in payload.manufacturer_ids:
         manufacturer = manufacturer_repo.get_by_id(m_id)
         if not manufacturer:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Manufacturer with ID {m_id} not found"
+                detail=f"Manufacturer {m_id} not found"
+            )
+        if not manufacturer.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid manufacturer"
             )
 
-    shares_response = []
     for m_id in payload.manufacturer_ids:
         share = share_service.create_share(
             design_variant_id=variant.id,

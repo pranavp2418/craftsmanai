@@ -13,7 +13,6 @@ Usage:
 """
  
 import base64
-import imghdr
 import logging
 import mimetypes
 import os

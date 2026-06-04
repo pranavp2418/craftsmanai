@@ -86,23 +86,50 @@ def share_design_variant(
     if not design:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
 
+    # Check if customer exists and is active before sharing
+    if payload.customer_id:
+        from app.repositories.customer import CustomerRepository
+        customer_repo = CustomerRepository(db)
+        customer = customer_repo.get_by_id(payload.customer_id)
+        if not customer:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Customer not found",
+            )
+        if not customer.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid customer",
+            )
+
     # Normalize metal to lowercase for consistent lookup
     metal = payload.metal.lower() if payload.metal else None
 
-    share = sharing_service.create_share(
-        design_variant_id=variant.id,
-        customer_id=payload.customer_id,
-        comment=payload.comment,
-        shared_metal=metal,
-    )
+    try:
+        share = sharing_service.create_share(
+            design_variant_id=variant.id,
+            customer_id=payload.customer_id,
+            comment=payload.comment,
+            shared_metal=metal,
+        )
+    except ValueError as e:
+        if str(e) in ["Design is already shared with another customer.", "Design already rejected by customer"]:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(e),
+            )
+        raise
+
+    # Update the design status to SHARED when shared with a customer
+    from app.models.design import DesignStatus
+    if design.status != DesignStatus.SHARED:
+        design_service.update_design(design, status=DesignStatus.SHARED)
 
     # Queue email to customer if customer exists and has email/phone
     if payload.customer_id:
-        from app.repositories.customer import CustomerRepository
         from app.tasks.email_tasks import send_customer_share_email, send_customer_share_sms
         from app.core.config import settings
 
-        customer_repo = CustomerRepository(db)
         customer = customer_repo.get_by_id(payload.customer_id)
         
         preview_url = f"{settings.FRONTEND_URL}/review/{share.public_token}"

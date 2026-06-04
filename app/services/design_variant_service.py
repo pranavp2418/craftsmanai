@@ -14,8 +14,12 @@ class DesignVariantService:
         self.activity_repo = DesignActivityLogRepository(db)
 
     def _next_version(self, design_id: int) -> int:
-        variants = self.variant_repo.list_for_design(design_id)
-        return (max((variant.version_number for variant in variants), default=-1) + 1)
+        versions = [
+            v[0] for v in self.db.query(DesignVariant.version_number)
+            .filter(DesignVariant.design_id == design_id)
+            .all()
+        ]
+        return max(versions, default=-1) + 1
 
     def get_variant(self, variant_id: int) -> Optional[DesignVariant]:
         return self.variant_repo.get_by_id(variant_id)
@@ -69,6 +73,7 @@ class DesignVariantService:
         base_design_image_url: Optional[str] = None,
         style_tags: Optional[str] = None,
         design_focus: Optional[str] = None,
+        reference_images_json: Optional[list] = None,
     ) -> DesignVariant:
         version = self._next_version(design_id)
         variant = self.variant_repo.create_variant(
@@ -81,6 +86,7 @@ class DesignVariantService:
             base_design_image_url=base_design_image_url,
             style_tags=style_tags,
             design_focus=design_focus,
+            reference_images_json=reference_images_json,
         )
         self.activity_repo.log(
             design_id=design_id,

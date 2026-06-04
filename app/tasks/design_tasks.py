@@ -191,6 +191,7 @@ def refine_design_variant_image(
     model_used: str,
     style_tags: str = None,
     design_focus: str = None,
+    reference_images: list = None,
     channel: str = None,
 ):
     """Generate a refined variant image via AI in the background.
@@ -210,14 +211,18 @@ def refine_design_variant_image(
         from app.models.design import DesignVariant
         from app.services.design_variant_service import DesignVariantService
 
-        # Fetch parent variant to get the reference image
-        parent_variant = db.query(DesignVariant).filter(DesignVariant.id == parent_variant_id).first()
-        if not parent_variant or not parent_variant.base_design_image_url:
-            raise ValueError(
-                f"Parent variant {parent_variant_id} has no base_design_image_url"
-            )
-
-        reference_image_url = parent_variant.base_design_image_url
+        # Resolve reference images for AI generation
+        if reference_images:
+            # Use user-provided reference images (uploaded during the refine request)
+            reference_image_source = reference_images
+        else:
+            # Fall back to parent variant's base image
+            parent_variant = db.query(DesignVariant).filter(DesignVariant.id == parent_variant_id).first()
+            if not parent_variant or not parent_variant.base_design_image_url:
+                raise ValueError(
+                    f"Parent variant {parent_variant_id} has no base_design_image_url"
+                )
+            reference_image_source = parent_variant.base_design_image_url
 
         # Look up jewellery_type from the design
         from app.models.design import Design as DesignModel
@@ -231,8 +236,8 @@ def refine_design_variant_image(
         if design_focus:
             combined_prompt = f"{combined_prompt}\nFocus on: {design_focus}"
 
-        # Generate refined image via OpenAI
-        generated_item = openai_service.generate_base_image(reference_image_url, combined_prompt, jewellery_type=jewellery_type)
+        # Generate refined image via OpenAI using the resolved reference images
+        generated_item = openai_service.generate_base_image(reference_image_source, combined_prompt, jewellery_type=jewellery_type)
         image_bytes, content_type = _extract_generated_image_data(generated_item)
         _validate_image_bytes(image_bytes, content_type)
 
