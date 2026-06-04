@@ -87,39 +87,47 @@ class NotificationService:
         This is a fire-and-forget operation - if it fails, the notification
         will be delivered when the user reconnects via flush_pending().
         """
-        try:
-            # Check if user has active sockets (synchronous check via event loop)
-            loop = asyncio.new_event_loop()
-            try:
-                sockets = loop.run_until_complete(
-                    realtime_state.list_user_sockets(str(user_id))
+        async def _async_push():
+            sockets = await realtime_state.list_user_sockets(str(user_id))
+            if sockets:
+                # User is connected - push in real-time
+                await ws_send_notification(
+                    user_id=str(user_id),
+                    title=notification.title,
+                    message=notification.message,
+                    notification_type=notification.type,
+                    data={
+                        **(notification.data or {}),
+                        "notification_id": notification.id,
+                        "source": notification.source,
+                        "reference_id": notification.reference_id,
+                        "created_at": notification.created_at.isoformat() if notification.created_at else None,
+                    },
                 )
-                if sockets:
-                    # User is connected - push in real-time
-                    loop.run_until_complete(
-                        ws_send_notification(
-                            user_id=str(user_id),
-                            title=notification.title,
-                            message=notification.message,
-                            notification_type=notification.type,
-                            data={
-                                **(notification.data or {}),
-                                "notification_id": notification.id,
-                                "source": notification.source,
-                                "reference_id": notification.reference_id,
-                                "created_at": notification.created_at.isoformat() if notification.created_at else None,
-                            },
-                        )
-                    )
-                    logger.debug(
-                        "Real-time push sent to user_id=%s notification_id=%s",
-                        user_id, notification.id,
-                    )
-            finally:
-                loop.close()
+                logger.info(
+                    "Real-time push sent to user_id=%s notification_id=%s",
+                    user_id, notification.id,
+                )
+
+        try:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                # Schedule on the running event loop
+                loop.create_task(_async_push())
+            else:
+                # No running event loop (e.g., CLI, tests)
+                new_loop = asyncio.new_event_loop()
+                try:
+                    new_loop.run_until_complete(_async_push())
+                finally:
+                    new_loop.close()
         except Exception as exc:
             # Fail silently - notification is already persisted
-            logger.debug(
+            logger.error(
                 "Real-time push failed for user_id=%s: %s (notification saved to DB)",
                 user_id, exc,
             )

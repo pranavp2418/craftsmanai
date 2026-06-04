@@ -109,4 +109,45 @@ class DesignVariantManufacturerShareService:
                 "delivery_time_days": delivery_time_days,
             },
         )
+
+        # Trigger notification to the retailer
+        recipient_user_id = None
+        if share.manufacturer:
+            recipient_user_id = share.manufacturer.created_by_user_id
+        if not recipient_user_id and variant and variant.design:
+            recipient_user_id = variant.design.user_id
+
+        if recipient_user_id:
+            try:
+                from app.services.notification_service import NotificationService
+                notification_service = NotificationService(self.db)
+                
+                manufacturer_name = share.manufacturer.name if share.manufacturer else "A manufacturer"
+                design_name = variant.design.name if (variant and variant.design) else "design"
+                variant_name = variant.variant_name if variant else ""
+                
+                notification_title = "Manufacturer Quote Submitted"
+                notification_message = f"Manufacturer '{manufacturer_name}' submitted a quote for variant '{variant_name}' of design '{design_name}': ${cost_price} (Delivery: {delivery_time_days} days)."
+                if notes:
+                    notification_message += f" Note: {notes}"
+                
+                notification_service.send_notification(
+                    user_id=recipient_user_id,
+                    type="manufacturer_quote_submitted",
+                    title=notification_title,
+                    message=notification_message,
+                    source="manufacturer_share",
+                    reference_id=share.id,
+                    data={
+                        "share_id": share.id,
+                        "design_id": variant.design_id if variant else None,
+                        "variant_id": share.design_variant_id,
+                        "cost_price": cost_price,
+                        "delivery_time_days": delivery_time_days,
+                    }
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to send manufacturer quote notification: {str(e)}")
+
         return updated
