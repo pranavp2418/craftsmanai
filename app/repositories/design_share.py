@@ -47,6 +47,18 @@ class DesignShareRepository:
             .all()
         )
 
+    def get_customer_shares_for_design(self, design_id: int) -> List[DesignShare]:
+        from app.models.design import DesignVariant
+        return (
+            self.db.query(DesignShare)
+            .join(DesignVariant, DesignVariant.id == DesignShare.design_variant_id)
+            .filter(
+                DesignVariant.design_id == design_id,
+                DesignShare.customer_id.isnot(None)
+            )
+            .all()
+        )
+
     def list_for_customer(self, customer_id: int) -> List[DesignShare]:
         return (
             self.db.query(DesignShare)
