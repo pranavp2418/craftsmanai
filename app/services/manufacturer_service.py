@@ -26,15 +26,14 @@ class ManufacturerService:
         location: Optional[str] = None,
         is_active: bool = True,
     ) -> Manufacturer:
-        token = self._generate_token()
         return self.manufacturer_repo.create_manufacturer(
-            created_by_user_id=user_id,
-            name=request.name,
-            speciality=request.speciality,
-            emails=emails_json,
-            phone_number=request.phone_number,
-            location=request.location,
-            is_active=request.is_active,
+            created_by_user_id=created_by_user_id,
+            name=name,
+            speciality=speciality,
+            emails=emails,
+            phone_number=phone_number,
+            location=location,
+            is_active=is_active,
         )
 
     def get_manufacturer(self, manufacturer_id: int) -> Optional[Manufacturer]:
