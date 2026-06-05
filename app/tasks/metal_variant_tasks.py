@@ -138,9 +138,9 @@ def generate_metal_variant_images(
             logger.info("Generating %s variant for variant_id=%s", metal, variant_id)
 
             try:
-                generated_item = openai_service.generate_side_view(
+                generated_item = openai_service.generate_metal_variation(
                     base_image_source=base_image_url,
-                    angle_description=prompt,
+                    metal=metal,
                     jewellery_type=jewellery_type,
                 )
                 image_bytes, content_type = _extract_image_data(generated_item)
