@@ -14,7 +14,6 @@ class ManufacturerRepository:
         *,
         created_by_user_id: int,
         name: str,
-        public_token: str,
         speciality: Optional[str] = None,
         emails: Optional[str] = None,
         phone_number: Optional[str] = None,
@@ -28,7 +27,6 @@ class ManufacturerRepository:
             emails=emails,
             phone_number=phone_number,
             location=location,
-            public_token=public_token,
             is_active=is_active,
         )
         self.db.add(manufacturer)
@@ -38,9 +36,6 @@ class ManufacturerRepository:
 
     def get_by_id(self, manufacturer_id: int) -> Optional[Manufacturer]:
         return self.db.query(Manufacturer).filter(Manufacturer.id == manufacturer_id, Manufacturer.is_deleted == False).first()
-
-    def get_by_token(self, token: str) -> Optional[Manufacturer]:
-        return self.db.query(Manufacturer).filter(Manufacturer.public_token == token, Manufacturer.is_deleted == False).first()
 
     def list_manufacturers(
         self,

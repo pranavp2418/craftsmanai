@@ -1,6 +1,7 @@
 import logging
 from typing import Optional
 from app.core.config import settings
+from app.services.template_renderer import render_template
 
 logger = logging.getLogger(__name__)
 
@@ -67,14 +68,14 @@ class EmailService:
             db.close()
     
     @staticmethod
-    async def send_signup_otp(to: str, otp: str, user_name: str):
+    async def send_signup_otp(to: str, otp: str, user_name: str, expires_minutes: int = 15, verify_url: str = "#"):
         """Send signup OTP email"""
         from app.models.email_log import EmailStatus
         log_id = EmailService._create_email_log(
             to_email=to,
             template_name="signup_otp",
             subject="Verify your email address - Craftmen",
-            variables={"otp": otp, "user_name": user_name}
+            variables={"otp": otp, "user_name": user_name, "expires_minutes": expires_minutes, "verify_url": verify_url}
         )
         try:
             logger.info(f"SENDING EMAIL: To={to}, OTP={otp}, User={user_name}")
@@ -85,75 +86,18 @@ class EmailService:
             import asyncio
             
             subject = "Verify your email address - Craftmen"
-            html_content = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Verify your email</title>
-</head>
-<body style="margin: 0; padding: 0; background-color: #0b0f19; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f3f4f6; -webkit-font-smoothing: antialiased; width: 100% !important; height: 100% !important;">
-    <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #0b0f19; padding: 40px 20px;">
-        <tr>
-            <td align="center">
-                <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background: linear-gradient(135deg, #111827 0%, #1f2937 100%); border-radius: 24px; border: 1px solid rgba(255, 255, 255, 0.08); overflow: hidden; max-width: 600px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.04);">
-                    <!-- Header -->
-                    <tr>
-                        <td align="center" style="padding: 40px 40px 20px 40px;">
-                            <div style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); -webkit-background-clip: text; color: transparent; font-size: 32px; font-weight: 800; letter-spacing: -0.025em; margin-bottom: 8px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-                                CRAFTMEN
-                            </div>
-                            <div style="height: 2px; width: 60px; background: linear-gradient(90deg, #6366f1 0%, #a855f7 100%); border-radius: 1px;"></div>
-                        </td>
-                    </tr>
-                    
-                    <!-- Content -->
-                    <tr>
-                        <td style="padding: 20px 40px 40px 40px;">
-                            <h1 style="color: #ffffff; font-size: 24px; font-weight: 700; margin-top: 0; margin-bottom: 16px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">Verify your email address</h1>
-                            
-                            <p style="color: #9ca3af; font-size: 16px; line-height: 1.7; margin-bottom: 28px; text-align: center;">
-                                Hi {user_name},<br>
-                                Thank you for registering with <strong>Craftmen</strong>. Please use the verification code below to complete your sign-up process.
-                            </p>
-                            
-                            <!-- OTP Box -->
-                            <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom: 32px;">
-                                <tr>
-                                    <td align="center">
-                                        <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 16px; padding: 20px 40px; display: inline-block;">
-                                            <span style="font-family: monospace; font-size: 36px; font-weight: 800; letter-spacing: 6px; color: #818cf8; text-shadow: 0 0 10px rgba(129, 140, 248, 0.2);">{otp}</span>
-                                        </div>
-                                    </td>
-                                </tr>
-                            </table>
-                            
-                            <p style="color: #9ca3af; font-size: 14px; line-height: 1.6; text-align: center; margin-bottom: 28px;">
-                                This code is valid for 10 minutes. If you did not request this verification code, please ignore this email.
-                            </p>
-                            
-                            <p style="color: #6b7280; font-size: 14px; line-height: 1.6; text-align: center; margin-bottom: 0;">
-                                Need assistance? Reach out to us at <a href="mailto:support@craftmen.com" style="color: #818cf8; text-decoration: none;">support@craftmen.com</a>
-                            </p>
-                        </td>
-                    </tr>
-                    
-                    <!-- Footer -->
-                    <tr>
-                        <td align="center" style="padding: 24px 40px; background-color: rgba(0, 0, 0, 0.2); border-top: 1px solid rgba(255, 255, 255, 0.04);">
-                            <p style="color: #4b5563; font-size: 12px; margin: 0;">
-                                &copy; 2026 Craftmen. All rights reserved.
-                            </p>
-                        </td>
-                    </tr>
-                </table>
-            </td>
-        </tr>
-    </table>
-</body>
-</html>
-"""
+            
+            # Render template using Jinja2
+            html_content = await render_template(
+                "signup_otp",
+                context={
+                    "user_name": user_name,
+                    "code": otp,
+                    "expires_minutes": expires_minutes,
+                    "verify_url": verify_url
+                }
+            )
+            
             text_body = f"Hi {user_name},\n\nYour OTP code is: {otp}\n\nBest regards,\nThe Craftmen Team"
             
             def sync_send():
@@ -162,8 +106,8 @@ class EmailService:
                 msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
                 msg['To'] = to
                 
-                msg.attach(MIMEText(text_body, 'plain'))
-                msg.attach(MIMEText(html_content, 'html'))
+                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
                 
                 with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
                     server.starttls()
@@ -188,14 +132,14 @@ class EmailService:
             raise e
     
     @staticmethod
-    async def send_password_reset_otp(to: str, otp: str, user_name: str):
+    async def send_password_reset_otp(to: str, otp: str, user_name: str, expires_minutes: int = 10, reset_url: str = "#"):
         """Send password reset OTP email"""
         from app.models.email_log import EmailStatus
         log_id = EmailService._create_email_log(
             to_email=to,
             template_name="password_reset_otp",
             subject="Reset your password - Craftmen",
-            variables={"otp": otp, "user_name": user_name}
+            variables={"otp": otp, "user_name": user_name, "expires_minutes": expires_minutes, "reset_url": reset_url}
         )
         try:
             logger.info(f"SENDING PASSWORD RESET EMAIL: To={to}, OTP={otp}, User={user_name}")
@@ -206,75 +150,18 @@ class EmailService:
             import asyncio
             
             subject = "Reset your password - Craftmen"
-            html_content = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reset your password</title>
-</head>
-<body style="margin: 0; padding: 0; background-color: #0b0f19; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f3f4f6; -webkit-font-smoothing: antialiased; width: 100% !important; height: 100% !important;">
-    <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #0b0f19; padding: 40px 20px;">
-        <tr>
-            <td align="center">
-                <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background: linear-gradient(135deg, #111827 0%, #1f2937 100%); border-radius: 24px; border: 1px solid rgba(255, 255, 255, 0.08); overflow: hidden; max-width: 600px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.04);">
-                    <!-- Header -->
-                    <tr>
-                        <td align="center" style="padding: 40px 40px 20px 40px;">
-                            <div style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); -webkit-background-clip: text; color: transparent; font-size: 32px; font-weight: 800; letter-spacing: -0.025em; margin-bottom: 8px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-                                CRAFTMEN
-                            </div>
-                            <div style="height: 2px; width: 60px; background: linear-gradient(90deg, #6366f1 0%, #a855f7 100%); border-radius: 1px;"></div>
-                        </td>
-                    </tr>
-                    
-                    <!-- Content -->
-                    <tr>
-                        <td style="padding: 20px 40px 40px 40px;">
-                            <h1 style="color: #ffffff; font-size: 24px; font-weight: 700; margin-top: 0; margin-bottom: 16px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">Reset your password</h1>
-                            
-                            <p style="color: #9ca3af; font-size: 16px; line-height: 1.7; margin-bottom: 28px; text-align: center;">
-                                Hi {user_name},<br>
-                                We received a request to reset your password. Please use the security code below to complete the reset.
-                            </p>
-                            
-                            <!-- OTP Box -->
-                            <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom: 32px;">
-                                <tr>
-                                    <td align="center">
-                                        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 16px; padding: 20px 40px; display: inline-block;">
-                                            <span style="font-family: monospace; font-size: 36px; font-weight: 800; letter-spacing: 6px; color: #f87171; text-shadow: 0 0 10px rgba(248, 113, 113, 0.2);">{otp}</span>
-                                        </div>
-                                    </td>
-                                </tr>
-                            </table>
-                            
-                            <p style="color: #9ca3af; font-size: 14px; line-height: 1.6; text-align: center; margin-bottom: 28px;">
-                                This code is valid for 10 minutes. If you did not request a password reset, please ignore this email and ensure your password is secure.
-                            </p>
-                            
-                            <p style="color: #6b7280; font-size: 14px; line-height: 1.6; text-align: center; margin-bottom: 0;">
-                                Need assistance? Reach out to us at <a href="mailto:support@craftmen.com" style="color: #818cf8; text-decoration: none;">support@craftmen.com</a>
-                            </p>
-                        </td>
-                    </tr>
-                    
-                    <!-- Footer -->
-                    <tr>
-                        <td align="center" style="padding: 24px 40px; background-color: rgba(0, 0, 0, 0.2); border-top: 1px solid rgba(255, 255, 255, 0.04);">
-                            <p style="color: #4b5563; font-size: 12px; margin: 0;">
-                                &copy; 2026 Craftmen. All rights reserved.
-                            </p>
-                        </td>
-                    </tr>
-                </table>
-            </td>
-        </tr>
-    </table>
-</body>
-</html>
-"""
+            
+            # Render template using Jinja2
+            html_content = await render_template(
+                "password_reset_otp",
+                context={
+                    "user_name": user_name,
+                    "code": otp,
+                    "expires_minutes": expires_minutes,
+                    "reset_url": reset_url
+                }
+            )
+            
             text_body = f"Hi {user_name},\n\nYour security code is: {otp}\n\nBest regards,\nThe Craftmen Team"
             
             def sync_send():
@@ -283,8 +170,8 @@ class EmailService:
                 msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
                 msg['To'] = to
                 
-                msg.attach(MIMEText(text_body, 'plain'))
-                msg.attach(MIMEText(html_content, 'html'))
+                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
                 
                 with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
                     server.starttls()
@@ -309,27 +196,40 @@ class EmailService:
             raise e
     
     @staticmethod
-    async def send_customer_share(to_email: str, customer_name: str, preview_url: str, designer_name: str):
-        """Send an email to a customer with a link to review a shared design."""
+    async def send_customer_share(to_email: str, customer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, version: str = None, version_label: str = None):
+        """Send an email to a customer with a link to review a shared design using customer_approval template."""
         from app.models.email_log import EmailStatus
+        from app.services.template_renderer import render_template
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        import asyncio
+        
         log_id = EmailService._create_email_log(
             to_email=to_email,
-            template_name="customer_share",
+            template_name="customer_approval",
             subject=f"{designer_name} shared a design with you - Craftmen",
-            variables={"customer_name": customer_name, "preview_url": preview_url, "designer_name": designer_name}
+            variables={"customer_name": customer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "version": version, "version_label": version_label}
         )
         try:
             logger.info(f"SENDING CUSTOMER SHARE EMAIL: To={to_email}, URL={preview_url}")
             
-            import smtplib
-            from email.mime.multipart import MIMEMultipart
-            from email.mime.text import MIMEText
-            import asyncio
-            
             subject = f"{designer_name} shared a design with you - Craftmen"
             
-            text_body = f"Hi {customer_name},\n\n{designer_name} has shared a design with you.\n\nReview it here: {preview_url}\n\nBest regards,\nThe Craftmen Team"
-            html_content = f"<p>Hi {customer_name},</p><p>{designer_name} has shared a design with you.</p><p><a href='{preview_url}'>Click here to review the design</a></p><p>Best regards,<br>The Craftmen Team</p>"
+            # Render the customer_approval template
+            context = {
+                "retailer_name": retailer_name or designer_name,
+                "render_image_url": render_image_url or "",
+                "version": version or "v1.0",
+                "design_number": design_code or "",
+                "jewelry_type": jewelry_type or "Custom Jewelry",
+                "version_label": version_label or "Version 1",
+                "approval_url": preview_url
+            }
+            
+            html_content = await render_template("customer_approval", context)
+            
+            text_body = f"Hi {customer_name},\n\n{retailer_name or designer_name} has shared a custom jewelry design with you.\n\nDesign Number: {design_code or 'N/A'}\nJewelry Type: {jewelry_type or 'Custom Jewelry'}\nVersion: {version or 'v1.0'}\n\nReview it here: {preview_url}\n\nBest regards,\nThe Craftmen Team"
             
             def sync_send():
                 msg = MIMEMultipart('alternative')
@@ -337,8 +237,8 @@ class EmailService:
                 msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
                 msg['To'] = to_email
                 
-                msg.attach(MIMEText(text_body, 'plain'))
-                msg.attach(MIMEText(html_content, 'html'))
+                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
                 
                 with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
                     server.starttls()
@@ -362,27 +262,39 @@ class EmailService:
             raise e
 
     @staticmethod
-    async def send_manufacturer_share(to_email: str, manufacturer_name: str, preview_url: str, designer_name: str):
-        """Send an email to a manufacturer with a link to review a shared design for quote."""
+    async def send_manufacturer_share(to_email: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, metal: str = None):
+        """Send an email to a manufacturer with a link to review a shared design for quote using manufacturer_design_share template."""
         from app.models.email_log import EmailStatus
+        from app.services.template_renderer import render_template
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        import asyncio
+        
         log_id = EmailService._create_email_log(
             to_email=to_email,
-            template_name="manufacturer_share",
+            template_name="manufacturer_design_share",
             subject=f"Quote Request from {designer_name} - Craftmen",
-            variables={"manufacturer_name": manufacturer_name, "preview_url": preview_url, "designer_name": designer_name}
+            variables={"manufacturer_name": manufacturer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "metal": metal}
         )
         try:
             logger.info(f"SENDING MANUFACTURER SHARE EMAIL: To={to_email}, URL={preview_url}")
             
-            import smtplib
-            from email.mime.multipart import MIMEMultipart
-            from email.mime.text import MIMEText
-            import asyncio
-            
             subject = f"Quote Request from {designer_name} - Craftmen"
             
-            text_body = f"Hi {manufacturer_name},\n\n{designer_name} has shared a design variant and requested a quote.\n\nReview it here: {preview_url}\n\nBest regards,\nThe Craftmen Team"
-            html_content = f"<p>Hi {manufacturer_name},</p><p>{designer_name} has shared a design variant and requested a quote.</p><p><a href='{preview_url}'>Click here to review the design and submit your quote</a></p><p>Best regards,<br>The Craftmen Team</p>"
+            # Render the manufacturer_design_share template
+            context = {
+                "retailer_name": retailer_name or designer_name,
+                "render_image_url": render_image_url or "",
+                "design_number": design_code or "",
+                "jewelry_type": jewelry_type or "Custom Jewelry",
+                "metal": metal or "Not specified",
+                "details_sheet_url": preview_url
+            }
+            
+            html_content = await render_template("manufacturer_design_share", context)
+            
+            text_body = f"Hi {manufacturer_name},\n\n{retailer_name or designer_name} sent a Details Sheet for manufacturer quote.\n\nDesign Number: {design_code or 'N/A'}\nJewelry Type: {jewelry_type or 'Custom Jewelry'}\nMetal: {metal or 'Not specified'}\n\nOpen the Details Sheet and submit costing here: {preview_url}\n\nBest regards,\nThe Craftmen Team"
             
             def sync_send():
                 msg = MIMEMultipart('alternative')
@@ -390,8 +302,8 @@ class EmailService:
                 msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
                 msg['To'] = to_email
                 
-                msg.attach(MIMEText(text_body, 'plain'))
-                msg.attach(MIMEText(html_content, 'html'))
+                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
                 
                 with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
                     server.starttls()
@@ -415,14 +327,14 @@ class EmailService:
             raise e
 
     @staticmethod
-    async def send_welcome_email(to: str, user_name: str):
+    async def send_welcome_email(to: str, user_name: str, dashboard_url: str = "#"):
         """Send welcome email after successful verification"""
         from app.models.email_log import EmailStatus
         log_id = EmailService._create_email_log(
             to_email=to,
-            template_name="welcome",
+            template_name="welcome_platform",
             subject="Welcome to Craftmen!",
-            variables={"user_name": user_name}
+            variables={"user_name": user_name, "dashboard_url": dashboard_url}
         )
         try:
             logger.info(f"SENDING WELCOME EMAIL: To={to}, User={user_name}")
@@ -433,74 +345,15 @@ class EmailService:
             import asyncio
             
             subject = "Welcome to Craftmen!"
-            html_content = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Welcome to Craftmen</title>
-</head>
-<body style="margin: 0; padding: 0; background-color: #0b0f19; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f3f4f6; -webkit-font-smoothing: antialiased; width: 100% !important; height: 100% !important;">
-    <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #0b0f19; padding: 40px 20px;">
-        <tr>
-            <td align="center">
-                <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background: linear-gradient(135deg, #111827 0%, #1f2937 100%); border-radius: 24px; border: 1px solid rgba(255, 255, 255, 0.08); overflow: hidden; max-width: 600px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.04);">
-                    <!-- Header -->
-                    <tr>
-                        <td align="center" style="padding: 40px 40px 20px 40px;">
-                            <div style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); -webkit-background-clip: text; color: transparent; font-size: 32px; font-weight: 800; letter-spacing: -0.025em; margin-bottom: 8px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-                                CRAFTMEN
-                            </div>
-                            <div style="height: 2px; width: 60px; background: linear-gradient(90deg, #6366f1 0%, #a855f7 100%); border-radius: 1px;"></div>
-                        </td>
-                    </tr>
-                    
-                    <!-- Content -->
-                    <tr>
-                        <td style="padding: 20px 40px 40px 40px;">
-                            <h1 style="color: #ffffff; font-size: 26px; font-weight: 800; margin-top: 0; margin-bottom: 16px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #a5b4fc 0%, #c084fc 100%); -webkit-background-clip: text; color: transparent;">Welcome to the family!</h1>
-                            
-                            <p style="color: #9ca3af; font-size: 16px; line-height: 1.8; margin-bottom: 28px; text-align: center;">
-                                Hi {user_name},<br>
-                                We are absolutely thrilled to welcome you to <strong>Craftmen</strong>! Your email address has been successfully verified, and your account is now fully active.
-                            </p>
-                            
-                            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 24px; margin-bottom: 32px; text-align: left;">
-                                <h3 style="color: #ffffff; margin-top: 0; margin-bottom: 12px; font-size: 16px;">What's next?</h3>
-                                <ul style="color: #9ca3af; padding-left: 20px; margin: 0; line-height: 1.6; font-size: 15px;">
-                                    <li style="margin-bottom: 8px;">Explore our platform and setup your profile</li>
-                                    <li style="margin-bottom: 8px;">Connect with other craftsmen and partners</li>
-                                    <li>Discover advanced features tailored just for you</li>
-                                </ul>
-                            </div>
-                            
-                            <p style="color: #9ca3af; font-size: 15px; line-height: 1.7; text-align: center; margin-bottom: 28px;">
-                                If you have any questions or need a hand getting started, simply reply to this email or drop us a line at support.
-                            </p>
-                            
-                            <p style="color: #6b7280; font-size: 14px; line-height: 1.6; text-align: center; margin-bottom: 0;">
-                                Cheers,<br>
-                                <strong>The Craftmen Team</strong>
-                            </p>
-                        </td>
-                    </tr>
-                    
-                    <!-- Footer -->
-                    <tr>
-                        <td align="center" style="padding: 24px 40px; background-color: rgba(0, 0, 0, 0.2); border-top: 1px solid rgba(255, 255, 255, 0.04);">
-                            <p style="color: #4b5563; font-size: 12px; margin: 0;">
-                                &copy; 2026 Craftmen. All rights reserved.
-                            </p>
-                        </td>
-                    </tr>
-                </table>
-            </td>
-        </tr>
-    </table>
-</body>
-</html>
-"""
+            
+            # Render template using Jinja2
+            html_content = await render_template(
+                "welcome_platform",
+                context={
+                    "dashboard_url": dashboard_url
+                }
+            )
+            
             text_body = f"Hi {user_name},\n\nWelcome to Craftmen! Your email address has been successfully verified.\n\nBest regards,\nThe Craftmen Team"
             
             def sync_send():
@@ -509,8 +362,8 @@ class EmailService:
                 msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
                 msg['To'] = to
                 
-                msg.attach(MIMEText(text_body, 'plain'))
-                msg.attach(MIMEText(html_content, 'html'))
+                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
                 
                 with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
                     server.starttls()

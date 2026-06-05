@@ -13,7 +13,7 @@ import base64
 import requests
 import tempfile
 from io import BytesIO
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 import imagehash
 import google.generativeai as genai
@@ -177,7 +177,11 @@ OUTPUT: Exactly ONE image. Front-facing hero angle. CAD-styled approval render o
 """
 
 HOUSE_STYLE = """
-STYLE: Clean CAD-styled jewelry approval render. Isolated piece on a pure, solid, clean white background (#FFFFFF) — no body, hands, props, or environment. Front-facing hero angle, centered, crisp edges, premium feel, manufacturable look. Realistic metal and stones. No cinematic atmosphere or heavy shadows. Always ignore the background of any reference image and render the piece on pure solid white.
+STYLE: Clean CAD-styled jewelry approval render. Isolated piece on a pure, solid, clean white background (#FFFFFF).
+- Absolutely NO hands, fingers, skin, neck, body parts, props, display boxes, or real-world environments.
+- Even if the reference image shows the jewelry on a hand/body or in a box, you MUST remove/strip the hand/body/box and render the jewelry piece completely isolated.
+- The render MUST be a clean, front-facing hero angle, centered, with crisp edges and a premium, manufacturable look.
+- Realistic metal and stones. No cinematic atmosphere or heavy shadows. Always ignore the background/props/hands of any reference image and render the piece on pure solid white.
 """
 
 STONE_RULES = """
@@ -294,6 +298,42 @@ def ensure_default_gold(prompt: str) -> str:
     if any(x in lower for x in metals):
         return prompt
     return f"10KT Yellow Gold. {prompt}"
+
+def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
+    if not prompt:
+        return []
+    replacements = []
+    
+    def clean_phrase(p: str) -> str:
+        p_clean = p.strip()
+        lower = p_clean.lower()
+        filler_prefixes = ["i want", "want", "use", "show", "have", "with", "the", "a", "an", "change", "replace"]
+        for prefix in filler_prefixes:
+            if lower.startswith(prefix + " "):
+                p_clean = p_clean[len(prefix) + 1:].strip()
+                lower = p_clean.lower()
+        return p_clean
+
+    # Pattern 1: [new] instead of [old]
+    matches1 = re.findall(r"\b([\w\s']{1,35})\s+instead\s+of\s+([\w\s']{1,35})\b", prompt, re.IGNORECASE)
+    for m in matches1:
+        new_txt, old_txt = clean_phrase(m[0]), clean_phrase(m[1])
+        replacements.append((old_txt, new_txt))
+        
+    # Pattern 2: change [old] to [new]
+    matches2 = re.findall(r"\bchange\s+([\w\s']{1,35})\s+to\s+([\w\s']{1,35})\b", prompt, re.IGNORECASE)
+    for m in matches2:
+        old_txt, new_txt = clean_phrase(m[0]), clean_phrase(m[1])
+        if not any(x in old_txt.lower() or x in new_txt.lower() for x in ["metal", "color", "tone", "gold", "silver"]):
+            replacements.append((old_txt, new_txt))
+            
+    # Pattern 3: replace [old] with [new]
+    matches3 = re.findall(r"\breplace\s+([\w\s']{1,35})\s+with\s+([\w\s']{1,35})\b", prompt, re.IGNORECASE)
+    for m in matches3:
+        old_txt, new_txt = clean_phrase(m[0]), clean_phrase(m[1])
+        replacements.append((old_txt, new_txt))
+        
+    return replacements
 
 def extract_text(image_path: str) -> List[str]:
     if OCR_ENGINE is None:
@@ -586,6 +626,7 @@ def build_class_ring_prompt(params: Dict[str, Any]) -> str:
 
     refinement_lock_block = ""
     if mode == "refine":
+        previous_fixes_text = f"\n\nPrevious fixes already applied (DO NOT undo):\n{previous_fixes}" if previous_fixes else ""
         refinement_lock_block = f"""
 REFINEMENT LOCK (mandatory):
 - The FIRST attached image is the LATEST APPROVED DRAFT — treat it as the absolute base
@@ -593,7 +634,9 @@ REFINEMENT LOCK (mandatory):
 - Do NOT restart from the original logo reference, do NOT regenerate from scratch
 - Apply ONLY the requested delta on top of the latest draft
 - Preserve every previous successful fix
-- If the request is ambiguous, under-edit rather than changing extra regions{f"\n\nPrevious fixes already applied (DO NOT undo):\n{previous_fixes}" if previous_fixes else ""}"""
+- If the request is ambiguous, under-edit rather than changing extra regions{previous_fixes_text}"""
+
+    refinement_note_text = f"Refinement target regions: {regions}\nRefinement request: {note}" if mode == "refine" else (f"User note: {note}" if note else "")
 
     return f"""You are Craftsman.ai's APPROVAL-RENDER engine for custom jewellery.
 Your job is NOT a beautiful fantasy image. Your job is a manufacturable, approval-ready jewellery render.
@@ -650,7 +693,7 @@ TEXT & LOGO PRECISION:
 Design subject: {subject}
 Metal tone: {metal}
 Locked elements: {locked_elements}
-{f"Refinement target regions: {regions}\nRefinement request: {note}" if mode == "refine" else (f"User note: {note}" if note else "")}
+{refinement_note_text}
 {SHARED_RULES}
 
 Generate ONE front-facing hero render of this CLASS / SIGNET RING — planar face, symmetrical shoulders, premium {metal}, clean background, approval-ready."""
@@ -745,7 +788,7 @@ def interpret_refinement(params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     except Exception:
         return None
 
-def build_focused_refinement_prompt(intent: Dict[str, Any], base_fallback: str, attempt: int) -> str:
+def build_focused_refinement_prompt(intent: Dict[str, Any], base_fallback: str, attempt: int, version_number: int = 1) -> str:
     targets = ", ".join(intent.get("target_components") or []) or "the requested component"
     regions = ", ".join(intent.get("target_regions") or []) or "(component region)"
     preserve = ", ".join(intent.get("preserve_components") or []) or "every other region"
@@ -767,10 +810,32 @@ def build_focused_refinement_prompt(intent: Dict[str, Any], base_fallback: str, 
 
     retry_rewrite = f"\n\nForceful rewrite: {intent.get('retry_prompt_if_failed')}" if attempt > 1 and intent.get("retry_prompt_if_failed") else ""
     qa_list = "\n".join([f"- {c}" for c in intent.get("qa_checks") or []])
+    default_qa_text = (
+    "- The requested change is visibly applied to the target component\n"
+    "- All non-target regions remain identical"
+)
+
+    qa_text = qa_list or default_qa_text
+
+    angle_rule = "Maintain camera angle, composition, lighting, background, and metal finish unless the change explicitly requires otherwise."
+    keep_bg_rule = "Keep the same jewelry type, same camera angle, same composition, same lighting, same background."
+    if version_number <= 1:
+        angle_rule = """CAMERA ANGLE & BACKGROUND OVERRIDE (CRITICAL):
+- Do NOT copy the background, environment, lighting, hand, fingers, skin, or props from the reference. The background must be pure solid white (#FFFFFF).
+- Do NOT copy the tilted hand-held angle. You MUST render the jewelry piece centered, flat, and front-facing toward the camera (front-facing hero view).
+- Strip the hand/body away completely and render only the jewelry piece."""
+        keep_bg_rule = "Keep the same jewelry type structure, but override background, lighting, and camera angle to be front-facing hero view on pure solid white background (#FFFFFF)."
+
+    replacements = extract_text_replacements(change)
+    replacement_block = ""
+    if replacements:
+        replacement_block = "\n\nCRITICAL TEXT & COMPONENT REPLACEMENTS (NON-NEGOTIABLE):\n"
+        for old_txt, new_txt in replacements:
+            replacement_block += f"- You MUST completely remove the text/element '{old_txt}' and replace it with '{new_txt}'. Do NOT keep any part of '{old_txt}'. The spelling of the new text must be exactly '{new_txt}' (case-sensitive if it matches a name/initials/letters).\n"
 
     return f"""REFINEMENT INTELLIGENCE — TARGETED EDIT (attempt {attempt})
 
-The FIRST attached image is the CURRENT APPROVED RENDER. Treat it as your only master visual truth.
+The FIRST attached image is the CURRENT APPROVED RENDER / MASTER REFERENCE.
 This is an IMAGE EDIT, not a redesign.
 
 PRIORITY ORDER (do not violate):
@@ -778,7 +843,7 @@ PRIORITY ORDER (do not violate):
 2. Preserve every non-target component pixel-faithfully.
 3. Maintain jewelry realism and manufacturability.
 4. Maintain premium CAD-styled render quality.
-5. Maintain camera angle, composition, lighting, background, and metal finish unless the change explicitly requires otherwise.
+5. {angle_rule}
 
 Never let preservation rules cancel the target edit. Preservation applies only to non-target regions.
 
@@ -788,7 +853,7 @@ ATTRIBUTE TO CHANGE: {intent.get('attribute_to_change') or '(inferred)'}
 {from_to}
 
 NORMALIZED INSTRUCTION (use this, not the raw user words):
-{change}
+{change}{replacement_block}
 
 {strategy_hint}
 
@@ -796,10 +861,10 @@ NORMALIZED INSTRUCTION (use this, not the raw user words):
 
 PRESERVE EXACTLY (do not touch): {preserve}.
 Do NOT add, remove, resize, recolor, or alter any non-target component.
-Do NOT change subtype. Do NOT introduce new decorative elements. Keep the same jewelry type, same camera angle, same composition, same lighting, same background.
+Do NOT change subtype. Do NOT introduce new decorative elements. {keep_bg_rule}
 
 VISUAL QA CHECKLIST the output MUST satisfy:
-{qa_list or "- The requested change is visibly applied to the target component\n- All non-target regions remain identical"}
+{qa_text}
 
 The output must look like a premium CAD-style jewelry render, physically plausible and production-friendly.
 
@@ -915,6 +980,13 @@ def build_prompt_from_dummy(params: Dict[str, Any]) -> str:
         else:
             metal_tone = "yellow gold"
     intent = pd.get("request_intent", "render_as_is")
+    note_lower = (note or "").lower()
+    if any(keyword in note_lower for keyword in ["change", "convert", "replace", "modify", "remove", "add", "switch", "edit", "update"]):
+        if "convert" in note_lower:
+            intent = "convert_to_jewelry"
+        else:
+            intent = "modify_existing"
+            
     source_kind = pd.get("source_kind", "unknown")
     gen_mode = pd.get("generation_mode", "BASE_RENDER")
     components = ", ".join(pd.get("dominant_components") or [])
@@ -964,11 +1036,12 @@ def build_prompt_from_dummy(params: Dict[str, Any]) -> str:
 
     stone_block = ""
     if stone_presence != "unknown":
+        stone_row_text = f"- Row count: {stone_row_count} rows (MUST be respected — reduce stone size to fit if needed)" if stone_row_count else ""
         stone_block = f"""
 Stone details:
 - Presence: {stone_presence}, Coverage: {stone_coverage}, Layout: {stone_layout}
 - Size class: {stone_size_class} (default small-to-mid — do NOT use chunky large stones unless explicitly requested)
-{f"- Row count: {stone_row_count} rows (MUST be respected — reduce stone size to fit if needed)" if stone_row_count else ""}
+{stone_row_text}
 - Arrangement: {stone_arrangement} (prefer staggered/honeycomb over naive grids)
 - Setting family: {setting_family} (keep uniform per region)"""
 
@@ -1114,6 +1187,7 @@ Output goal:
 Return a refined CAD-styled jewelry render with ONLY the requested updates applied, while keeping the rest of the piece stable and faithful to the previous version.
 =================================================="""
 
+        previous_fixes_appendage = "\n\nPrevious fixes already applied (preserve all of these):\n" + previous_fixes if previous_fixes else ""
         refinement_lock_block = f"""
 REFINEMENT MODE — THE FIRST ATTACHED IMAGE IS THE DESIGN:
 - Think like an image editor, not a designer
@@ -1124,7 +1198,7 @@ REFINEMENT MODE — THE FIRST ATTACHED IMAGE IS THE DESIGN:
 - Same silhouette, same proportions, same stones, same text, same layout, same angle, same composition.
 - Do NOT regenerate from scratch. Do NOT reinterpret the design.
 - If unsure, preserve more and change less.
-- The output must be visually identical to the input EXCEPT for the requested change.{(f"\n\nPrevious fixes already applied (preserve all of these):\n{previous_fixes}" if previous_fixes else "")}"""
+- The output must be visually identical to the input EXCEPT for the requested change.{previous_fixes_appendage}"""
 
         preservation_block = """
 PRESERVATION-FIRST RULES:
@@ -1354,8 +1428,25 @@ def build_prompt(
     note = user_prompt or ""
     pd = parsed_data or {}
     image_count = len(image_urls or []) if image_urls is not None else (1 if reference_image else 0)
-    refinement_mode = classify_refinement(note) if mode == "refine" else None
-    target_regions = identify_target_regions(note) if mode == "refine" else None
+    refinement_mode = None
+    target_regions = None
+    if mode == "refine":
+        if refinement_intent:
+            strategy = refinement_intent.get("render_strategy") or ""
+            if strategy == "full_regeneration":
+                refinement_mode = "FULL_REGEN"
+            elif strategy in ("partial_regeneration", "component_inpaint"):
+                refinement_mode = "PARTIAL_REGEN"
+            else:
+                refinement_mode = "LOCAL_EDIT"
+            target_regions = refinement_intent.get("target_regions")
+        
+        # Fall back to regex if still not resolved
+        if not refinement_mode:
+            refinement_mode = classify_refinement(note)
+        if not target_regions:
+            target_regions = identify_target_regions(note)
+
     base_prompt = build_prompt_from_dummy({
         "parsedData": pd,
         "note": note,
@@ -1366,11 +1457,12 @@ def build_prompt(
         "targetRegions": target_regions,
     })
 
+
     is_refine = mode == "refine"
     system_preamble = (
-        "REFINEMENT MODE. The first attached image is the CURRENT RENDER. Apply ONLY the change described. Keep the design structure identical, BUT you MUST render the piece isolated and centered on a pure, solid, clean white background (#FFFFFF). Do NOT copy the background, shadows, lighting environment, hands, or props from the reference. The background must be solid white. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece."
+        "REFINEMENT MODE. The first attached image is the CURRENT RENDER. Apply ONLY the change described. Keep the design structure identical, BUT you MUST render the piece isolated and centered on a pure, solid, clean white background (#FFFFFF). Do NOT copy the background, shadows, lighting environment, hands, fingers, skin, or props from the reference. You MUST strip away any hands or body parts and render ONLY the jewelry piece itself as a clean, front-facing hero view on pure solid white. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece."
         if is_refine
-        else "JEWELRY RENDER. If reference image(s) are attached, the FIRST is the master reference. Reproduce the design structure as faithfully as possible, BUT render it isolated and centered on a pure, solid, clean white background (#FFFFFF). Do NOT copy the background, environment, lighting, hands, or props from the reference. The background must be solid white. Never refuse. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece."
+        else "JEWELRY RENDER. If reference image(s) are attached, the FIRST is the master reference. Reproduce the design structure as faithfully as possible, BUT render it isolated and centered on a pure, solid, clean white background (#FFFFFF). Do NOT copy the background, environment, lighting, hands, fingers, skin, or props from the reference. You MUST strip away any hands or body parts and render ONLY the jewelry piece itself as a clean, front-facing hero view on pure solid white. Never refuse. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece."
     )
 
     resolved_item_type = str(pd.get("item_type") or infer_item_type_from_prompt(note)).lower()
@@ -1387,7 +1479,7 @@ SET-TYPE HARD CONSTRAINT (non-negotiable, overrides user prompt and reference im
 
     focused_prompt = base_prompt
     if is_refine and refinement_intent:
-        focused_prompt = build_focused_refinement_prompt(refinement_intent, base_prompt, attempt)
+        focused_prompt = build_focused_refinement_prompt(refinement_intent, base_prompt, attempt, version_number)
 
     final_prompt = f"""{CRAFTSMAN_MASTER_SYSTEM_PROMPT}
 
@@ -1619,12 +1711,16 @@ def generate_with_fallback(
     image_urls: Optional[List[str]] = None,
     metal_tone: str = "yellow_gold",
     mode: Optional[str] = None,
-    version_number: int = 1
+    version_number: int = 1,
+    refinement_intent_override: Optional[Dict[str, Any]] = None
 ) -> Any:
-    # Intelligently detect mode based on prompt and mode arguments
-    selected_mode = mode
-    if not selected_mode:
-        lower_prompt = (user_prompt or "").lower()
+    # Force refinement mode if we have a reference image and the user prompt requests an edit/change/conversion
+    has_reference_image = bool(image_source or image_urls)
+    lower_prompt = (user_prompt or "").lower()
+    edit_keywords = ["change", "convert", "replace", "modify", "remove", "add", "switch", "edit", "update"]
+    if has_reference_image and any(w in lower_prompt for w in edit_keywords):
+        selected_mode = "refine"
+    elif not selected_mode:
         if any(w in lower_prompt for w in ["refine", "style tags:", "focus on:", "change", "add", "remove", "replace"]):
             selected_mode = "refine"
         else:
@@ -1632,8 +1728,8 @@ def generate_with_fallback(
 
     resolved_image_urls = resolve_image_urls(image_source, image_urls)
 
-    refinement_intent = None
-    if selected_mode == "refine" and user_prompt:
+    refinement_intent = refinement_intent_override
+    if not refinement_intent and selected_mode == "refine" and user_prompt:
         refinement_intent = interpret_refinement({
             "note": user_prompt,
             "parsedData": parsed_data or {},
@@ -1642,23 +1738,45 @@ def generate_with_fallback(
             "versionNumber": version_number,
         })
 
+
     if not refinement_intent:
-        # Synthesize a robust initial QA validation intent
-        refinement_intent = {
-            "normalized_prompt": user_prompt,
-            "raw_user_prompt": user_prompt,
-            "target_components": ["full design"],
-            "attribute_to_change": "jewelry render creation",
-            "from_state": "reference image concept",
-            "to_state": "premium CAD jewelry render",
-            "qa_checks": [
-                "The output is a premium, photorealistic, CAD-style jewelry render.",
-                "The output matches the core style, theme, and identity of the reference image.",
-                "The background is clean, solid, and seamless (preferably pure white).",
-                "The design features no distorted lines, overlapping letters, or physical defects."
-            ],
-            "retry_prompt_if_failed": f"Generate a premium jewelry CAD render of the design requested: {user_prompt}. Ensure white background, sharp details, symmetrical structure, and no physical defects."
-        }
+        if selected_mode == "refine":
+            # Synthesize a robust refinement intent
+            refinement_intent = {
+                "normalized_prompt": user_prompt,
+                "raw_user_prompt": user_prompt,
+                "target_components": ["the requested component"],
+                "attribute_to_change": "specified jewelry component",
+                "from_state": "current state",
+                "to_state": "new state",
+                "render_strategy": "targeted_component_edit",
+                "target_regions": ["unspecified"],
+                "preserve_components": ["all other regions"],
+                "qa_checks": [
+                    "The requested change is visibly applied to the target component.",
+                    "All non-target regions remain identical to the previous render.",
+                    "No unrelated areas are redesigned or changed."
+                ],
+                "retry_prompt_if_failed": f"Refine the jewelry to apply this change: {user_prompt}. Preserve all other parts exactly as they are in the reference image."
+            }
+        else:
+            # Synthesize a robust initial QA validation intent
+            refinement_intent = {
+                "normalized_prompt": user_prompt,
+                "raw_user_prompt": user_prompt,
+                "target_components": ["full design"],
+                "attribute_to_change": "jewelry render creation",
+                "from_state": "reference image concept",
+                "to_state": "premium CAD jewelry render",
+                "qa_checks": [
+                    "The output is a premium, photorealistic, CAD-style jewelry render.",
+                    "The output matches the core style, theme, and identity of the reference image.",
+                    "The background is clean, solid, and seamless (preferably pure white).",
+                    "The design features no distorted lines, overlapping letters, or physical defects."
+                ],
+                "retry_prompt_if_failed": f"Generate a premium jewelry CAD render of the design requested: {user_prompt}. Ensure white background, sharp details, symmetrical structure, and no physical defects."
+            }
+
 
     # Ensure local path for reference image
     local_ref_path, ref_temp_cleanup = ensure_local_file(image_source)
@@ -1718,7 +1836,19 @@ def generate_with_fallback(
                         logger.info(f"[ATTEMPT {attempt}] HASH SIMILARITY: {hash_score}, SSIM SIMILARITY: {ssim_score}")
                         
                         if selected_mode == "refine":
-                            similarity_passed = (ssim_score >= 60.0 and hash_score >= 40)
+                            is_v1_raw_ref = (version_number <= 1)
+                            is_text_or_major_change = any(k in lower_prompt for k in ["change text", "change name", "instead of", "replace", "convert"])
+                            
+                            if is_v1_raw_ref:
+                                threshold = 20.0
+                                hash_threshold = 20
+                            elif is_text_or_major_change:
+                                threshold = 35.0
+                                hash_threshold = 30
+                            else:
+                                threshold = 60.0
+                                hash_threshold = 40
+                            similarity_passed = (ssim_score >= threshold and hash_score >= hash_threshold)
                         else:
                             similarity_passed = (60.0 <= ssim_score <= 65.0 and hash_score >= 40)
                     finally:
@@ -1729,7 +1859,7 @@ def generate_with_fallback(
                                 pass
 
                 overall_score = ssim_score + hash_score
-                candidates.append((result, ssim_score, hash_score, overall_score))
+                candidates.append((result, ssim_score, hash_score, overall_score, qa_passed))
 
                 if qa_passed and similarity_passed:
                     logger.info(f"[ATTEMPT {attempt}] Passed both QA and similarity checks. Returning result.")
@@ -1743,11 +1873,11 @@ def generate_with_fallback(
         # If we completed all attempts and have some candidates but none passed both checks perfectly
         if candidates:
             if selected_mode == "refine":
-                # For refinements, we prefer higher SSIM similarity to keep the base structure.
-                # Sort by ssim (descending), and tie-break by hash score (descending)
-                candidates.sort(key=lambda x: (-x[1], -x[2]))
+                # For refinements, we prefer candidates that passed visual QA check (True first),
+                # followed by highest SSIM similarity.
+                candidates.sort(key=lambda x: (not x[4], -x[1], -x[2]))
                 best_candidate = candidates[0]
-                logger.info(f"All attempts completed. None passed all checks. Returning highest similarity image (Attempt with HASH: {best_candidate[2]}, SSIM: {best_candidate[1]})")
+                logger.info(f"All attempts completed. None passed all checks. Returning best candidate (QA passed: {best_candidate[4]}, HASH: {best_candidate[2]}, SSIM: {best_candidate[1]})")
                 return best_candidate[0]
             else:
                 # Sort by ssim distance to [60.0, 65.0] range (ascending), and tie-break by hash score (descending)
@@ -1847,6 +1977,9 @@ class OpenAIService:
             resp = requests.get(source)
             img = Image.open(BytesIO(resp.content))
         else:
+            # Strip file:// prefix if present for local file paths
+            if source.startswith("file://"):
+                source = source[7:]
             img = Image.open(source)
         
         img = img.convert("RGBA")
@@ -1965,6 +2098,69 @@ class OpenAIService:
         )
         b64 = extract_b64_from_result(result)
         return OpenAIImageObject(b64_json=b64)
+
+    def generate_metal_variation(
+        self,
+        base_image_source: str,
+        metal: str,
+        jewellery_type: str = "",
+        size: str = "1024x1024"
+    ) -> OpenAIImageObject:
+        """
+        Generate metal tone variation of the jewelry using the refine mode
+        to lock down the design structure and only change the color.
+        """
+        logger.info(f"Generating metal variation '{metal}' using Gemini Refine Pipeline")
+        
+        metal_names = {
+            "gold": "18K yellow gold",
+            "rose_gold": "18K rose gold",
+            "silver": "sterling silver",
+            "platinum": "platinum",
+            "white_gold": "18K white gold"
+        }
+        target_metal = metal_names.get(metal, metal.replace("_", " ").title())
+        
+        # Build the exact refinement prompt
+        user_prompt = f"Change the metal tone of the jewelry to {target_metal}. Do NOT change any other part of the jewelry. Keep all stones, diamonds, engravings, geometry, background, and structure completely identical."
+        
+        # Synthesize a precise refinement intent to freeze all non-color features
+        refinement_intent = {
+            "normalized_prompt": user_prompt,
+            "raw_user_prompt": user_prompt,
+            "target_components": ["all metal surfaces"],
+            "attribute_to_change": "metal tone",
+            "from_state": "original metal tone",
+            "to_state": target_metal,
+            "render_strategy": "color_only_edit",  # Maps to LOCAL_EDIT cosmetic refinement mode
+            "target_regions": ["global_cosmetic"],
+            "preserve_components": ["diamonds", "gemstones", "engravings", "layout", "overall geometry"],
+            "qa_checks": [
+                f"All metal parts are rendered in {target_metal}.",
+                "All diamonds, stones, and settings remain exactly unchanged.",
+                "The geometry, structure, camera angle, and background are identical to the source image."
+            ],
+            "retry_prompt_if_failed": f"Change the metal to {target_metal}. Do not touch or redesign the stones or structure."
+        }
+        
+        # Normalize the metal tone argument to what build_prompt expects (yellow_gold, rose_gold, white_gold, platinum)
+        normalized_metal_tone = metal
+        if metal == "gold":
+            normalized_metal_tone = "yellow_gold"
+        elif metal == "silver":
+            normalized_metal_tone = "white_gold"
+
+        result = generate_with_fallback(
+            image_source=base_image_source,
+            user_prompt=user_prompt,
+            parsed_data={"item_type": jewellery_type} if jewellery_type else None,
+            metal_tone=normalized_metal_tone,
+            mode="refine",
+            refinement_intent_override=refinement_intent
+        )
+        b64 = extract_b64_from_result(result)
+        return OpenAIImageObject(b64_json=b64)
+
 
     def generate_image_from_prompt(
         self,

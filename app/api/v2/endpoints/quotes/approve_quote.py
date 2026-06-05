@@ -15,7 +15,10 @@ def approve_quote(
     current_user: User = Depends(get_current_user)
 ):
     service = ManufacturerQuoteService(db)
-    quote = service.quote_repo.get(quote_id)
+    quote = service.quote_repo.get_by_id(quote_id)
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
-    return service.update_status(quote, status=ManufacturerQuoteStatus.ACCEPTED)
+    try:
+        return service.update_status(quote, status=ManufacturerQuoteStatus.APPROVED)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

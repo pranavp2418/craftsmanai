@@ -152,7 +152,8 @@ async def verify_otp(
         from app.tasks.email_tasks import send_welcome_email
         send_welcome_email.delay(
             to=user.email,
-            user_name=user.username or user.email
+            user_name=user.username or user.email,
+            dashboard_url="https://craftmenai.txogavideo.in/"
         )
         logger.info(f"Welcome email queued for {user.email}")
     except Exception as e:

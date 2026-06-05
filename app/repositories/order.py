@@ -33,6 +33,12 @@ class OrderRepository:
     def get_by_id(self, order_id: int) -> Optional[Order]:
         return self.db.query(Order).filter(Order.id == order_id).first()
 
+    def get_by_share_id(self, share_id: int) -> Optional[Order]:
+        return self.db.query(Order).filter(Order.share_id == share_id).order_by(Order.created_at.desc()).first()
+
+    def get_latest_by_design_id(self, design_id: int) -> Optional[Order]:
+        return self.db.query(Order).filter(Order.design_id == design_id).order_by(Order.created_at.desc()).first()
+
     def list_orders(
         self,
         *,

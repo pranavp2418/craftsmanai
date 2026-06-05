@@ -5,6 +5,75 @@ from sqlalchemy.orm import Session
 from app.models.design import Design, DesignVariant
 
 
+def detect_metal_tone(prompt: Optional[str], image_url: Optional[str]) -> Optional[dict]:
+    if not image_url:
+        return None
+        
+    metal = None
+    
+    # 1. Primary: Classify from the actual generated image color profile
+    try:
+        import urllib.request
+        import io
+        from PIL import Image
+        
+        if image_url.startswith("http"):
+            req = urllib.request.Request(
+                image_url, 
+                headers={'User-Agent': 'Mozilla/5.0'}
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                img_bytes = response.read()
+            img = Image.open(io.BytesIO(img_bytes))
+        else:
+            img = Image.open(image_url)
+            
+        img = img.convert("RGB")
+        img.thumbnail((100, 100))
+        
+        pixels = list(img.getdata())
+        foreground = []
+        for r, g, b in pixels:
+            if r > 240 and g > 240 and b > 240:
+                continue
+            if r < 30 and g < 30 and b < 30:
+                continue
+            foreground.append((r, g, b))
+            
+        if foreground:
+            avg_r = sum(p[0] for p in foreground) / len(foreground)
+            avg_g = sum(p[1] for p in foreground) / len(foreground)
+            avg_b = sum(p[2] for p in foreground) / len(foreground)
+            
+            diff_rg = avg_r - avg_g
+            max_diff = max(abs(avg_r - avg_g), abs(avg_r - avg_b), abs(avg_g - avg_b))
+            
+            if max_diff < 15:
+                metal = "silver"
+            elif diff_rg > 15:
+                metal = "rose_gold"
+            else:
+                metal = "gold"
+    except Exception:
+        pass
+        
+    # 2. Fallback: Parse from prompt
+    if not metal and prompt:
+        lower = prompt.lower()
+        if "rose gold" in lower or "rose-gold" in lower or "rose_gold" in lower:
+            metal = "rose_gold"
+        elif "white gold" in lower or "silver" in lower or "platinum" in lower or "sterling" in lower:
+            metal = "silver"
+        elif "yellow gold" in lower or "gold" in lower:
+            metal = "gold"
+            
+    if not metal:
+        metal = "gold"
+        
+    return {metal: image_url}
+
+
+
 class DesignVariantRepository:
     """Repository for managing design variants and lineage."""
 
@@ -28,6 +97,10 @@ class DesignVariantRepository:
         style_tags: Optional[str] = None,
         reference_images_json: Optional[list] = None,
     ) -> DesignVariant:
+        # Auto-detect metal tone if base_design_image_url is set and metal_variations_json is empty
+        if base_design_image_url and not metal_variations_json:
+            metal_variations_json = detect_metal_tone(prompt_used or style_tags or design_focus, base_design_image_url)
+
         variant = DesignVariant(
             design_id=design_id,
             parent_variant_id=parent_variant_id,
@@ -129,6 +202,20 @@ class DesignVariantRepository:
         return variant
 
     def update_variant(self, variant: DesignVariant, **kwargs) -> DesignVariant:
+        # Auto-detect metal tone on base image update
+        new_image_url = kwargs.get("base_design_image_url")
+        prompt = kwargs.get("prompt_used") or variant.prompt_used
+        
+        if new_image_url and "metal_variations_json" not in kwargs:
+            detected = detect_metal_tone(prompt or variant.style_tags or variant.design_focus, new_image_url)
+            if detected:
+                existing = dict(variant.metal_variations_json or {})
+                for k, v in detected.items():
+                    existing[k] = v
+                variant.metal_variations_json = existing
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(variant, "metal_variations_json")
+
         for field, value in kwargs.items():
             if hasattr(variant, field) and value is not None:
                 setattr(variant, field, value)
