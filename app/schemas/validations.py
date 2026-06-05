@@ -65,7 +65,16 @@ def normalize_phone_number(phone_number: Optional[str], *, validate: bool = Fals
                 detail="Invalid phone number format",
             )
 
-    return re.sub(r"[\s\-()]", "", phone_text)
+    normalized_phone = re.sub(r"[\s\-()]", "", phone_text)
+    
+    if validate:
+        if len(normalized_phone) < 10 or len(normalized_phone) > 15:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Phone number must be between 10 and 15 digits (including country code)",
+            )
+
+    return normalized_phone
 
 
 def find_contact_conflict(

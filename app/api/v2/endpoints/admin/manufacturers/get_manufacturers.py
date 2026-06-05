@@ -20,7 +20,8 @@ async def get_admin_manufacturers(
         "recently_added",
         description="Combined subfilter: 'recently_added', 'alphabetical', or 'letter:<A-Z>'"
     ),
-    search: Optional[str] = Query(None, description="Search by name or email"),
+    search: Optional[str] = Query(None, description="Search by name, email, phone number, or location"),
+    sort_by: Optional[str] = Query("recently_added", description="Sort by: 'recently_added' or 'alphabetical'"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     admin: User = Depends(deps.get_current_admin)
@@ -31,35 +32,36 @@ async def get_admin_manufacturers(
     query = select(Manufacturer)
 
     # Search filter
-    if search:
+    if search and isinstance(search, str) and search.strip():
+        search_term = search.strip()
         query = query.where(
             or_(
-                Manufacturer.name.ilike(f"%{search}%"),
-                Manufacturer.emails.ilike(f"%{search}%")
+                Manufacturer.name.ilike(f"%{search_term}%"),
+                Manufacturer.emails.ilike(f"%{search_term}%"),
+                Manufacturer.phone_number.ilike(f"%{search_term}%"),
+                Manufacturer.location.ilike(f"%{search_term}%")
             )
         )
 
     # Status filter
-    status_lower = status.lower()
+    status_lower = status.lower() if status and isinstance(status, str) else "all"
     if status_lower == "active":
         query = query.where(Manufacturer.is_active == True)
     elif status_lower in ("inactive", "disabled"):
         query = query.where(Manufacturer.is_active == False)
 
     # Apply combined subfilter (recently_added / alphabetical / letter)
-    if subfilter:
-        if subfilter.lower().startswith("letter:"):
-            letter = subfilter.split(":", 1)[1].upper()
-            if letter.isalpha() and len(letter) == 1:
+    if subfilter and isinstance(subfilter, str) and subfilter.strip():
+        subfilter_lower = subfilter.strip().lower()
+        if subfilter_lower.startswith("letter:"):
+            letter = subfilter.split(":", 1)[1].upper() if ":" in subfilter else ""
+            if letter and letter.isalpha() and len(letter) == 1:
                 query = query.where(Manufacturer.name.ilike(f"{letter}%"))
-                query = query.order_by(Manufacturer.name.asc())
-            else:
-                query = query.order_by(Manufacturer.created_at.desc())
-        elif subfilter.lower() == "alphabetical":
-            query = query.order_by(Manufacturer.name.asc())
-        else:  # Default or recently_added
-            query = query.order_by(Manufacturer.created_at.desc())
-    else:
+
+    # Apply sort_by parameter
+    if sort_by and isinstance(sort_by, str) and sort_by.strip().lower() == "alphabetical":
+        query = query.order_by(Manufacturer.name.asc())
+    else:  # Default or recently_added
         query = query.order_by(Manufacturer.created_at.desc())
 
     # Total count for pagination    
@@ -106,6 +108,19 @@ async def get_admin_manufacturers(
 
     # Available letters
     letter_query = select(func.distinct(func.substr(Manufacturer.name, 1, 1)))
+    
+    # Apply search filter to available letters
+    if search:
+        letter_query = letter_query.where(
+            or_(
+                Manufacturer.name.ilike(f"%{search}%"),
+                Manufacturer.emails.ilike(f"%{search}%"),
+                Manufacturer.phone_number.ilike(f"%{search}%"),
+                Manufacturer.location.ilike(f"%{search}%")
+            )
+        )
+    
+    # Apply status filter to available letters
     if status_lower == "active":
         letter_query = letter_query.where(Manufacturer.is_active == True)
     elif status_lower in ("inactive", "disabled"):

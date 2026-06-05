@@ -66,6 +66,41 @@ def create_manufacturer(
                 if c_email in req_emails:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address belongs to a customer.")
 
+    # Validate against existing manufacturers
+    from app.models.manufacturer import Manufacturer
+    
+    if request.phone_number:
+        manufacturer_with_phone = db.query(Manufacturer).filter(
+            Manufacturer.phone_number == request.phone_number.strip(),
+            Manufacturer.is_deleted == False
+        ).first()
+        if manufacturer_with_phone:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This phone number already belongs to a manufacturer.")
+            
+    if request.emails:
+        req_emails = [e.email.lower().strip() for e in request.emails if getattr(e, 'email', None)]
+        manufacturers = db.query(Manufacturer).filter(
+            Manufacturer.emails.isnot(None),
+            Manufacturer.is_deleted == False
+        ).all()
+        
+        for m in manufacturers:
+            try:
+                m_emails_data = json.loads(m.emails)
+                if isinstance(m_emails_data, list):
+                    for m_email_obj in m_emails_data:
+                        m_email = (m_email_obj.get("email") if isinstance(m_email_obj, dict) else str(m_email_obj)).lower().strip()
+                        if m_email in req_emails:
+                            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address already belongs to a manufacturer.")
+                elif isinstance(m_emails_data, dict):
+                    m_email = str(m_emails_data.get("email", "")).lower().strip()
+                    if m_email in req_emails:
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address already belongs to a manufacturer.")
+            except (json.JSONDecodeError, TypeError):
+                m_email = str(m.emails).split(',')[0].strip().lower()
+                if m_email in req_emails:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address already belongs to a manufacturer.")
+
     # Serialize emails list to JSON string
     emails_str = None
     if request.emails:

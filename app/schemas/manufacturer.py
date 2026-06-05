@@ -7,6 +7,7 @@ import json
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 from app.schemas.customer import EmailAddressSchema
+from app.schemas.validations import normalize_phone_number
 
 
 class ManufacturerSpeciality(str, Enum):
@@ -28,6 +29,21 @@ class ManufacturerCreateRequest(BaseModel):
     location: Optional[str] = None
     is_active: Optional[bool] = True
 
+    @model_validator(mode="before")
+    @classmethod
+    def validate_phone_number(cls, data: any) -> any:
+        if isinstance(data, dict) and data.get("phone_number"):
+            data["phone_number"] = normalize_phone_number(data["phone_number"], validate=True)
+        return data
+
+    @model_validator(mode="after")
+    def validate_unique_emails(self) -> "ManufacturerCreateRequest":
+        if self.emails:
+            email_list = [email.email.lower() for email in self.emails]
+            if len(email_list) != len(set(email_list)):
+                raise ValueError("Emails must be unique")
+        return self
+
 
 class ManufacturerUpdateRequest(BaseModel):
     name: Optional[str] = None
@@ -36,6 +52,21 @@ class ManufacturerUpdateRequest(BaseModel):
     phone_number: Optional[str] = None
     location: Optional[str] = None
     is_active: Optional[bool] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_phone_number(cls, data: any) -> any:
+        if isinstance(data, dict) and data.get("phone_number"):
+            data["phone_number"] = normalize_phone_number(data["phone_number"], validate=True)
+        return data
+
+    @model_validator(mode="after")
+    def validate_unique_emails(self) -> "ManufacturerUpdateRequest":
+        if self.emails:
+            email_list = [email.email.lower() for email in self.emails]
+            if len(email_list) != len(set(email_list)):
+                raise ValueError("Emails must be unique")
+        return self
 
 
 class ManufacturerResponse(BaseModel):
