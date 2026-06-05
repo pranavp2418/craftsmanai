@@ -56,7 +56,7 @@ class DesignVariantManufacturerShareService:
 
         return (
             f"{settings.FRONTEND_URL.rstrip('/')}"
-            f"/manufacturer/review/{manufacturer.public_token}?token={share.public_token}"
+            f"/manufacturer/review/{share.public_token}"
         )
 
     def create_share(

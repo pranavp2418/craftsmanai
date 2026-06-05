@@ -47,7 +47,6 @@ class ManufacturerResponse(BaseModel):
     phone_number: Optional[str] = None
     location: Optional[str] = None
     status: str
-    public_token: str
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -123,7 +122,6 @@ class ManufacturerResponse(BaseModel):
             "phone_number": phone,
             "speciality": speciality,
             "location": address,
-            "public_token": getattr(data, "public_token"),
             "status": "Active" if is_active else "Inactive",
             "created_at": getattr(data, "created_at"),
             "updated_at": getattr(data, "updated_at", None),
@@ -181,7 +179,6 @@ class ManufacturerDetailResponse(BaseModel):
     phone_number: Optional[str] = None
     location: Optional[str] = None
     status: str
-    public_token: str
     created_at: datetime
     updated_at: Optional[datetime] = None
     
