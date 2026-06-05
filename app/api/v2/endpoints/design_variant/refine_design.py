@@ -69,16 +69,23 @@ async def refine_design_variant(
         reference_images_json=reference_urls if reference_urls else None,
     )
 
-    # Resolve reference images for AI: use uploaded files if provided, else fall back to design's input images
-    ai_reference_images = reference_urls if reference_urls else None
+    # Resolve reference images for AI:
+    # The parent variant's image MUST be the first (primary) image in refinement, serving as the master visual truth.
+    ai_reference_images = []
+    if parent_variant.base_design_image_url:
+        ai_reference_images.append(parent_variant.base_design_image_url)
+    
+    # Append any user-provided reference images as secondary resources
+    if reference_urls:
+        ai_reference_images.extend(reference_urls)
+        
+    # If the parent variant had no image (e.g. edge cases), fall back to design's input images
     if not ai_reference_images:
-        # Fall back to the parent variant's base image as the reference
-        if parent_variant.base_design_image_url:
-            ai_reference_images = [parent_variant.base_design_image_url]
-        elif design.input_image_urls:
+        if design.input_image_urls:
             ai_reference_images = design.input_image_urls if isinstance(design.input_image_urls, list) else [design.input_image_urls]
         elif design.input_image_url:
             ai_reference_images = [design.input_image_url]
+
 
     # Dispatch background AI generation task on variant-specific SSE channel
     channel = f"variant:{variant.id}"
