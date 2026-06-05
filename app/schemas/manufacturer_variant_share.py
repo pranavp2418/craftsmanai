@@ -42,6 +42,7 @@ class ManufacturerVariantShareDetailResponse(BaseModel):
     manufacturer_id: int
     manufacturer: Optional[ManufacturerResponse] = None
     shared_date: Optional[datetime] = None
+    quote_id: Optional[int] = None
     quoted_price: Optional[float] = None
     estimated_delivery_days: Optional[int] = None
     estimated_delivery_date: Optional[datetime] = None

@@ -20,6 +20,7 @@ router = APIRouter()
 async def refine_design_variant(
     design_id: int,
     parent_variant_id: int = Form(...),
+    metal_variant: Optional[str] = Form(None),
     prompt_used: Optional[str] = Form(None),
     model_used: Optional[str] = Form(None),
     base_design_image_url: Optional[str] = Form(None),
@@ -39,6 +40,37 @@ async def refine_design_variant(
     parent_variant = variant_service.get_variant(parent_variant_id)
     if not parent_variant or parent_variant.design_id != design.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent variant not found")
+
+    def _extract_url(url_value):
+        if isinstance(url_value, dict):
+            return url_value.get("url")
+        if isinstance(url_value, str):
+            return url_value
+        return None
+
+    def _normalize_metal_key(value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+        return value.strip().lower().replace("-", "_").replace(" ", "_")
+
+    # Resolve the source image that should be used as the primary refinement reference.
+    # Priority:
+    # 1) Requested metal variant image from parent variant (if metal_variant is provided)
+    # 2) Explicit image URL from request
+    # 3) Parent variant base image
+    requested_metal_image_url = None
+    requested_metal_key = _normalize_metal_key(metal_variant)
+    if requested_metal_key and isinstance(parent_variant.metal_variations_json, dict):
+        for key, value in parent_variant.metal_variations_json.items():
+            if _normalize_metal_key(key) == requested_metal_key:
+                requested_metal_image_url = _extract_url(value)
+                if requested_metal_image_url:
+                    break
+
+    resolved_source_image_url = requested_metal_image_url or base_design_image_url
+
+    if not resolved_source_image_url and parent_variant.base_design_image_url:
+        resolved_source_image_url = parent_variant.base_design_image_url
 
     # Upload reference images to Supabase (same pattern as create_design)
     reference_urls = []
@@ -63,22 +95,33 @@ async def refine_design_variant(
         parent_variant_id=parent_variant.id,
         prompt_used=prompt_used,
         model_used=model_used,
-        base_design_image_url=base_design_image_url,
+        base_design_image_url=resolved_source_image_url,
         style_tags=style_tags if style_tags else None,
         design_focus=design_focus if design_focus else None,
         reference_images_json=reference_urls if reference_urls else None,
     )
 
-    # Resolve reference images for AI: use uploaded files if provided, else fall back to design's input images
-    ai_reference_images = reference_urls if reference_urls else None
+    # Resolve reference images for AI.
+    # Always include the selected source image first (metal variant image when requested),
+    # then append any user-uploaded references.
+    ai_reference_images = []
+    if resolved_source_image_url:
+        ai_reference_images.append(resolved_source_image_url)
+
+    if reference_urls:
+        ai_reference_images.extend(reference_urls)
+
     if not ai_reference_images:
-        # Fall back to the parent variant's base image as the reference
-        if parent_variant.base_design_image_url:
-            ai_reference_images = [parent_variant.base_design_image_url]
-        elif design.input_image_urls:
-            ai_reference_images = design.input_image_urls if isinstance(design.input_image_urls, list) else [design.input_image_urls]
+        if design.input_image_urls:
+            ai_reference_images = (
+                design.input_image_urls
+                if isinstance(design.input_image_urls, list)
+                else [design.input_image_urls]
+            )
         elif design.input_image_url:
             ai_reference_images = [design.input_image_url]
+        else:
+            ai_reference_images = None
 
     # Dispatch background AI generation task on variant-specific SSE channel
     channel = f"variant:{variant.id}"

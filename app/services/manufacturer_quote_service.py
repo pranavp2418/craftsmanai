@@ -5,6 +5,10 @@ from sqlalchemy.orm import Session
 from app.models.order import ManufacturerQuote, ManufacturerQuoteStatus
 from app.repositories.manufacturer_quote import ManufacturerQuoteRepository
 from app.repositories.activity_log import OrderActivityLogRepository
+from app.repositories.order import OrderRepository
+from app.repositories.manufacturer_variant_share import DesignVariantManufacturerShareRepository
+from app.models.design import ManufacturerShareStatus
+from app.services.notification_service import NotificationService
 
 
 class ManufacturerQuoteService:
@@ -12,6 +16,9 @@ class ManufacturerQuoteService:
         self.db = db
         self.quote_repo = ManufacturerQuoteRepository(db)
         self.activity_repo = OrderActivityLogRepository(db)
+        self.order_repo = OrderRepository(db)
+        self.variant_share_repo = DesignVariantManufacturerShareRepository(db)
+        self.notification_service = NotificationService(db)
 
     def submit_quote(
         self,
@@ -78,11 +85,62 @@ class ManufacturerQuoteService:
         status: ManufacturerQuoteStatus,
         message: Optional[str] = None,
     ) -> ManufacturerQuote:
+        if status == ManufacturerQuoteStatus.APPROVED:
+            order = quote.order or self.order_repo.get_by_id(quote.order_id)
+            design_id = order.design_id if order else None
+            if design_id is not None:
+                accepted_for_design = self.quote_repo.get_accepted_for_design(design_id)
+                if accepted_for_design and accepted_for_design.id != quote.id:
+                    raise ValueError("A manufacturer is already approved for this design")
+
         updated = self.quote_repo.update_status(quote, status=status)
+
+        if status == ManufacturerQuoteStatus.APPROVED:
+            order = quote.order or self.order_repo.get_by_id(quote.order_id)
+            if order:
+                self.order_repo.assign_manufacturer(order, quote.manufacturer_id)
+
+        # Keep design_variant_manufacturer_shares status synchronized.
+        order = quote.order or self.order_repo.get_by_id(quote.order_id)
+        if order:
+            share = self.variant_share_repo.get_latest_for_design_and_manufacturer(
+                design_id=order.design_id,
+                manufacturer_id=quote.manufacturer_id,
+            )
+            if share:
+                target_share_status = None
+                if status == ManufacturerQuoteStatus.APPROVED:
+                    target_share_status = ManufacturerShareStatus.ACCEPTED
+                elif status == ManufacturerQuoteStatus.REJECTED:
+                    target_share_status = ManufacturerShareStatus.REJECTED
+
+                if target_share_status is not None:
+                    self.variant_share_repo.update_share(share, status=target_share_status)
+
         self.activity_repo.log(
             order_id=quote.order_id,
             action_type="STATUS_CHANGED",
             message=message or f"Quote {status.value}",
             metadata={"quote_id": quote.id, "status": status.value},
         )
+
+        # Restore real-time sync by notifying design owner on approval/rejection.
+        order = quote.order or self.order_repo.get_by_id(quote.order_id)
+        if order and order.design and order.design.user_id:
+            status_label = "Approved" if status == ManufacturerQuoteStatus.APPROVED else "Rejected"
+            if status in (ManufacturerQuoteStatus.APPROVED, ManufacturerQuoteStatus.REJECTED):
+                self.notification_service.send_notification(
+                    user_id=order.design.user_id,
+                    type="quote_status",
+                    title=f"Quote {status_label}",
+                    message=message or f"Quote #{quote.id} was {status_label.lower()}.",
+                    source="quote",
+                    reference_id=quote.id,
+                    data={
+                        "quote_id": quote.id,
+                        "order_id": quote.order_id,
+                        "manufacturer_id": quote.manufacturer_id,
+                        "status": status.value,
+                    },
+                )
         return updated

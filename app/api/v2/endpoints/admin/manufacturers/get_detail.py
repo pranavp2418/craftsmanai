@@ -35,7 +35,7 @@ async def get_admin_manufacturer_detail(
     approved_res = await db.execute(
         select(func.count(ManufacturerQuote.id)).where(
             ManufacturerQuote.manufacturer_id == m.id,
-            ManufacturerQuote.status == ManufacturerQuoteStatus.ACCEPTED
+            ManufacturerQuote.status == ManufacturerQuoteStatus.APPROVED
         )
     )
     approved_jobs = approved_res.scalar() or 0

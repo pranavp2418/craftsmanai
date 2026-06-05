@@ -10,6 +10,7 @@ from app.schemas.manufacturer_variant_share import VariantManufacturerSharesResp
 from app.services.design_service import DesignService
 from app.services.design_variant_service import DesignVariantService
 from app.services.manufacturer_variant_share_service import DesignVariantManufacturerShareService
+from app.models.order import ManufacturerQuoteStatus
 
 
 router = APIRouter()
@@ -55,11 +56,13 @@ def get_variant_manufacturer_shares(
         manufacturer = manufacturer_repo.get_by_id(share.manufacturer_id)
         if not manufacturer:
             continue
+
+        quote = share_service.get_quote_for_share(share)
             
         shared_date = share.created_at
         estimated_delivery_date = (
-            shared_date + timedelta(days=share.delivery_time_days)
-            if shared_date and share.delivery_time_days is not None
+            shared_date + timedelta(days=(quote.delivery_time_days if quote and quote.delivery_time_days is not None else share.delivery_time_days))
+            if shared_date and ((quote.delivery_time_days if quote else share.delivery_time_days) is not None)
             else None
         )
         share_items.append(
@@ -69,11 +72,16 @@ def get_variant_manufacturer_shares(
                 "manufacturer_id": manufacturer.id,
                 "manufacturer": manufacturer,
                 "shared_date": shared_date,
-                "quoted_price": share.cost_price,
-                "estimated_delivery_days": share.delivery_time_days,
+                "quote_id": quote.id if quote else None,
+                "quoted_price": quote.cost_price if quote else share.cost_price,
+                "estimated_delivery_days": quote.delivery_time_days if quote else share.delivery_time_days,
                 "estimated_delivery_date": estimated_delivery_date,
-                "manufacturer_notes": share.notes,
-                "status": share.status.value if hasattr(share.status, "value") else share.status,
+                "manufacturer_notes": quote.notes if quote else share.notes,
+                "status": (
+                    quote.status.value
+                    if quote and isinstance(quote.status, ManufacturerQuoteStatus)
+                    else (share.status.value if hasattr(share.status, "value") else share.status)
+                ),
                 "public_token": share.public_token,
                 "shared_metal": share.shared_metal,
             }

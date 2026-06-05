@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.design import DesignVariantManufacturerShare, ManufacturerShareStatus
+from app.models.design import DesignVariantManufacturerShare, ManufacturerShareStatus, DesignVariant
 
 
 class DesignVariantManufacturerShareRepository:
@@ -50,6 +50,22 @@ class DesignVariantManufacturerShareRepository:
             .filter(DesignVariantManufacturerShare.manufacturer_id == manufacturer_id)
             .order_by(DesignVariantManufacturerShare.created_at.desc())
             .all()
+        )
+
+    def get_latest_for_design_and_manufacturer(
+        self,
+        design_id: int,
+        manufacturer_id: int,
+    ) -> Optional[DesignVariantManufacturerShare]:
+        return (
+            self.db.query(DesignVariantManufacturerShare)
+            .join(DesignVariant, DesignVariant.id == DesignVariantManufacturerShare.design_variant_id)
+            .filter(
+                DesignVariant.design_id == design_id,
+                DesignVariantManufacturerShare.manufacturer_id == manufacturer_id,
+            )
+            .order_by(DesignVariantManufacturerShare.created_at.desc())
+            .first()
         )
 
     def update_share(
