@@ -454,8 +454,8 @@ def send_design_review_email(
         msg["From"] = sender
         msg["To"] = to_email
 
-        msg.attach(MIMEText(text_content, "plain"))
-        msg.attach(MIMEText(html_content, "html"))
+        msg.attach(MIMEText(text_content, "plain", "utf-8"))
+        msg.attach(MIMEText(html_content, "html", "utf-8"))
 
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
             server.starttls()
@@ -899,8 +899,8 @@ def send_team_invitation_email(self, to_email: str, team_name: str, variables: d
         msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
         msg['To'] = to_email
         
-        msg.attach(MIMEText(text_content, 'plain'))
-        msg.attach(MIMEText(html_content, 'html'))
+        msg.attach(MIMEText(text_content, 'plain', 'utf-8'))
+        msg.attach(MIMEText(html_content, 'html', 'utf-8'))
         
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
             server.starttls()
@@ -1107,4 +1107,5 @@ The Craftmen Team
 www.craftmen.com
 """
     return text.strip()
+
 

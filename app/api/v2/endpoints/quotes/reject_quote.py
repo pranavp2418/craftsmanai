@@ -15,7 +15,7 @@ def reject_quote(
     current_user: User = Depends(get_current_user)
 ):
     service = ManufacturerQuoteService(db)
-    quote = service.quote_repo.get(quote_id)
+    quote = service.quote_repo.get_by_id(quote_id)
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
     return service.update_status(quote, status=ManufacturerQuoteStatus.REJECTED)

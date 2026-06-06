@@ -26,7 +26,6 @@ class ManufacturerService:
         location: Optional[str] = None,
         is_active: bool = True,
     ) -> Manufacturer:
-        token = self._generate_token()
         return self.manufacturer_repo.create_manufacturer(
             created_by_user_id=created_by_user_id,
             name=name,
@@ -34,7 +33,6 @@ class ManufacturerService:
             emails=emails,
             phone_number=phone_number,
             location=location,
-            public_token=token,
             is_active=is_active,
         )
 

@@ -28,7 +28,7 @@ class OrderStatus(str, Enum):
 
 class ManufacturerQuoteStatus(str, Enum):
     SUBMITTED = "SUBMITTED"
-    ACCEPTED = "ACCEPTED"
+    APPROVED = "APPROVED"
     REJECTED = "REJECTED"
 
 

@@ -212,17 +212,29 @@ def refine_design_variant_image(
         from app.services.design_variant_service import DesignVariantService
 
         # Resolve reference images for AI generation
+        parent_variant = db.query(DesignVariant).filter(DesignVariant.id == parent_variant_id).first()
+        parent_variant_img = parent_variant.base_design_image_url if parent_variant else None
+
         if reference_images:
-            # Use user-provided reference images (uploaded during the refine request)
-            reference_image_source = reference_images
+            # Ensure the parent variant's image is always the first (primary) image in the reference list,
+            # acting as the master visual truth.
+            if parent_variant_img:
+                if parent_variant_img in reference_images:
+                    # Remove it and put it at the front
+                    imgs = [img for img in reference_images if img != parent_variant_img]
+                    reference_image_source = [parent_variant_img] + imgs
+                else:
+                    # Prepend it to the user uploaded references
+                    reference_image_source = [parent_variant_img] + reference_images
+            else:
+                reference_image_source = reference_images
         else:
-            # Fall back to parent variant's base image
-            parent_variant = db.query(DesignVariant).filter(DesignVariant.id == parent_variant_id).first()
-            if not parent_variant or not parent_variant.base_design_image_url:
+            if not parent_variant_img:
                 raise ValueError(
                     f"Parent variant {parent_variant_id} has no base_design_image_url"
                 )
-            reference_image_source = parent_variant.base_design_image_url
+            reference_image_source = [parent_variant_img]
+
 
         # Look up jewellery_type from the design
         from app.models.design import Design as DesignModel

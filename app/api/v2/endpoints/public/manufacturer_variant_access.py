@@ -152,20 +152,26 @@ def manufacturer_submit_quote(
             detail=f"Quote has already been submitted (status: {share.status.value})",
         )
 
-    updated = share_service.submit_quote(
-        share,
-        cost_price=payload.cost_price,
-        delivery_time_days=payload.delivery_time_days,
-        notes=payload.notes,
-    )
+    try:
+        updated = share_service.submit_quote(
+            share,
+            cost_price=payload.cost_price,
+            delivery_time_days=payload.delivery_time_days,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    quote = share_service.get_quote_for_share(updated)
 
     return {
         "success": True,
         "message": "Quote submitted successfully",
+        "quote_id": quote.id if quote else None,
         "share_id": updated.id,
         "design_variant_id": updated.design_variant_id,
         "manufacturer_id": updated.manufacturer_id,
         "status": updated.status.value,
-        "cost_price": updated.cost_price,
-        "delivery_time_days": updated.delivery_time_days,
+        "cost_price": quote.cost_price if quote else updated.cost_price,
+        "delivery_time_days": quote.delivery_time_days if quote else updated.delivery_time_days,
     }

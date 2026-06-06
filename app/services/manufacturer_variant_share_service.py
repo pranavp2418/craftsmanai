@@ -9,6 +9,10 @@ from app.repositories.manufacturer_variant_share import DesignVariantManufacture
 from app.repositories.design_variant import DesignVariantRepository
 from app.repositories.activity_log import DesignActivityLogRepository
 from app.repositories.manufacturer import ManufacturerRepository
+from app.repositories.order import OrderRepository
+from app.repositories.manufacturer_quote import ManufacturerQuoteRepository
+from app.models.order import ManufacturerQuoteStatus
+from app.repositories.design_share import DesignShareRepository
 
 
 class DesignVariantManufacturerShareService:
@@ -18,6 +22,29 @@ class DesignVariantManufacturerShareService:
         self.variant_repo = DesignVariantRepository(db)
         self.activity_repo = DesignActivityLogRepository(db)
         self.manufacturer_repo = ManufacturerRepository(db)
+        self.order_repo = OrderRepository(db)
+        self.quote_repo = ManufacturerQuoteRepository(db)
+        self.design_share_repo = DesignShareRepository(db)
+
+    def _resolve_or_create_order_for_variant(self, variant) -> Optional[object]:
+        if not variant:
+            return None
+
+        order = self.order_repo.get_latest_by_design_id(variant.design_id)
+        if order:
+            return order
+
+        # Create an order context so manufacturer quotes are always persisted.
+        shares = self.design_share_repo.list_for_design_variant(variant.id)
+        latest_share = shares[0] if shares else None
+        customer_id = latest_share.customer_id if latest_share else None
+        share_id = latest_share.id if latest_share else None
+
+        return self.order_repo.create_order(
+            design_id=variant.design_id,
+            customer_id=customer_id,
+            share_id=share_id,
+        )
 
     def _token(self) -> str:
         return secrets.token_urlsafe(18)
@@ -29,7 +56,7 @@ class DesignVariantManufacturerShareService:
 
         return (
             f"{settings.FRONTEND_URL.rstrip('/')}"
-            f"/manufacturer/review/{manufacturer.public_token}?token={share.public_token}"
+            f"/manufacturer/review/{share.public_token}"
         )
 
     def create_share(
@@ -89,6 +116,16 @@ class DesignVariantManufacturerShareService:
         notes: Optional[str] = None,
     ) -> DesignVariantManufacturerShare:
         """Manufacturer submits a quote for the shared variant."""
+        variant = share.design_variant
+        design_id = variant.design_id if variant else None
+
+        # If a manufacturer has already been approved for this design, block other quotes.
+        if design_id is not None:
+            accepted_quote = self.quote_repo.get_accepted_for_design(design_id)
+            if accepted_quote and accepted_quote.manufacturer_id != share.manufacturer_id:
+                raise ValueError("A manufacturer is already approved for this design")
+
+        # Keep existing share table fields in sync for backward compatibility.
         updated = self.share_repo.update_share(
             share,
             status=ManufacturerShareStatus.QUOTED,
@@ -96,7 +133,29 @@ class DesignVariantManufacturerShareService:
             delivery_time_days=delivery_time_days,
             notes=notes,
         )
-        variant = share.design_variant
+
+        # Canonical quote persistence in manufacturer_quotes table.
+        if design_id is not None:
+            order = self._resolve_or_create_order_for_variant(variant)
+            if order:
+                self.quote_repo.create_or_update_quote(
+                    order_id=order.id,
+                    manufacturer_id=share.manufacturer_id,
+                    cost_price=cost_price,
+                    delivery_time_days=delivery_time_days,
+                    notes=notes,
+                    status=ManufacturerQuoteStatus.SUBMITTED,
+                )
+                from app.models.order import OrderStatus
+                if order.status == OrderStatus.CREATED:
+                    self.order_repo.update_status(order, status=OrderStatus.QUOTED)
+            
+            # Also update the customer share if one exists
+            shares = self.design_share_repo.list_for_design_variant(share.design_variant_id)
+            if shares:
+                from app.models.design import DesignShareStatus
+                self.design_share_repo.update_status(shares[0], status=DesignShareStatus.Quoted)
+
         self.activity_repo.log(
             design_id=variant.design_id if variant else None,
             action_type="MANUFACTURER_QUOTE_SUBMITTED",
@@ -151,3 +210,14 @@ class DesignVariantManufacturerShareService:
                 logging.getLogger(__name__).error(f"Failed to send manufacturer quote notification: {str(e)}")
 
         return updated
+
+    def get_quote_for_share(self, share: DesignVariantManufacturerShare):
+        variant = share.design_variant
+        if not variant:
+            return None
+
+        order = self.order_repo.get_latest_by_design_id(variant.design_id)
+        if not order:
+            return None
+
+        return self.quote_repo.get_by_order_and_manufacturer(order.id, share.manufacturer_id)

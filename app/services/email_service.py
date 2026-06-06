@@ -106,8 +106,8 @@ class EmailService:
                 msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
                 msg['To'] = to
                 
-                msg.attach(MIMEText(text_body, 'plain'))
-                msg.attach(MIMEText(html_content, 'html'))
+                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
                 
                 with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
                     server.starttls()
@@ -170,8 +170,8 @@ class EmailService:
                 msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
                 msg['To'] = to
                 
-                msg.attach(MIMEText(text_body, 'plain'))
-                msg.attach(MIMEText(html_content, 'html'))
+                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
                 
                 with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
                     server.starttls()
@@ -237,8 +237,8 @@ class EmailService:
                 msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
                 msg['To'] = to_email
                 
-                msg.attach(MIMEText(text_body, 'plain'))
-                msg.attach(MIMEText(html_content, 'html'))
+                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
                 
                 with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
                     server.starttls()
@@ -302,8 +302,8 @@ class EmailService:
                 msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
                 msg['To'] = to_email
                 
-                msg.attach(MIMEText(text_body, 'plain'))
-                msg.attach(MIMEText(html_content, 'html'))
+                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
                 
                 with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
                     server.starttls()
@@ -362,8 +362,8 @@ class EmailService:
                 msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
                 msg['To'] = to
                 
-                msg.attach(MIMEText(text_body, 'plain'))
-                msg.attach(MIMEText(html_content, 'html'))
+                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
                 
                 with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
                     server.starttls()

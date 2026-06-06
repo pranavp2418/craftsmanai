@@ -169,7 +169,6 @@ def get_manufacturer(
         "phone_number": manufacturer.phone_number,
         "location": manufacturer.location,
         "status": "Active" if manufacturer.is_active else "Inactive",
-        "public_token": manufacturer.public_token,
         "created_at": manufacturer.created_at,
         "updated_at": manufacturer.updated_at,
         "stats": stats,
