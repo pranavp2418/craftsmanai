@@ -1718,6 +1718,7 @@ def generate_with_fallback(
     has_reference_image = bool(image_source or image_urls)
     lower_prompt = (user_prompt or "").lower()
     edit_keywords = ["change", "convert", "replace", "modify", "remove", "add", "switch", "edit", "update"]
+    selected_mode = mode
     if has_reference_image and any(w in lower_prompt for w in edit_keywords):
         selected_mode = "refine"
     elif not selected_mode:
