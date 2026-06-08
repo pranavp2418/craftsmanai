@@ -14,13 +14,14 @@ CELERY_ROUTES = {
     'app.tasks.email_tasks.send_welcome_email': {'queue': 'email'},
     'app.tasks.email_tasks.send_customer_share_email': {'queue': 'email'},
     'app.tasks.email_tasks.send_manufacturer_share_email': {'queue': 'email'},
-    
+    'app.tasks.resend_manufacturer_share_task.resend_manufacturer_share_email': {'queue': 'email'},
+
     # Cleanup tasks go to cleanup queue
     'app.tasks.cleanup_tasks.cleanup_expired_otps': {'queue': 'cleanup'},
     'app.tasks.cleanup_tasks.cleanup_expired_tokens': {'queue': 'cleanup'},
     'app.tasks.cleanup_tasks.cleanup_blacklisted_tokens': {'queue': 'cleanup'},
     'app.tasks.design_tasks.generate_design_base_image': {'queue': 'design'},
-    
+
     # Analytics tasks (future) go to analytics queue
     # 'app.tasks.analytics_tasks.track_user_activity': {'queue': 'analytics'},
 }
@@ -49,7 +50,7 @@ SCHEDULE_CONFIG = {
         'options': {'queue': 'cleanup'}
     },
     'cleanup_tokens': {
-        'task': 'app.tasks.cleanup_tasks.cleanup_expired_tokens', 
+        'task': 'app.tasks.cleanup_tasks.cleanup_expired_tokens',
         'schedule': crontab(minute=0, hour='*/6'),  # Every 6 hours
         'options': {'queue': 'cleanup'}
     },

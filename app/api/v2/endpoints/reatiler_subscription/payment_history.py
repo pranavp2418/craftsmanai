@@ -1,6 +1,7 @@
-from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, Response
+from typing import Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, cast, String, and_
 from datetime import datetime
 import logging
 from io import BytesIO
@@ -24,11 +25,17 @@ def get_payment_history(
     current_user: User = Depends(get_current_user),
     page: int = 1,
     limit: int = 20,
-    status: str = None
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    payment_method: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    min_amount: Optional[float] = Query(None),
+    max_amount: Optional[float] = Query(None)
 ) -> Any:
     """
     Get payment history for the current user.
-    Supports pagination and optional status filtering.
+    Supports pagination, search, and multiple filters.
     """
     try:
         offset = (page - 1) * limit
@@ -36,13 +43,60 @@ def get_payment_history(
         # Build base query
         query = db.query(Payment).filter(Payment.user_id == current_user.id)
         
-        # Add status filter if provided
+        # Build filters list
+        filters = []
+        
+        # Status Filter
         if status:
             try:
                 payment_status = PaymentStatus(status.upper())
-                query = query.filter(Payment.status == payment_status)
+                filters.append(Payment.status == payment_status)
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+        
+        # Payment Method Filter
+        if payment_method:
+            filters.append(Payment.payment_method.ilike(f"%{payment_method}%"))
+        
+        # Date Range Filter
+        if start_date:
+            try:
+                start_datetime = datetime.fromisoformat(start_date)
+                filters.append(Payment.created_at >= start_datetime)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid start_date format. Use ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)")
+        
+        if end_date:
+            try:
+                end_datetime = datetime.fromisoformat(end_date)
+                filters.append(Payment.created_at <= end_datetime)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid end_date format. Use ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)")
+        
+        # Amount Range Filter
+        if min_amount is not None:
+            filters.append(Payment.amount >= min_amount)
+        
+        if max_amount is not None:
+            filters.append(Payment.amount <= max_amount)
+        
+        # Global Search Filter
+        if search:
+            search_term = f"%{search}%"
+            filters.append(
+                or_(
+                    Payment.invoice_id.ilike(search_term),
+                    Payment.payment_method.ilike(search_term),
+                    Payment.stripe_customer_id.ilike(search_term),
+                    Payment.stripe_payment_intent_id.ilike(search_term),
+                    cast(Payment.amount, String).ilike(search_term),
+                    cast(Payment.status, String).ilike(search_term),
+                )
+            )
+        
+        # Apply all filters
+        if filters:
+            query = query.filter(and_(*filters))
         
         total_count = query.count()
         payments = query.order_by(Payment.created_at.desc()).offset(offset).limit(limit).all()

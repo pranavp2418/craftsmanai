@@ -5,13 +5,77 @@ All email sending operations are handled here
 
 from datetime import datetime, timezone
 import logging
-import smtplib
+import json
 
 from app.core.config import settings
 from app.services.email_service import EmailService
 from app.tasks.base import create_task
+import httpx
 
 logger = logging.getLogger(__name__)
+
+
+def _send_via_zeptomail_sync(
+    to_email: str,
+    subject: str,
+    html_content: str,
+    text_content: str,
+    from_email: str = None
+) -> dict:
+    """
+    Synchronous ZeptoMail email sender for use in Celery tasks
+    
+    Args:
+        to_email: Recipient email address
+        subject: Email subject
+        html_content: HTML body content
+        text_content: Plain text body content
+        from_email: Optional override sender email (defaults to ZEPTOMAIL_FROM_EMAIL)
+    
+    Returns:
+        dict with keys: success (bool), message (str)
+    """
+    if not settings.ZEPTOMAIL_API_KEY:
+        raise ValueError("ZEPTOMAIL_API_KEY is not configured")
+    
+    from_email = from_email or settings.ZEPTOMAIL_FROM_EMAIL or "noreply@craftmen.com"
+    from_name = settings.ZEPTOMAIL_FROM_NAME
+    
+    payload = {
+        "from": {
+            "address": from_email,
+            "name": from_name
+        },
+        "to": [
+            {
+                "email_address": {
+                    "address": to_email
+                }
+            }
+        ],
+        "subject": subject,
+        "htmlbody": html_content,
+        "textbody": text_content
+    }
+    
+    headers = {
+        "Authorization": f"Zoho-enczapikey {settings.ZEPTOMAIL_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    response = httpx.post(
+        settings.ZEPTOMAIL_API_URL,
+        json=payload,
+        headers=headers,
+        timeout=30.0
+    )
+    
+    if response.status_code in (200, 201, 202):
+        return {"success": True, "message": "Email sent successfully via ZeptoMail"}
+    else:
+        error_detail = f"ZeptoMail API error: {response.status_code} - {response.text}"
+        logger.error(error_detail)
+        return {"success": False, "message": error_detail}
 
 
 @create_task(name="send_signup_otp_email", max_retries=3)
@@ -37,7 +101,6 @@ def send_signup_otp_email(self, to: str, otp: str, user_name: str):
         
         from app.core.database import SessionLocal
         from app.models.email_log import EmailLog, EmailStatus
-        import json
         
         db = SessionLocal()
         retry_count = getattr(self.request, "retries", 0)
@@ -72,7 +135,7 @@ def send_signup_otp_email(self, to: str, otp: str, user_name: str):
             email_log.status = EmailStatus.SENT
             email_log.retry_count = retry_count
             email_log.error_message = None
-            email_log.smtp_response = "Message sent successfully"
+            email_log.smtp_response = "Message sent successfully via ZeptoMail"
             email_log.sent_at = datetime.now(timezone.utc)
             db.commit()
         
@@ -132,7 +195,6 @@ def send_password_reset_email(self, to: str, otp: str, user_name: str):
         
         from app.core.database import SessionLocal
         from app.models.email_log import EmailLog, EmailStatus
-        import json
         
         db = SessionLocal()
         retry_count = getattr(self.request, "retries", 0)
@@ -166,7 +228,7 @@ def send_password_reset_email(self, to: str, otp: str, user_name: str):
             email_log.status = EmailStatus.SENT
             email_log.retry_count = retry_count
             email_log.error_message = None
-            email_log.smtp_response = "Message sent successfully"
+            email_log.smtp_response = "Message sent successfully via ZeptoMail"
             email_log.sent_at = datetime.now(timezone.utc)
             db.commit()
         
@@ -225,7 +287,6 @@ def send_welcome_email(self, to: str, user_name: str, dashboard_url: str = "#"):
         
         from app.core.database import SessionLocal
         from app.models.email_log import EmailLog, EmailStatus
-        import json
         
         db = SessionLocal()
         retry_count = getattr(self.request, "retries", 0)
@@ -259,15 +320,15 @@ def send_welcome_email(self, to: str, user_name: str, dashboard_url: str = "#"):
             email_log.status = EmailStatus.SENT
             email_log.retry_count = retry_count
             email_log.error_message = None
-            email_log.smtp_response = "Message sent successfully"
+            email_log.smtp_response = "Message sent successfully via ZeptoMail"
             email_log.sent_at = datetime.now(timezone.utc)
             db.commit()
         
-        logger.info(f" {task_name} completed successfully for {to}")
+        logger.info(f"✅ {task_name} completed successfully for {to}")
         return True
         
     except Exception as exc:
-        logger.error(f" {task_name} failed for {to}: {str(exc)}")
+        logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
         
         try:
             if db and email_log_id:
@@ -299,8 +360,6 @@ def send_welcome_email(self, to: str, user_name: str, dashboard_url: str = "#"):
             pass
 
 
-
-
 @create_task(name="send_design_review_email", max_retries=3)
 def send_design_review_email(
     self,
@@ -330,9 +389,6 @@ def send_design_review_email(
 
         from app.core.database import SessionLocal
         from app.models.email_log import EmailLog, EmailStatus
-        import json
-        from email.mime.multipart import MIMEMultipart
-        from email.mime.text import MIMEText
 
         subject = f"Review your Craftmen design: {design_name}"
 
@@ -447,24 +503,17 @@ def send_design_review_email(
             "Best regards,\nThe Craftmen Team"
         )
 
-        sender = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
-
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = sender
-        msg["To"] = to_email
-
-        msg.attach(MIMEText(text_content, "plain", "utf-8"))
-        msg.attach(MIMEText(html_content, "html", "utf-8"))
-
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-            server.starttls()
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.sendmail(
-                sender,
-                [to_email],
-                msg.as_string(),
-            )
+        # Send via ZeptoMail - design review emails use ZEPTOMAIL_CUSTOMER_EMAIL
+        result = _send_via_zeptomail_sync(
+            to_email=to_email,
+            subject=subject,
+            html_content=html_content,
+            text_content=text_content,
+            from_email=settings.ZEPTOMAIL_CUSTOMER_EMAIL
+        )
+        
+        if not result["success"]:
+            raise Exception(result["message"])
 
         # Mark email log as sent
         email_log = (
@@ -477,7 +526,7 @@ def send_design_review_email(
             email_log.status = EmailStatus.SENT
             email_log.retry_count = retry_count
             email_log.error_message = None
-            email_log.smtp_response = "Message sent successfully via SMTP"
+            email_log.smtp_response = "Message sent successfully via ZeptoMail"
             email_log.sent_at = datetime.now(timezone.utc)
             db.commit()
 
@@ -500,10 +549,7 @@ def send_design_review_email(
                     retry_count = getattr(self.request, "retries", 0) + 1
                     email_log.retry_count = retry_count
                     email_log.error_message = str(exc)
-                    if isinstance(exc, smtplib.SMTPAuthenticationError):
-                        email_log.status = EmailStatus.FAILED
-                        email_log.smtp_response = f"{exc.smtp_code} {exc.smtp_error}"
-                    elif getattr(self.request, "retries", 0) >= self.max_retries:
+                    if getattr(self.request, "retries", 0) >= self.max_retries:
                         email_log.status = EmailStatus.FAILED
                         email_log.smtp_response = str(exc)
                     else:
@@ -515,9 +561,6 @@ def send_design_review_email(
             logger.error(
                 f"Failed to update email log: {str(log_exc)}"
             )
-
-        if isinstance(exc, smtplib.SMTPAuthenticationError):
-            raise
 
         retry_kwargs = dict(getattr(self.request, "kwargs", {}) or {})
         retry_kwargs["email_log_id"] = email_log_id
@@ -535,142 +578,6 @@ def send_design_review_email(
                 db.close()
         except Exception:
             pass
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# @create_task(name="send_design_review_email", max_retries=3)
-# def send_design_review_email(
-#     self,
-#     to_email: str,
-#     customer_name: str,
-#     review_url: str,
-#     design_name: str,
-#     variant_name: str,
-# ):
-#     """
-#     Send a design review link email using Celery.
-
-#     Args:
-#         to_email: Recipient email address
-#         customer_name: Customer's display name
-#         review_url: Frontend review link containing the public token
-#         design_name: Name of the design being shared
-#         variant_name: Name of the shared variant
-#     """
-#     task_name = "send_design_review_email"
-
-#     try:
-#         logger.info(f"📧 Starting {task_name} for {to_email}")
-
-#         import smtplib
-#         from email.mime.multipart import MIMEMultipart
-#         from email.mime.text import MIMEText
-
-#         subject = f"Review your Craftmen design: {design_name}"
-#         safe_variant_name = variant_name or "Design Variant"
-#         html_content = f"""
-# <!DOCTYPE html>
-# <html>
-# <head>
-#     <meta charset="utf-8">
-#     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-#     <title>Review your design</title>
-# </head>
-# <body style="margin: 0; padding: 0; background-color: #0b0f19; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f3f4f6; -webkit-font-smoothing: antialiased; width: 100% !important; height: 100% !important;">
-#     <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #0b0f19; padding: 40px 20px;">
-#         <tr>
-#             <td align="center">
-#                 <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background: linear-gradient(135deg, #111827 0%, #1f2937 100%); border-radius: 24px; border: 1px solid rgba(255, 255, 255, 0.08); overflow: hidden; max-width: 600px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.04);">
-#                     <tr>
-#                         <td align="center" style="padding: 40px 40px 20px 40px;">
-#                             <div style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); -webkit-background-clip: text; color: transparent; font-size: 32px; font-weight: 800; letter-spacing: -0.025em; margin-bottom: 8px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-#                                 CRAFTMEN
-#                             </div>
-#                             <div style="height: 2px; width: 60px; background: linear-gradient(90deg, #6366f1 0%, #a855f7 100%); border-radius: 1px;"></div>
-#                         </td>
-#                     </tr>
-#                     <tr>
-#                         <td style="padding: 20px 40px 40px 40px;">
-#                             <h1 style="color: #ffffff; font-size: 24px; font-weight: 700; margin-top: 0; margin-bottom: 16px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">Your design is ready for review</h1>
-#                             <p style="color: #9ca3af; font-size: 16px; line-height: 1.7; margin-bottom: 24px; text-align: center;">
-#                                 Hi {customer_name},<br>
-#                                 <strong>{design_name}</strong> ({safe_variant_name}) has been shared with you for review.
-#                             </p>
-#                             <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom: 28px;">
-#                                 <tr>
-#                                     <td align="center">
-#                                         <a href="{review_url}" style="display: inline-block; background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); color: #ffffff; text-decoration: none; font-weight: 700; font-size: 16px; padding: 14px 28px; border-radius: 9999px;">Review design</a>
-#                                     </td>
-#                                 </tr>
-#                             </table>
-#                             <p style="color: #9ca3af; font-size: 14px; line-height: 1.6; text-align: center; margin-bottom: 16px;">
-#                                 If the button does not open, use the link below:
-#                             </p>
-#                             <p style="word-break: break-all; color: #818cf8; font-size: 13px; line-height: 1.6; text-align: center; margin-bottom: 0;">
-#                                 <a href="{review_url}" style="color: #818cf8; text-decoration: none;">{review_url}</a>
-#                             </p>
-#                         </td>
-#                     </tr>
-#                     <tr>
-#                         <td align="center" style="padding: 24px 40px; background-color: rgba(0, 0, 0, 0.2); border-top: 1px solid rgba(255, 255, 255, 0.04);">
-#                             <p style="color: #4b5563; font-size: 12px; margin: 0;">
-#                                 &copy; 2026 Craftmen. All rights reserved.
-#                             </p>
-#                         </td>
-#                     </tr>
-#                 </table>
-#             </td>
-#         </tr>
-#     </table>
-# </body>
-# </html>
-# """
-#         text_content = (
-#             f"Hi {customer_name},\n\n"
-#             f"{design_name} ({safe_variant_name}) has been shared with you for review.\n\n"
-#             f"Open this link to review it:\n{review_url}\n\n"
-#             "Best regards,\nThe Craftmen Team"
-#         )
-
-#         def sync_send():
-#             msg = MIMEMultipart('alternative')
-#             msg['Subject'] = subject
-#             msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
-#             msg['To'] = to_email
-
-#             msg.attach(MIMEText(text_content, 'plain'))
-#             msg.attach(MIMEText(html_content, 'html'))
-
-#             with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-#                 server.starttls()
-#                 server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-#                 server.sendmail(settings.SMTP_USER, [to_email], msg.as_string())
-
-#         sync_send()
-
-#         logger.info(f"✅ {task_name} completed successfully for {to_email}")
-#         return True
-
-#     except Exception as exc:
-#         logger.error(f"❌ {task_name} failed for {to_email}: {str(exc)}")
-
-#         raise self.retry(
-#             exc=exc,
-#             countdown=60 * (2 ** self.request.retries),
-#             max_retries=3
-#         )
 
 
 @create_task(name="send_customer_share_sms", max_retries=3)
@@ -866,10 +773,6 @@ def send_team_invitation_email(self, to_email: str, team_name: str, variables: d
         
         from app.core.database import SessionLocal
         from app.models.email_log import EmailLog, EmailStatus
-        import json
-        import smtplib
-        from email.mime.multipart import MIMEMultipart
-        from email.mime.text import MIMEText
         from app.core.config import settings
         
         db = SessionLocal()
@@ -893,24 +796,22 @@ def send_team_invitation_email(self, to_email: str, team_name: str, variables: d
         html_content = _build_team_invitation_html(team_name, variables)
         text_content = _build_team_invitation_text(team_name, variables)
         
-        # Send email
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
-        msg['To'] = to_email
+        # Send via ZeptoMail
+        result = _send_via_zeptomail_sync(
+            to_email=to_email,
+            subject=subject,
+            html_content=html_content,
+            text_content=text_content
+        )
         
-        msg.attach(MIMEText(text_content, 'plain', 'utf-8'))
-        msg.attach(MIMEText(html_content, 'html', 'utf-8'))
-        
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-            server.starttls()
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.sendmail(settings.SMTP_USER, [to_email], msg.as_string())
+        if not result["success"]:
+            raise Exception(result["message"])
         
         # Update log status
         email_log = db.query(EmailLog).filter(EmailLog.id == log_id).first()
         if email_log:
             email_log.status = EmailStatus.SENT
+            email_log.smtp_response = "Message sent successfully via ZeptoMail"
             db.commit()
         
         db.close()
@@ -1107,5 +1008,3 @@ The Craftmen Team
 www.craftmen.com
 """
     return text.strip()
-
-

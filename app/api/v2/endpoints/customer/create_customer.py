@@ -69,6 +69,41 @@ def create_customer(
                 if m_email in req_emails:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address belongs to a manufacturer.")
 
+    # Validate against existing customers
+    from app.models.customer import Customer
+    
+    if request.phone_number:
+        customer_with_phone = db.query(Customer).filter(
+            Customer.phone_number == request.phone_number.strip(),
+            Customer.is_deleted == False
+        ).first()
+        if customer_with_phone:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This phone number already belongs to a customer.")
+            
+    if request.emails:
+        req_emails = [e.email.lower().strip() for e in request.emails if getattr(e, 'email', None)]
+        customers = db.query(Customer).filter(
+            Customer.emails.isnot(None),
+            Customer.is_deleted == False
+        ).all()
+        
+        for c in customers:
+            try:
+                c_emails_data = json.loads(c.emails)
+                if isinstance(c_emails_data, list):
+                    for c_email_obj in c_emails_data:
+                        c_email = (c_email_obj.get("email") if isinstance(c_email_obj, dict) else str(c_email_obj)).lower().strip()
+                        if c_email in req_emails:
+                            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address already belongs to a customer.")
+                elif isinstance(c_emails_data, dict):
+                    c_email = str(c_emails_data.get("email", "")).lower().strip()
+                    if c_email in req_emails:
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address already belongs to a customer.")
+            except (json.JSONDecodeError, TypeError):
+                c_email = str(c.emails).split(',')[0].strip().lower()
+                if c_email in req_emails:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address already belongs to a customer.")
+
     # Serialize the list of emails into a JSON string for the DB column
     email_db = None
     if request.emails:

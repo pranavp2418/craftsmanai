@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, model_validator
 
-from app.schemas.validations import NormalizedEmailStr
+from app.schemas.validations import NormalizedEmailStr, normalize_phone_number
 
 
 class BrandSettingUpdateRequest(BaseModel):
@@ -12,6 +12,13 @@ class BrandSettingUpdateRequest(BaseModel):
     business_email: Optional[NormalizedEmailStr] = None
     phone_number: Optional[str] = None
     primary_color: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_phone_number(cls, data: any) -> any:
+        if isinstance(data, dict) and data.get("phone_number"):
+            data["phone_number"] = normalize_phone_number(data["phone_number"], validate=True)
+        return data
 
 
 class BrandSettingResponse(BaseModel):

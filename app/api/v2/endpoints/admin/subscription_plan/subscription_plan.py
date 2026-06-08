@@ -1,12 +1,12 @@
-from typing import Any, List
+from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, or_
 import uuid
 
 from app.core.dependencies import get_db, get_current_superuser as get_current_admin
 from app.models.user import User
-from app.models.subscription import SubscriptionPlan, UserSubscription
+from app.models.subscription import SubscriptionPlan, UserSubscription, SubscriptionStatus
 from app.schemas.subscription import SubscriptionPlan as SubscriptionPlanSchema, SubscriptionPlanCreate, SubscriptionPlanUpdate
 
 router = APIRouter()
@@ -112,25 +112,53 @@ def read_all_user_subscriptions(
     db: Session = Depends(get_db),
     skip: int = 0,
     limit: int = 100,
+    status: Optional[SubscriptionStatus] = None,
+    search: Optional[str] = None,
     current_user: User = Depends(get_current_admin)
 ) -> Any:
     """
     Retrieve all user subscriptions (Admin only).
+    
+    Filters:
+    - status: Filter by subscription status (ACTIVE, CANCELLED, EXPIRED, TRIAL, PAUSED, PAST_DUE)
+    - search: Search by retailer name, email, or business name
     """
-    total_count = db.query(func.count(UserSubscription.id)).scalar() or 0
-
-    if total_count == 0:
-        return {"data": [], "total": 0}
-
-    rows = (
+    # Build base query
+    query = (
         db.query(
             UserSubscription,
             User.full_name,
             User.email,
+            User.business_name,
             SubscriptionPlan.name.label("plan_name")
         )
         .outerjoin(User, UserSubscription.user_id == User.id)
         .outerjoin(SubscriptionPlan, UserSubscription.plan_id == SubscriptionPlan.id)
+    )
+    
+    # Apply status filter
+    if status:
+        query = query.filter(UserSubscription.status == status)
+    
+    # Apply search filter (search in retailer name, email, or business name)
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            or_(
+                User.full_name.ilike(search_term),
+                User.email.ilike(search_term),
+                User.business_name.ilike(search_term)
+            )
+        )
+    
+    # Get total count with filters applied
+    total_count = query.count()
+    
+    if total_count == 0:
+        return {"success": True, "data": [], "total": 0}
+
+    rows = (
+        query
         .order_by(desc(UserSubscription.created_at))
         .offset(skip)
         .limit(limit)
@@ -142,12 +170,15 @@ def read_all_user_subscriptions(
         sub = row[0]
         user_name = row[1]
         user_email = row[2]
-        plan_name = row[3]
+        business_name = row[3]
+        plan_name = row[4]
         
         data.append({
             "id": sub.id,
             "user_id": sub.user_id,
             "user_name": user_name or user_email or "Unknown",
+            "email": user_email or "Unknown",
+            "business_name": business_name,
             "plan_id": sub.plan_id,
             "plan_name": plan_name or "Unknown Plan",
             "status": sub.status,

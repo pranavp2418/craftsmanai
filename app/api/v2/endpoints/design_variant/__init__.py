@@ -8,6 +8,7 @@ from .get_variant import router as get_router
 from .list_variants import router as list_router
 from .share_with_manufacturer import router as share_manufacturer_router
 from .get_variant_manufacturer_shares import router as variant_manufacturer_shares_router
+from .resend_manufacturer_emails import router as resend_manufacturer_emails_router
 from .archive_variant import router as archive_variant_router
 from .restore_variant import router as restore_variant_router
 from .list_archived_variants import router as list_archived_variants_router
@@ -25,6 +26,7 @@ router.include_router(get_router)
 router.include_router(list_router)
 router.include_router(share_manufacturer_router)
 router.include_router(variant_manufacturer_shares_router)
+router.include_router(resend_manufacturer_emails_router)
 router.include_router(archive_variant_router)
 router.include_router(restore_variant_router)
 router.include_router(delete_variant_router)

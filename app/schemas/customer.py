@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field, model_validator
 
-from app.schemas.validations import NormalizedEmailStr
+from app.schemas.validations import NormalizedEmailStr, normalize_phone_number
 
 
 def _coerce_customer_emails(data: any) -> any:
@@ -78,6 +78,21 @@ class CustomerCreateRequest(BaseModel):
     def normalize_email_payload(cls, data: any) -> any:
         return _coerce_customer_emails(data)
 
+    @model_validator(mode="before")
+    @classmethod
+    def validate_phone_number(cls, data: any) -> any:
+        if isinstance(data, dict) and data.get("phone_number"):
+            data["phone_number"] = normalize_phone_number(data["phone_number"], validate=True)
+        return data
+
+    @model_validator(mode="after")
+    def validate_unique_emails(self) -> "CustomerCreateRequest":
+        if self.emails:
+            email_list = [email.email.lower() for email in self.emails]
+            if len(email_list) != len(set(email_list)):
+                raise ValueError("Emails must be unique")
+        return self
+
 
 class CustomerUpdateRequest(BaseModel):
     full_name: Optional[str] = None
@@ -91,6 +106,21 @@ class CustomerUpdateRequest(BaseModel):
     @classmethod
     def normalize_email_payload(cls, data: any) -> any:
         return _coerce_customer_emails(data)
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_phone_number(cls, data: any) -> any:
+        if isinstance(data, dict) and data.get("phone_number"):
+            data["phone_number"] = normalize_phone_number(data["phone_number"], validate=True)
+        return data
+
+    @model_validator(mode="after")
+    def validate_unique_emails(self) -> "CustomerUpdateRequest":
+        if self.emails:
+            email_list = [email.email.lower() for email in self.emails]
+            if len(email_list) != len(set(email_list)):
+                raise ValueError("Emails must be unique")
+        return self
 
 
 class CustomerResponse(BaseModel):

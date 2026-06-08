@@ -43,6 +43,7 @@ class DesignVariantService:
         base_design_image_url: Optional[str] = None,
         prompt_used: Optional[str] = None,
         model_used: Optional[str] = None,
+        metal_variations_json: Optional[dict] = None,
     ) -> DesignVariant:
         variant = self.variant_repo.create_variant(
             design_id=design_id,
@@ -52,6 +53,7 @@ class DesignVariantService:
             prompt_used=prompt_used,
             model_used=model_used,
             is_selected=True,
+            metal_variations_json=metal_variations_json,
         )
         self.variant_repo.clear_selected(design_id)
         self.variant_repo.set_selected(variant, selected=True)

@@ -123,7 +123,14 @@ def share_variant_with_manufacturer(
         )
 
     shared_metal = latest_customer_share.shared_metal
-    
+
+    if not payload.manufacturer_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one manufacturer ID must be provided."
+        )
+
+    shares = []
     from app.repositories.manufacturer import ManufacturerRepository
     from app.tasks.email_tasks import send_manufacturer_share_email, send_manufacturer_share_sms
     from app.core.config import settings
