@@ -75,3 +75,26 @@ class ManufacturerQuoteSubmitRequest(BaseModel):
     cost_price: float = Field(..., ge=0, description="Quoted cost price")
     delivery_time_days: int = Field(..., ge=1, description="Estimated delivery time in days")
     notes: Optional[str] = Field(default=None, description="Additional notes about the quote")
+
+
+class ResendShareItem(BaseModel):
+    """Per-share entry returned by the resend manufacturer emails endpoint."""
+
+    share_id: int
+    manufacturer_id: int
+    status: str
+    task_id: Optional[str] = None
+    review_url: Optional[str] = None
+    message: Optional[str] = None
+
+
+class ResendManufacturerEmailsResponse(BaseModel):
+    """Response returned by the resend manufacturer emails endpoint."""
+
+    variant_id: int
+    total_shares: int
+    queued_count: int
+    skipped_count: int
+    background: bool = True
+    message: str
+    items: list[ResendShareItem]
