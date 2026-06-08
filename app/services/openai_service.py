@@ -173,11 +173,12 @@ Rings (Band, Bust Down, Signet, Statement, Wedding, Engagement, Custom Shape) ·
 """
 
 OUTPUT_CONTRACT = """
-OUTPUT: Exactly ONE image. Front-facing hero angle. CAD-styled approval render on a clean white background. Centered piece, no environment. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece.
+OUTPUT: Exactly ONE image. Size must be exactly 1024x1024 pixels. Front-facing hero angle. CAD-styled approval render on a clean white background. Centered piece, no environment. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece.
 """
 
 HOUSE_STYLE = """
 STYLE: Clean CAD-styled jewelry approval render. Isolated piece on a pure, solid, clean white background (#FFFFFF).
+- Image size must be exactly 1024x1024 pixels.
 - Absolutely NO hands, fingers, skin, neck, body parts, props, display boxes, or real-world environments.
 - Even if the reference image shows the jewelry on a hand/body or in a box, you MUST remove/strip the hand/body/box and render the jewelry piece completely isolated.
 - The render MUST be a clean, front-facing hero angle, centered, with crisp edges and a premium, manufacturable look.
@@ -696,7 +697,7 @@ Locked elements: {locked_elements}
 {refinement_note_text}
 {SHARED_RULES}
 
-Generate ONE front-facing hero render of this CLASS / SIGNET RING — planar face, symmetrical shoulders, premium {metal}, clean background, approval-ready."""
+Generate ONE front-facing hero render of this CLASS / SIGNET RING — planar face, symmetrical shoulders, premium {metal}, clean background, exactly 1024x1024 pixels, approval-ready."""
 
 def interpret_refinement(params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     gemini_api_key = os.getenv("GEMINI_API_KEY")
@@ -817,14 +818,15 @@ def build_focused_refinement_prompt(intent: Dict[str, Any], base_fallback: str, 
 
     qa_text = qa_list or default_qa_text
 
-    angle_rule = "Maintain camera angle, composition, lighting, background, and metal finish unless the change explicitly requires otherwise."
-    keep_bg_rule = "Keep the same jewelry type, same camera angle, same composition, same lighting, same background."
+    angle_rule = "Maintain camera angle, composition, lighting, background, 1024x1024 pixel size, and metal finish unless the change explicitly requires otherwise."
+    keep_bg_rule = "Keep the same jewelry type, same camera angle, same composition, same lighting, same background. The output image size must be exactly 1024x1024 pixels."
     if version_number <= 1:
         angle_rule = """CAMERA ANGLE & BACKGROUND OVERRIDE (CRITICAL):
+- The output image size must be exactly 1024x1024 pixels (1:1 square aspect ratio).
 - Do NOT copy the background, environment, lighting, hand, fingers, skin, or props from the reference. The background must be pure solid white (#FFFFFF).
 - Do NOT copy the tilted hand-held angle. You MUST render the jewelry piece centered, flat, and front-facing toward the camera (front-facing hero view).
 - Strip the hand/body away completely and render only the jewelry piece."""
-        keep_bg_rule = "Keep the same jewelry type structure, but override background, lighting, and camera angle to be front-facing hero view on pure solid white background (#FFFFFF)."
+        keep_bg_rule = "Keep the same jewelry type structure, but override background, lighting, and camera angle to be front-facing hero view on pure solid white background (#FFFFFF). The output image size must be exactly 1024x1024 pixels."
 
     replacements = extract_text_replacements(change)
     replacement_block = ""
@@ -976,9 +978,15 @@ def build_prompt_from_dummy(params: Dict[str, Any]) -> str:
             if pd.get("metal_tone"):
                 metal_tone = pd.get("metal_tone")
             else:
-                metal_tone = "same as the attached reference image"
+                if metal_tone in ("yellow_gold", "rose_gold", "white_gold", "silver", "platinum"):
+                    metal_tone = metal_tone.replace("_", " ")
+                else:
+                    metal_tone = "same as the attached reference image"
         else:
-            metal_tone = "yellow gold"
+            if metal_tone:
+                metal_tone = metal_tone.replace("_", " ")
+            else:
+                metal_tone = "yellow gold"
     intent = pd.get("request_intent", "render_as_is")
     note_lower = (note or "").lower()
     if any(keyword in note_lower for keyword in ["change", "convert", "replace", "modify", "remove", "add", "switch", "edit", "update"]):
@@ -1218,6 +1226,7 @@ PRESERVATION-FIRST RULES:
 {refinement_skeleton_block}
 
 Current piece: {item_type}
+Metal tone: {metal_tone or "yellow gold"}
 Requested change: {note}
 {stone_block}
 
@@ -1234,6 +1243,7 @@ Generate ONE front-facing hero render of the redesigned {item_type}."""
 {refinement_skeleton_block}
 
 Current piece: {item_type}
+Metal tone: {metal_tone or "yellow gold"}
 Refinement request: {note}
 Target regions: {regions}
 Frozen regions (do NOT change): everything except {regions}
@@ -1254,6 +1264,7 @@ Generate ONE front-facing hero render with the regional change applied to this {
 {refinement_skeleton_block}
 
 Current piece: {item_type}
+Metal tone: {metal_tone or "yellow gold"}
 Refinement request: {note}
 Target regions: {regions}
 {stone_block}
@@ -1489,29 +1500,129 @@ SET-TYPE HARD CONSTRAINT (non-negotiable, overrides user prompt and reference im
 
     return final_prompt.strip()
 
+def crop_to_jewelry(img: Image.Image) -> Image.Image:
+    try:
+        rgba = img.convert("RGBA")
+        import numpy as np
+        arr = np.array(rgba)
+        r = arr[:, :, 0]
+        g = arr[:, :, 1]
+        b = arr[:, :, 2]
+        # Background is white (r > 240 and g > 240 and b > 240)
+        white_mask = (r > 240) & (g > 240) & (b > 240)
+        arr[:, :, 3][white_mask] = 0
+        
+        temp_img = Image.fromarray(arr)
+        bbox = temp_img.getbbox()
+        if bbox:
+            cropped = img.crop(bbox)
+            canvas = Image.new("RGB", (512, 512), (255, 255, 255))
+            cropped.thumbnail((512, 512), Image.Resampling.LANCZOS)
+            offset = ((512 - cropped.width) // 2, (512 - cropped.height) // 2)
+            canvas.paste(cropped, offset)
+            return canvas
+    except Exception as e:
+        logger.error(f"Error in crop_to_jewelry: {e}")
+    return img
+
+def enforce_image_specs(b64_json: str) -> str:
+    try:
+        from io import BytesIO
+        img_data = base64.b64decode(b64_json)
+        img = Image.open(BytesIO(img_data))
+        original_format = img.format or "PNG"
+        
+        # Enforce white background if there is alpha/transparency
+        if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+            canvas = Image.new("RGB", img.size, (255, 255, 255))
+            canvas.paste(img, mask=img.convert("RGBA").split()[3])
+            img = canvas
+        else:
+            img = img.convert("RGB")
+            
+        # Enforce exact size 1024x1024 with aspect ratio preservation (no stretching/distortion)
+        if img.size != (1024, 1024):
+            logger.info(f"Resizing/centering generated image from {img.size} to (1024, 1024)")
+            canvas = Image.new("RGB", (1024, 1024), (255, 255, 255))
+            w, h = img.size
+            scale = min(1024 / w, 1024 / h)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            offset = ((1024 - new_w) // 2, (1024 - new_h) // 2)
+            canvas.paste(img, offset)
+            img = canvas
+            
+        buffered = BytesIO()
+        img.save(buffered, format=original_format)
+        return base64.b64encode(buffered.getvalue()).decode('utf-8')
+    except Exception as e:
+        logger.error(f"Error enforcing image specs: {e}")
+        return b64_json
+
+
 def calculate_hash_similarity(img1: str, img2: str) -> int:
     try:
-        hash1 = imagehash.average_hash(Image.open(img1))
-        hash2 = imagehash.average_hash(Image.open(img2))
+        pil_img1 = Image.open(img1)
+        pil_img2 = Image.open(img2)
+        
+        cropped_img1 = crop_to_jewelry(pil_img1)
+        cropped_img2 = crop_to_jewelry(pil_img2)
+        
+        hash1 = imagehash.average_hash(cropped_img1)
+        hash2 = imagehash.average_hash(cropped_img2)
         return 100 - (hash1 - hash2)
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error calculating hash similarity: {e}")
         return 0
 
 def calculate_ssim_similarity(img1: str, img2: str) -> float:
     if not SSIM_ENABLED:
         return 0.0
     try:
-        image1 = cv2.imread(img1)
-        image2 = cv2.imread(img2)
-        if image1 is None or image2 is None:
-            return 0.0
+        pil_img1 = Image.open(img1)
+        pil_img2 = Image.open(img2)
+        
+        cropped_img1 = crop_to_jewelry(pil_img1)
+        cropped_img2 = crop_to_jewelry(pil_img2)
+        
+        import numpy as np
+        # Convert PIL RGB to OpenCV BGR
+        image1 = cv2.cvtColor(np.array(cropped_img1), cv2.COLOR_RGB2BGR)
+        image2 = cv2.cvtColor(np.array(cropped_img2), cv2.COLOR_RGB2BGR)
+        
         image1 = cv2.cvtColor(image1, cv2.COLOR_BGR2GRAY)
         image2 = cv2.cvtColor(image2, cv2.COLOR_BGR2GRAY)
         image2 = cv2.resize(image2, (image1.shape[1], image1.shape[0]))
+        
         score, _ = ssim(image1, image2, full=True)
         return round(score * 100, 2)
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error calculating ssim: {e}")
         return 0.0
+
+def extract_b64_from_result(result: Any) -> Optional[str]:
+    b64 = getattr(result, "b64_json", None) or (
+        result.get("b64_json")
+        if isinstance(result, dict)
+        else None
+    )
+    if not b64:
+        try:
+            if hasattr(result, "candidates"):
+                for candidate in result.candidates:
+                    for part in candidate.content.parts:
+                        inline_data = getattr(part, "inline_data", None)
+                        if inline_data and hasattr(inline_data, "data"):
+                            b64 = base64.b64encode(inline_data.data).decode("utf-8")
+                            break
+        except Exception:
+            pass
+
+    if b64:
+        return enforce_image_specs(b64)
+    return None
+
 
 def validate_output(reference: str, generated: str) -> Dict[str, Any]:
     hash_score = calculate_hash_similarity(reference, generated)
@@ -1561,31 +1672,12 @@ def resolve_image_urls(image_source: Optional[str | list[str]], image_urls: Opti
         return [data_url] if data_url else []
     return []
 
-def extract_b64_from_result(result: Any) -> Optional[str]:
-    b64 = getattr(result, "b64_json", None) or (
-        result.get("b64_json")
-        if isinstance(result, dict)
-        else None
-    )
-    if b64:
-        return b64
-
-    try:
-        if hasattr(result, "candidates"):
-            for candidate in result.candidates:
-                for part in candidate.content.parts:
-                    inline_data = getattr(part, "inline_data", None)
-                    if inline_data and hasattr(inline_data, "data"):
-                        return base64.b64encode(inline_data.data).decode("utf-8")
-    except Exception:
-        pass
-
-    return None
 
 def generate_with_gemini(
     image_source: Optional[str | list[str]],
     user_prompt: str,
-    prompt_override: Optional[str] = None
+    prompt_override: Optional[str] = None,
+    metal_tone: Optional[str] = None
 ) -> Any:
     gemini_api_key = os.getenv("GEMINI_API_KEY")
     gemini_model_name = os.getenv("GEMINI_IMAGE_MODEL")
@@ -1598,7 +1690,7 @@ def generate_with_gemini(
     genai.configure(api_key=gemini_api_key)
     model = genai.GenerativeModel(gemini_model_name)
 
-    fallback_prompt = prompt_override or build_safe_fallback_prompt(user_prompt)
+    fallback_prompt = prompt_override or build_safe_fallback_prompt(user_prompt, metal_tone=metal_tone)
 
     sources = []
     if image_source:
@@ -1649,11 +1741,27 @@ def generate_with_gemini(
                 except Exception:
                     pass
 
-def build_safe_fallback_prompt(user_prompt: str) -> str:
+def build_safe_fallback_prompt(user_prompt: str, metal_tone: Optional[str] = None) -> str:
+    metal_line = ""
+    if metal_tone:
+        normalized = metal_tone.replace("_", " ").strip().lower()
+        if normalized in ("gold", "yellow gold"):
+            normalized = "18K yellow gold"
+        elif normalized == "rose gold":
+            normalized = "18K rose gold"
+        elif normalized == "silver":
+            normalized = "sterling silver"
+        elif normalized == "white gold":
+            normalized = "18K white gold"
+        elif normalized == "platinum":
+            normalized = "platinum"
+        metal_line = f"\nMetal tone: {normalized}"
+
     return f"""
 Generate jewelry inspired by the uploaded reference while preserving the overall visual identity.
 
-Use clean jewelry CAD rendering on a white background.
+The output image size must be exactly 1024x1024 pixels (1:1 square aspect ratio).
+Use clean jewelry CAD rendering on a pure solid white background (#FFFFFF).{metal_line}
 
 User Request:
 {user_prompt}
@@ -1903,7 +2011,8 @@ def generate_with_fallback(
             logger.info("[GEMINI FALLBACK GENERATION]")
             return generate_with_gemini(
                 image_source=image_source,
-                user_prompt=user_prompt
+                user_prompt=user_prompt,
+                metal_tone=metal_tone
             )
         except Exception as gemini_error:
             raise Exception(f"GEMINI FALLBACK FAILED: {gemini_error}")
@@ -2011,7 +2120,8 @@ class OpenAIService:
         user_prompt: str,
         jewellery_type: str = "",
         size: str = "1024x1024",
-        mode: Optional[str] = None
+        mode: Optional[str] = None,
+        metal_tone: Optional[str] = None
     ) -> OpenAIImageObject:
         """
         Generate base image using full Gemini pipeline (Primary + Fallback + QA checks).
@@ -2026,11 +2136,38 @@ class OpenAIService:
             else:
                 selected_mode = "initial"
 
+        # Dynamically detect metal tone from reference image if not explicitly passed
+        detected_metal = metal_tone
+        if not detected_metal:
+            detected_metal = "yellow_gold"
+            primary_ref = None
+            if image_source:
+                if isinstance(image_source, list):
+                    if image_source:
+                        primary_ref = image_source[0]
+                else:
+                    primary_ref = image_source
+                    
+            if primary_ref:
+                try:
+                    from app.repositories.design_variant import detect_metal_tone
+                    metal_dict = detect_metal_tone(user_prompt, primary_ref)
+                    if metal_dict:
+                        detected_key = list(metal_dict.keys())[0]
+                        if detected_key == "gold":
+                            detected_metal = "yellow_gold"
+                        elif detected_key == "silver":
+                            detected_metal = "white_gold"
+                        else:
+                            detected_metal = detected_key
+                except Exception as e:
+                    logger.warning(f"Failed to detect metal tone in generate_base_image: {e}")
+
         result = generate_with_fallback(
             image_source=image_source,
             user_prompt=user_prompt,
             parsed_data={"item_type": jewellery_type} if jewellery_type else None,
-            metal_tone="yellow_gold",
+            metal_tone=detected_metal,
             mode=selected_mode
         )
         
@@ -2042,17 +2179,37 @@ class OpenAIService:
         base_image_source: str,
         angle_description: str = "rotate 90 degrees to the right, full side profile view, camera at same height",
         jewellery_type: str = "",
-        size: str = "1024x1024"
+        size: str = "1024x1024",
+        metal_tone: Optional[str] = None
     ) -> OpenAIImageObject:
         """
         Generate side view using Gemini Pipeline.
         """
         logger.info("Generating side view using Gemini Pipeline")
+        
+        detected_metal = metal_tone
+        if not detected_metal:
+            detected_metal = "yellow_gold"
+            if base_image_source:
+                try:
+                    from app.repositories.design_variant import detect_metal_tone
+                    metal_dict = detect_metal_tone(angle_description, base_image_source)
+                    if metal_dict:
+                        detected_key = list(metal_dict.keys())[0]
+                        if detected_key == "gold":
+                            detected_metal = "yellow_gold"
+                        elif detected_key == "silver":
+                            detected_metal = "white_gold"
+                        else:
+                            detected_metal = detected_key
+                except Exception as e:
+                    logger.warning(f"Failed to detect metal tone in generate_side_view: {e}")
+
         result = generate_with_fallback(
             image_source=base_image_source,
             user_prompt=angle_description,
             parsed_data={"item_type": jewellery_type} if jewellery_type else None,
-            metal_tone="yellow_gold",
+            metal_tone=detected_metal,
             mode="initial"
         )
         b64 = extract_b64_from_result(result)
@@ -2063,17 +2220,37 @@ class OpenAIService:
         base_image_source: str,
         angle_description: str = "top-down view, camera positioned directly above at 90 degrees looking down",
         jewellery_type: str = "",
-        size: str = "1024x1024"
+        size: str = "1024x1024",
+        metal_tone: Optional[str] = None
     ) -> OpenAIImageObject:
         """
         Generate top view using Gemini Pipeline.
         """
         logger.info("Generating top view using Gemini Pipeline")
+        
+        detected_metal = metal_tone
+        if not detected_metal:
+            detected_metal = "yellow_gold"
+            if base_image_source:
+                try:
+                    from app.repositories.design_variant import detect_metal_tone
+                    metal_dict = detect_metal_tone(angle_description, base_image_source)
+                    if metal_dict:
+                        detected_key = list(metal_dict.keys())[0]
+                        if detected_key == "gold":
+                            detected_metal = "yellow_gold"
+                        elif detected_key == "silver":
+                            detected_metal = "white_gold"
+                        else:
+                            detected_metal = detected_key
+                except Exception as e:
+                    logger.warning(f"Failed to detect metal tone in generate_top_view: {e}")
+
         result = generate_with_fallback(
             image_source=base_image_source,
             user_prompt=angle_description,
             parsed_data={"item_type": jewellery_type} if jewellery_type else None,
-            metal_tone="yellow_gold",
+            metal_tone=detected_metal,
             mode="initial"
         )
         b64 = extract_b64_from_result(result)
@@ -2084,17 +2261,37 @@ class OpenAIService:
         base_image_source: str,
         angle_description: str,
         jewellery_type: str = "",
-        size: str = "1024x1024"
+        size: str = "1024x1024",
+        metal_tone: Optional[str] = None
     ) -> OpenAIImageObject:
         """
         Generate custom angle view using Gemini Pipeline.
         """
         logger.info(f"Generating custom angle using Gemini Pipeline: {angle_description}")
+        
+        detected_metal = metal_tone
+        if not detected_metal:
+            detected_metal = "yellow_gold"
+            if base_image_source:
+                try:
+                    from app.repositories.design_variant import detect_metal_tone
+                    metal_dict = detect_metal_tone(angle_description, base_image_source)
+                    if metal_dict:
+                        detected_key = list(metal_dict.keys())[0]
+                        if detected_key == "gold":
+                            detected_metal = "yellow_gold"
+                        elif detected_key == "silver":
+                            detected_metal = "white_gold"
+                        else:
+                            detected_metal = detected_key
+                except Exception as e:
+                    logger.warning(f"Failed to detect metal tone in generate_custom_angle: {e}")
+
         result = generate_with_fallback(
             image_source=base_image_source,
             user_prompt=angle_description,
             parsed_data={"item_type": jewellery_type} if jewellery_type else None,
-            metal_tone="yellow_gold",
+            metal_tone=detected_metal,
             mode="initial"
         )
         b64 = extract_b64_from_result(result)
