@@ -198,7 +198,7 @@ async def get_customers(
             "retailer": {
                 "name":  retailer_name,
                 "email": retailer_email,
-            } if retailer_name else None,
+            },
             "total_orders":  total_orders,
             "active_orders": active_orders,
         })
