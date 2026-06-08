@@ -12,6 +12,8 @@ class SubscriptionStatus(str, enum.Enum):
     CANCELLED = "CANCELLED"
     EXPIRED = "EXPIRED"
     TRIAL = "TRIAL"
+    PAUSED = "PAUSED"
+    PAST_DUE = "PAST_DUE"
 
 class PaymentStatus(str, enum.Enum):
     PAID = "PAID"

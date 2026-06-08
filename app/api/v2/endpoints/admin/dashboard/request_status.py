@@ -101,8 +101,13 @@ async def get_monitoring_requests(
                 CustomerAlias.full_name.ilike(search_term),
                 CustomerAlias.emails.ilike(search_term),
                 CustomerAlias.phone_number.ilike(search_term),
+                CustomerAlias.tag.ilike(search_term),
+                CustomerAlias.location.ilike(search_term),
                 RetailerAlias.full_name.ilike(search_term),
                 RetailerAlias.email.ilike(search_term),
+                RetailerAlias.username.ilike(search_term),
+                RetailerAlias.whatsapp_number.ilike(search_term),
+                RetailerAlias.business_name.ilike(search_term),
             )
         )
 
