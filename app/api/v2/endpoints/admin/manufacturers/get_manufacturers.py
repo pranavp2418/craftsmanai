@@ -9,6 +9,7 @@ from app.models.user import User
 from app.models.manufacturer import Manufacturer
 from app.models.design import DesignVariantManufacturerShare
 from app.models.order import ManufacturerQuote
+from app.core.dependencies import get_db, get_current_user
 
 router = APIRouter()
 
@@ -24,7 +25,8 @@ async def get_admin_manufacturers(
     sort_by: Optional[str] = Query("recently_added", description="Sort by: 'recently_added' or 'alphabetical'"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    admin: User = Depends(deps.get_current_admin)
+    # admin: User = Depends(deps.get_current_admin)
+    current_user: User = Depends(get_current_user)
 ):
     skip = (page - 1) * limit
 
