@@ -11,6 +11,7 @@ celery_app = Celery(
         "app.tasks.cleanup_tasks",
         "app.tasks.design_tasks",
         "app.tasks.metal_variant_tasks",
+        "app.tasks.resend_manufacturer_share_task",
     ]
 )
 
@@ -24,13 +25,13 @@ celery_app.conf.update(
     accept_content=settings.CELERY_ACCEPT_CONTENT,
     timezone=settings.CELERY_TIMEZONE,
     enable_utc=settings.CELERY_ENABLE_UTC,
-    
+
     # Task routing
     task_routes=CELERY_ROUTES,
-    
+
     # Periodic schedules
     beat_schedule=SCHEDULE_CONFIG,
-    
+
     # Task execution settings
     task_track_started=True,
     task_time_limit=30 * 60,  # 30 minutes

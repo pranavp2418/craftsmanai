@@ -6,7 +6,7 @@ Import tasks from here to ensure they're registered with Celery
 # Email tasks
 from .email_tasks import (
     send_signup_otp_email,
-    send_password_reset_email, 
+    send_password_reset_email,
     send_welcome_email,
     send_customer_share_email,
     send_manufacturer_share_email
@@ -33,6 +33,11 @@ from .angle_variant_tasks import (
     generate_remaining_variant_angles,
 )
 
+# Manufacturer share resend task
+from .resend_manufacturer_share_task import (
+    resend_manufacturer_share_email,
+)
+
 # Analytics tasks (future)
 # from .analytics_tasks import (
 #     track_user_activity,
@@ -42,11 +47,11 @@ from .angle_variant_tasks import (
 __all__ = [
     # Email tasks
     "send_signup_otp_email",
-    "send_password_reset_email", 
+    "send_password_reset_email",
     "send_welcome_email",
     "send_customer_share_email",
     "send_manufacturer_share_email",
-    
+
     # Cleanup tasks
     "cleanup_expired_otps",
     "cleanup_expired_tokens",
@@ -59,7 +64,10 @@ __all__ = [
 
     # Angle variant tasks
     "generate_remaining_variant_angles",
-    
+
+    # Manufacturer share resend
+    "resend_manufacturer_share_email",
+
     # Analytics tasks (future)
     # "track_user_activity",
     # "generate_daily_reports",

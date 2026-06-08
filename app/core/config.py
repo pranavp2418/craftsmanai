@@ -85,21 +85,27 @@ class Settings(BaseSettings):
     TWILIO_AUTH_TOKEN: Optional[str] = None
     TWILIO_PHONE_NUMBER: Optional[str] = None
 
-    # Email Settings
-    SMTP_TLS: bool = True
-    SMTP_PORT: int = 587
-    SMTP_HOST: Optional[str] = None
-    SMTP_USER: Optional[str] = None
-    SMTP_PASSWORD: Optional[str] = None
-    EMAILS_FROM_EMAIL: Optional[str] = None
-    EMAILS_FROM_NAME: str = "CRAFTMEN"
+    # ZeptoMail Email Settings (replaces Gmail SMTP)
+    ZEPTOMAIL_API_KEY: Optional[str] = None
+    ZEPTOMAIL_FROM_EMAIL: Optional[str] = None
+    ZEPTOMAIL_FROM_NAME: str = "CRAFTMEN"
+    ZEPTOMAIL_BOUNCE_ADDRESS: Optional[str] = None
+    ZEPTOMAIL_API_URL: str = "https://api.zeptomail.com/v1.1/email"
+    ZEPTOMAIL_CUSTOMER_EMAIL: str = "designs@craftsmanai.app"
+    ZEPTOMAIL_QUOTES_EMAIL: str = "quotes@craftsmanai.app"
     
     # Frontend URL
     FRONTEND_URL: str = "https://craftmenai.txogavideo.in/"
 
     @property
-    def SMTP_FROM(self) -> Optional[str]:
-        return self.EMAILS_FROM_EMAIL or self.SMTP_USER
+    def EMAILS_FROM_EMAIL(self) -> Optional[str]:
+        """Backward compatibility - returns ZeptoMail from email"""
+        return self.ZEPTOMAIL_FROM_EMAIL
+
+    @property
+    def EMAILS_FROM_NAME(self) -> str:
+        """Backward compatibility - returns ZeptoMail from name"""
+        return self.ZEPTOMAIL_FROM_NAME
         
     model_config = SettingsConfigDict(
         env_file=".env",
