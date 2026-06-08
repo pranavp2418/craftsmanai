@@ -11,66 +11,77 @@ def detect_metal_tone(prompt: Optional[str], image_url: Optional[str]) -> Option
         
     metal = None
     
-    # 1. Primary: Classify from the actual generated image color profile
-    try:
-        import urllib.request
-        import io
-        from PIL import Image
-        
-        if image_url.startswith("http"):
-            req = urllib.request.Request(
-                image_url, 
-                headers={'User-Agent': 'Mozilla/5.0'}
-            )
-            with urllib.request.urlopen(req, timeout=5) as response:
-                img_bytes = response.read()
-            img = Image.open(io.BytesIO(img_bytes))
-        else:
-            img = Image.open(image_url)
-            
-        img = img.convert("RGB")
-        img.thumbnail((100, 100))
-        
-        pixels = list(img.getdata())
-        foreground = []
-        for r, g, b in pixels:
-            if r > 240 and g > 240 and b > 240:
-                continue
-            if r < 30 and g < 30 and b < 30:
-                continue
-            foreground.append((r, g, b))
-            
-        if foreground:
-            avg_r = sum(p[0] for p in foreground) / len(foreground)
-            avg_g = sum(p[1] for p in foreground) / len(foreground)
-            avg_b = sum(p[2] for p in foreground) / len(foreground)
-            
-            diff_rg = avg_r - avg_g
-            max_diff = max(abs(avg_r - avg_g), abs(avg_r - avg_b), abs(avg_g - avg_b))
-            
-            if max_diff < 15:
-                metal = "silver"
-            elif diff_rg > 15:
-                metal = "rose_gold"
-            else:
-                metal = "gold"
-    except Exception:
-        pass
-        
-    # 2. Fallback: Parse from prompt
-    if not metal and prompt:
+    # 1. Primary: Parse from prompt (since metadata/intent is the absolute source of truth)
+    if prompt:
         lower = prompt.lower()
         if "rose gold" in lower or "rose-gold" in lower or "rose_gold" in lower:
             metal = "rose_gold"
-        elif "white gold" in lower or "silver" in lower or "platinum" in lower or "sterling" in lower:
+        elif "white gold" in lower or "white-gold" in lower or "white_gold" in lower or "silver" in lower or "platinum" in lower or "sterling" in lower:
             metal = "silver"
-        elif "yellow gold" in lower or "gold" in lower:
+        elif "yellow gold" in lower or "yellow-gold" in lower or "yellow_gold" in lower or "gold" in lower:
             metal = "gold"
+            
+    # 2. Secondary: If not specified in prompt, classify from the actual generated image color profile
+    if not metal:
+        try:
+            import urllib.request
+            import io
+            from PIL import Image
+            
+            if image_url.startswith("http"):
+                req = urllib.request.Request(
+                    image_url, 
+                    headers={'User-Agent': 'Mozilla/5.0'}
+                )
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    img_bytes = response.read()
+                img = Image.open(io.BytesIO(img_bytes))
+            else:
+                img = Image.open(image_url)
+                
+            img = img.convert("RGB")
+            img.thumbnail((100, 100))
+            
+            pixels = list(img.getdata())
+            foreground = []
+            for r, g, b in pixels:
+                brightness = (r + g + b) / 3
+                colorness = max(r, g, b) - min(r, g, b)
+                
+                # Filter background: if it is bright AND neutral, it is likely background
+                if brightness > 190 and colorness < 20:
+                    continue
+                if r < 30 and g < 30 and b < 30:
+                    continue
+                foreground.append((r, g, b))
+                
+            if foreground:
+                avg_r = sum(p[0] for p in foreground) / len(foreground)
+                avg_g = sum(p[1] for p in foreground) / len(foreground)
+                avg_b = sum(p[2] for p in foreground) / len(foreground)
+                
+                diff_rg = avg_r - avg_g
+                diff_gb = avg_g - avg_b
+                max_diff = max(abs(avg_r - avg_g), abs(avg_r - avg_b), abs(avg_g - avg_b))
+                
+                if max_diff < 15:
+                    metal = "silver"
+                elif diff_rg > 15:
+                    # Rose gold has closer Green and Blue, whereas Yellow Gold has Green much higher than Blue
+                    if diff_gb < 45:
+                        metal = "rose_gold"
+                    else:
+                        metal = "gold"
+                else:
+                    metal = "silver"
+        except Exception:
+            pass
             
     if not metal:
         metal = "gold"
         
     return {metal: image_url}
+
 
 
 
@@ -99,7 +110,21 @@ class DesignVariantRepository:
     ) -> DesignVariant:
         # Auto-detect metal tone if base_design_image_url is set and metal_variations_json is empty
         if base_design_image_url and not metal_variations_json:
-            metal_variations_json = detect_metal_tone(prompt_used or style_tags or design_focus, base_design_image_url)
+            ref_image_url = None
+            try:
+                design = self.db.query(Design).filter(Design.id == design_id).first()
+                if design and design.input_image_urls:
+                    ref_image_url = design.input_image_urls[0]
+                elif design and design.input_image_url:
+                    ref_image_url = design.input_image_url
+            except Exception:
+                pass
+            
+            detect_source = ref_image_url or base_design_image_url
+            detected = detect_metal_tone(prompt_used or style_tags or design_focus, detect_source)
+            if detected:
+                detected_key = list(detected.keys())[0]
+                metal_variations_json = {detected_key: base_design_image_url}
 
         variant = DesignVariant(
             design_id=design_id,
@@ -207,7 +232,18 @@ class DesignVariantRepository:
         prompt = kwargs.get("prompt_used") or variant.prompt_used
         
         if new_image_url and "metal_variations_json" not in kwargs:
-            detected = detect_metal_tone(prompt or variant.style_tags or variant.design_focus, new_image_url)
+            ref_image_url = None
+            try:
+                design = self.db.query(Design).filter(Design.id == variant.design_id).first()
+                if design and design.input_image_urls:
+                    ref_image_url = design.input_image_urls[0]
+                elif design and design.input_image_url:
+                    ref_image_url = design.input_image_url
+            except Exception:
+                pass
+            
+            detect_source = ref_image_url or new_image_url
+            detected = detect_metal_tone(prompt or variant.style_tags or variant.design_focus, detect_source)
             if detected:
                 existing = dict(variant.metal_variations_json or {})
                 for k, v in detected.items():

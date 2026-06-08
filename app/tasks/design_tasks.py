@@ -83,7 +83,25 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
         elif design.input_image_url:
             reference_image_source = design.input_image_url
 
+        detected_metal = None
+        metal_variations_json = None
         if reference_image_source:
+            # Detect metal tone from reference image first to pass to generator
+            primary_ref = reference_image_source[0] if isinstance(reference_image_source, list) else reference_image_source
+            try:
+                from app.repositories.design_variant import detect_metal_tone
+                metal_dict = detect_metal_tone(prompt, primary_ref)
+                if metal_dict:
+                    detected_key = list(metal_dict.keys())[0]
+                    if detected_key == "gold":
+                        detected_metal = "yellow_gold"
+                    elif detected_key == "silver":
+                        detected_metal = "white_gold"
+                    else:
+                        detected_metal = detected_key
+            except Exception as e:
+                logger.warning(f"Failed to pre-detect metal tone in task: {e}")
+
             # Publish initial stage events
             _publish_sse(
                 channel,
@@ -101,6 +119,7 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                 image_source=reference_image_source,
                 user_prompt=prompt,
                 jewellery_type=design.jewellery_type or "pendant",
+                metal_tone=detected_metal
             )
 
             final_image_bytes, content_type = _extract_generated_image_data(generated_item)
@@ -109,6 +128,10 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             # Upload final refined image to Supabase
             bucket_path = f"generated/base/{design.design_code}"
             generated_image_url = upload_image_to_supabase(final_image_bytes, bucket_path)
+
+            if detected_metal:
+                db_key = "gold" if detected_metal == "yellow_gold" else ("silver" if detected_metal == "white_gold" else detected_metal)
+                metal_variations_json = {db_key: generated_image_url}
 
         else:
             # ── Fallback: prompt-only generation (no reference image) ─
@@ -125,6 +148,7 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             base_design_image_url=generated_image_url,
             prompt_used=prompt,
             model_used=openai_service.model,
+            metal_variations_json=metal_variations_json,
         )
 
         AIGenerationWorkflowService(db).complete_generation(
@@ -248,8 +272,26 @@ def refine_design_variant_image(
         if design_focus:
             combined_prompt = f"{combined_prompt}\nFocus on: {design_focus}"
 
+        # Resolve metal tone from the parent variant's database record
+        parent_metal = None
+        if parent_variant:
+            if parent_variant.metal_variations_json:
+                # Find the key whose value matches the parent's base_design_image_url
+                for m, url in parent_variant.metal_variations_json.items():
+                    if url == parent_variant.base_design_image_url:
+                        parent_metal = m
+                        break
+                if not parent_metal:
+                    # Fallback: get the first key
+                    parent_metal = list(parent_variant.metal_variations_json.keys())[0]
+
         # Generate refined image via OpenAI using the resolved reference images
-        generated_item = openai_service.generate_base_image(reference_image_source, combined_prompt, jewellery_type=jewellery_type)
+        generated_item = openai_service.generate_base_image(
+            reference_image_source,
+            combined_prompt,
+            jewellery_type=jewellery_type,
+            metal_tone=parent_metal
+        )
         image_bytes, content_type = _extract_generated_image_data(generated_item)
         _validate_image_bytes(image_bytes, content_type)
 
