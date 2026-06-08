@@ -1,13 +1,15 @@
 import logging
+import json
 from typing import Optional
 from app.core.config import settings
 from app.services.template_renderer import render_template
+import httpx
 
 logger = logging.getLogger(__name__)
 
 
 class EmailService:
-    """Email service for sending OTPs and notifications"""
+    """Email service for sending OTPs and notifications via ZeptoMail API"""
     
     @staticmethod
     def _create_email_log(to_email: str, template_name: str, subject: str, variables: dict) -> Optional[str]:
@@ -15,7 +17,6 @@ class EmailService:
         from app.core.database import SessionLocal
         from app.models.email_log import EmailLog, EmailStatus
         from app.models.user import User
-        import json
         
         db = SessionLocal()
         try:
@@ -68,6 +69,81 @@ class EmailService:
             db.close()
     
     @staticmethod
+    async def _send_via_zeptomail(
+        to_email: str,
+        subject: str,
+        html_content: str,
+        text_body: str,
+        from_email: Optional[str] = None
+    ) -> dict:
+        """
+        Send email via ZeptoMail REST API
+        
+        Args:
+            to_email: Recipient email address
+            subject: Email subject
+            html_content: HTML body content
+            text_body: Plain text body content
+            from_email: Optional override sender email (defaults to ZEPTOMAIL_FROM_EMAIL)
+        
+        Returns:
+            dict with keys: success (bool), message (str), data (dict)
+        """
+        if not settings.ZEPTOMAIL_API_KEY:
+            raise ValueError("ZEPTOMAIL_API_KEY is not configured")
+        
+        api_url = settings.ZEPTOMAIL_API_URL
+        from_email = from_email or settings.ZEPTOMAIL_FROM_EMAIL or "noreply@craftmen.com"
+        from_name = settings.ZEPTOMAIL_FROM_NAME
+        
+        payload = {
+            "from": {
+                "address": from_email,
+                "name": from_name
+            },
+            "to": [
+                {
+                    "email_address": {
+                        "address": to_email
+                    }
+                }
+            ],
+            "subject": subject,
+            "htmlbody": html_content,
+            "textbody": text_body
+        }
+        
+        if settings.ZEPTOMAIL_BOUNCE_ADDRESS:
+            payload["bounce_address"] = settings.ZEPTOMAIL_BOUNCE_ADDRESS
+        
+        headers = {
+            "Authorization": f"Zoho-enczapikey {settings.ZEPTOMAIL_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                api_url,
+                json=payload,
+                headers=headers
+            )
+            
+            if response.status_code in (200, 201, 202):
+                return {
+                    "success": True,
+                    "message": "Email sent successfully via ZeptoMail",
+                    "data": response.json()
+                }
+            else:
+                error_detail = f"ZeptoMail API error: {response.status_code} - {response.text}"
+                logger.error(error_detail)
+                return {
+                    "success": False,
+                    "message": error_detail,
+                    "data": None
+                }
+    
+    @staticmethod
     async def send_signup_otp(to: str, otp: str, user_name: str, expires_minutes: int = 15, verify_url: str = "#"):
         """Send signup OTP email"""
         from app.models.email_log import EmailStatus
@@ -79,11 +155,6 @@ class EmailService:
         )
         try:
             logger.info(f"SENDING EMAIL: To={to}, OTP={otp}, User={user_name}")
-            
-            import smtplib
-            from email.mime.multipart import MIMEMultipart
-            from email.mime.text import MIMEText
-            import asyncio
             
             subject = "Verify your email address - Craftmen"
             
@@ -100,27 +171,22 @@ class EmailService:
             
             text_body = f"Hi {user_name},\n\nYour OTP code is: {otp}\n\nBest regards,\nThe Craftmen Team"
             
-            def sync_send():
-                msg = MIMEMultipart('alternative')
-                msg['Subject'] = subject
-                msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
-                msg['To'] = to
-                
-                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
-                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
-                
-                with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-                    server.starttls()
-                    server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-                    server.sendmail(settings.SMTP_USER, [to], msg.as_string())
-            
-            await asyncio.to_thread(sync_send)
-            logger.info(f"Successfully sent signup OTP email to {to}")
-            EmailService._update_email_log_status(
-                log_id=log_id,
-                status=EmailStatus.SENT,
-                smtp_response="Message sent successfully via SMTP"
+            result = await EmailService._send_via_zeptomail(
+                to_email=to,
+                subject=subject,
+                html_content=html_content,
+                text_body=text_body
             )
+            
+            if result["success"]:
+                logger.info(f"Successfully sent signup OTP email to {to}")
+                EmailService._update_email_log_status(
+                    log_id=log_id,
+                    status=EmailStatus.SENT,
+                    smtp_response=result["message"]
+                )
+            else:
+                raise Exception(result["message"])
             
         except Exception as e:
             logger.error(f"Failed to send signup OTP to {to}: {str(e)}")
@@ -144,11 +210,6 @@ class EmailService:
         try:
             logger.info(f"SENDING PASSWORD RESET EMAIL: To={to}, OTP={otp}, User={user_name}")
             
-            import smtplib
-            from email.mime.multipart import MIMEMultipart
-            from email.mime.text import MIMEText
-            import asyncio
-            
             subject = "Reset your password - Craftmen"
             
             # Render template using Jinja2
@@ -164,27 +225,22 @@ class EmailService:
             
             text_body = f"Hi {user_name},\n\nYour security code is: {otp}\n\nBest regards,\nThe Craftmen Team"
             
-            def sync_send():
-                msg = MIMEMultipart('alternative')
-                msg['Subject'] = subject
-                msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
-                msg['To'] = to
-                
-                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
-                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
-                
-                with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-                    server.starttls()
-                    server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-                    server.sendmail(settings.SMTP_USER, [to], msg.as_string())
-            
-            await asyncio.to_thread(sync_send)
-            logger.info(f"Successfully sent password reset OTP email to {to}")
-            EmailService._update_email_log_status(
-                log_id=log_id,
-                status=EmailStatus.SENT,
-                smtp_response="Message sent successfully via SMTP"
+            result = await EmailService._send_via_zeptomail(
+                to_email=to,
+                subject=subject,
+                html_content=html_content,
+                text_body=text_body
             )
+            
+            if result["success"]:
+                logger.info(f"Successfully sent password reset OTP email to {to}")
+                EmailService._update_email_log_status(
+                    log_id=log_id,
+                    status=EmailStatus.SENT,
+                    smtp_response=result["message"]
+                )
+            else:
+                raise Exception(result["message"])
             
         except Exception as e:
             logger.error(f"Failed to send password reset OTP to {to}: {str(e)}")
@@ -199,11 +255,6 @@ class EmailService:
     async def send_customer_share(to_email: str, customer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, version: str = None, version_label: str = None):
         """Send an email to a customer with a link to review a shared design using customer_approval template."""
         from app.models.email_log import EmailStatus
-        from app.services.template_renderer import render_template
-        import smtplib
-        from email.mime.multipart import MIMEMultipart
-        from email.mime.text import MIMEText
-        import asyncio
         
         log_id = EmailService._create_email_log(
             to_email=to_email,
@@ -231,27 +282,25 @@ class EmailService:
             
             text_body = f"Hi {customer_name},\n\n{retailer_name or designer_name} has shared a custom jewelry design with you.\n\nDesign Number: {design_code or 'N/A'}\nJewelry Type: {jewelry_type or 'Custom Jewelry'}\nVersion: {version or 'v1.0'}\n\nReview it here: {preview_url}\n\nBest regards,\nThe Craftmen Team"
             
-            def sync_send():
-                msg = MIMEMultipart('alternative')
-                msg['Subject'] = subject
-                msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
-                msg['To'] = to_email
-                
-                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
-                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
-                
-                with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-                    server.starttls()
-                    server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-                    server.sendmail(settings.SMTP_USER, [to_email], msg.as_string())
-            
-            await asyncio.to_thread(sync_send)
-            logger.info(f"Successfully sent customer share email to {to_email}")
-            EmailService._update_email_log_status(
-                log_id=log_id,
-                status=EmailStatus.SENT,
-                smtp_response="Message sent successfully via SMTP"
+            # Customer design share emails use ZEPTOMAIL_CUSTOMER_EMAIL
+            result = await EmailService._send_via_zeptomail(
+                to_email=to_email,
+                subject=subject,
+                html_content=html_content,
+                text_body=text_body,
+                from_email=settings.ZEPTOMAIL_CUSTOMER_EMAIL
             )
+            
+            if result["success"]:
+                logger.info(f"Successfully sent customer share email to {to_email}")
+                EmailService._update_email_log_status(
+                    log_id=log_id,
+                    status=EmailStatus.SENT,
+                    smtp_response=result["message"]
+                )
+            else:
+                raise Exception(result["message"])
+                
         except Exception as e:
             logger.error(f"Failed to send customer share email to {to_email}: {str(e)}")
             EmailService._update_email_log_status(
@@ -265,11 +314,6 @@ class EmailService:
     async def send_manufacturer_share(to_email: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, metal: str = None):
         """Send an email to a manufacturer with a link to review a shared design for quote using manufacturer_design_share template."""
         from app.models.email_log import EmailStatus
-        from app.services.template_renderer import render_template
-        import smtplib
-        from email.mime.multipart import MIMEMultipart
-        from email.mime.text import MIMEText
-        import asyncio
         
         log_id = EmailService._create_email_log(
             to_email=to_email,
@@ -296,27 +340,25 @@ class EmailService:
             
             text_body = f"Hi {manufacturer_name},\n\n{retailer_name or designer_name} sent a Details Sheet for manufacturer quote.\n\nDesign Number: {design_code or 'N/A'}\nJewelry Type: {jewelry_type or 'Custom Jewelry'}\nMetal: {metal or 'Not specified'}\n\nOpen the Details Sheet and submit costing here: {preview_url}\n\nBest regards,\nThe Craftmen Team"
             
-            def sync_send():
-                msg = MIMEMultipart('alternative')
-                msg['Subject'] = subject
-                msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
-                msg['To'] = to_email
-                
-                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
-                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
-                
-                with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-                    server.starttls()
-                    server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-                    server.sendmail(settings.SMTP_USER, [to_email], msg.as_string())
-            
-            await asyncio.to_thread(sync_send)
-            logger.info(f"Successfully sent manufacturer share email to {to_email}")
-            EmailService._update_email_log_status(
-                log_id=log_id,
-                status=EmailStatus.SENT,
-                smtp_response="Message sent successfully via SMTP"
+            # Manufacturer quote emails use ZEPTOMAIL_QUOTES_EMAIL
+            result = await EmailService._send_via_zeptomail(
+                to_email=to_email,
+                subject=subject,
+                html_content=html_content,
+                text_body=text_body,
+                from_email=settings.ZEPTOMAIL_QUOTES_EMAIL
             )
+            
+            if result["success"]:
+                logger.info(f"Successfully sent manufacturer share email to {to_email}")
+                EmailService._update_email_log_status(
+                    log_id=log_id,
+                    status=EmailStatus.SENT,
+                    smtp_response=result["message"]
+                )
+            else:
+                raise Exception(result["message"])
+                
         except Exception as e:
             logger.error(f"Failed to send manufacturer share email to {to_email}: {str(e)}")
             EmailService._update_email_log_status(
@@ -339,11 +381,6 @@ class EmailService:
         try:
             logger.info(f"SENDING WELCOME EMAIL: To={to}, User={user_name}")
             
-            import smtplib
-            from email.mime.multipart import MIMEMultipart
-            from email.mime.text import MIMEText
-            import asyncio
-            
             subject = "Welcome to Craftmen!"
             
             # Render template using Jinja2
@@ -356,27 +393,22 @@ class EmailService:
             
             text_body = f"Hi {user_name},\n\nWelcome to Craftmen! Your email address has been successfully verified.\n\nBest regards,\nThe Craftmen Team"
             
-            def sync_send():
-                msg = MIMEMultipart('alternative')
-                msg['Subject'] = subject
-                msg['From'] = settings.EMAILS_FROM_EMAIL or settings.SMTP_USER
-                msg['To'] = to
-                
-                msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
-                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
-                
-                with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-                    server.starttls()
-                    server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-                    server.sendmail(settings.SMTP_USER, [to], msg.as_string())
-            
-            await asyncio.to_thread(sync_send)
-            logger.info(f"Successfully sent welcome email to {to}")
-            EmailService._update_email_log_status(
-                log_id=log_id,
-                status=EmailStatus.SENT,
-                smtp_response="Message sent successfully via SMTP"
+            result = await EmailService._send_via_zeptomail(
+                to_email=to,
+                subject=subject,
+                html_content=html_content,
+                text_body=text_body
             )
+            
+            if result["success"]:
+                logger.info(f"Successfully sent welcome email to {to}")
+                EmailService._update_email_log_status(
+                    log_id=log_id,
+                    status=EmailStatus.SENT,
+                    smtp_response=result["message"]
+                )
+            else:
+                raise Exception(result["message"])
             
         except Exception as e:
             logger.error(f"Failed to send welcome email to {to}: {str(e)}")
