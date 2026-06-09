@@ -13,7 +13,7 @@ class SubscriptionPlanBase(BaseModel):
     duration_days: Optional[int] = None
     is_active: bool = True
     is_most_popular: bool = False
-    feature_points: List[str] = []
+    feature_points: Optional[List[str]] = None
     monthly_renders: int = -1
     customer_shares: int = -1
     manufacturer_quotes: int = -1
