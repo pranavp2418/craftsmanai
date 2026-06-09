@@ -45,7 +45,7 @@ def parse_customer_emails(raw_emails):
 @router.get("/", response_model=Dict[str, Any])
 async def get_customers(
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_active_user),
+    current_user: User = Depends(deps.get_current_admin),
 
     status: Optional[str] = Query("ALL"),
     name: Optional[str] = Query(None),
