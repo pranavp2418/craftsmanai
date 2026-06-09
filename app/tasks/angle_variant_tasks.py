@@ -169,23 +169,37 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
                     variant_id,
                 )
 
+                # Map metal_name to standard values expected by openai_service
+                norm_metal = "yellow_gold"
+                if metal_name in ("rose", "rose_gold"):
+                    norm_metal = "rose_gold"
+                elif metal_name in ("silver", "white_gold"):
+                    norm_metal = "white_gold"
+                elif metal_name in ("gold", "yellow_gold"):
+                    norm_metal = "yellow_gold"
+                elif metal_name == "platinum":
+                    norm_metal = "platinum"
+
                 if angle_name == "side_view":
                     generated_item = openai_service.generate_side_view(
                         base_image_source=variant.base_design_image_url,
                         angle_description=full_prompt,
                         jewellery_type=jewellery_type,
+                        metal_tone=norm_metal,
                     )
                 elif angle_name == "top_view":
                     generated_item = openai_service.generate_top_view(
                         base_image_source=variant.base_design_image_url,
                         angle_description=full_prompt,
                         jewellery_type=jewellery_type,
+                        metal_tone=norm_metal,
                     )
                 else:
                     generated_item = openai_service.generate_custom_angle(
                         base_image_source=variant.base_design_image_url,
                         angle_description=full_prompt,
                         jewellery_type=jewellery_type,
+                        metal_tone=norm_metal,
                     )
 
                 image_bytes, content_type = _extract_image_data(generated_item)
