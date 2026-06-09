@@ -246,8 +246,8 @@ class DesignVariantRepository:
             detected = detect_metal_tone(prompt or variant.style_tags or variant.design_focus, detect_source)
             if detected:
                 existing = dict(variant.metal_variations_json or {})
-                for k, v in detected.items():
-                    existing[k] = v
+                for k in detected.keys():
+                    existing[k] = new_image_url
                 variant.metal_variations_json = existing
                 from sqlalchemy.orm.attributes import flag_modified
                 flag_modified(variant, "metal_variations_json")
