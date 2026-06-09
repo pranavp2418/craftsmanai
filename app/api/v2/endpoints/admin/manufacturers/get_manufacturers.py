@@ -9,7 +9,7 @@ from app.models.user import User
 from app.models.manufacturer import Manufacturer
 from app.models.design import DesignVariantManufacturerShare
 from app.models.order import ManufacturerQuote
-from app.core.dependencies import get_db, get_current_user
+from app.core.dependencies import get_db, get_current_superuser
 
 router = APIRouter()
 
@@ -26,7 +26,7 @@ async def get_admin_manufacturers(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     # admin: User = Depends(deps.get_current_admin)
-    current_user: User = Depends(get_current_user)
+    admin: User = Depends(get_current_superuser)
 ):
     skip = (page - 1) * limit
 
