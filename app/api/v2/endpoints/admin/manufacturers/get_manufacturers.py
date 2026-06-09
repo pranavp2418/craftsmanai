@@ -22,7 +22,6 @@ async def get_admin_manufacturers(
         description="Combined subfilter: 'recently_added', 'alphabetical', or 'letter:<A-Z>'"
     ),
     search: Optional[str] = Query(None, description="Search by name, email, phone number, or location"),
-    sort_by: Optional[str] = Query("recently_added", description="Sort by: 'recently_added' or 'alphabetical'"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     # admin: User = Depends(deps.get_current_admin)
@@ -60,11 +59,12 @@ async def get_admin_manufacturers(
             if letter and letter.isalpha() and len(letter) == 1:
                 query = query.where(Manufacturer.name.ilike(f"{letter}%"))
 
-    # Apply sort_by parameter
-    if sort_by and isinstance(sort_by, str) and sort_by.strip().lower() == "alphabetical":
+    # Apply ordering based on subfilter
+    if subfilter and isinstance(subfilter, str) and subfilter.strip().lower() == "alphabetical":
         query = query.order_by(Manufacturer.name.asc())
-    else:  # Default or recently_added
+    else:  # recently_added, letter:X, or default
         query = query.order_by(Manufacturer.created_at.desc())
+        
 
     # Total count for pagination    
     count_subq = query.subquery()

@@ -48,7 +48,7 @@ async def request_password_reset(
     
     logger.info(f"Generated password reset OTP for user {user.email}: code={otp_code}")
     
-    # Send OTP email (background task)
+    # Send OTP email (background task via Celery)
     from app.tasks.email_tasks import send_password_reset_email
     send_password_reset_email.delay(
         to=user.email,
@@ -98,7 +98,7 @@ async def resend_password_reset_otp(
     
     logger.info(f"Resent password reset OTP for user {user.email}: code={otp_code}")
     
-    # Send OTP email (background task)
+    # Send OTP email (background task via Celery)
     from app.tasks.email_tasks import send_password_reset_email
     send_password_reset_email.delay(
         to=user.email,

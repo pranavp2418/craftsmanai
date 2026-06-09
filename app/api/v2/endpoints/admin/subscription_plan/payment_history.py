@@ -1,14 +1,14 @@
 import csv
 from io import StringIO
-from typing import Any
+from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_
 import uuid
 
 from app.core.dependencies import get_db, get_current_superuser as get_current_admin
 from app.models.user import User
-from app.models.subscription import Payment, SubscriptionPlan
+from app.models.subscription import Payment, PaymentStatus, SubscriptionPlan
 
 router = APIRouter()
 
@@ -19,37 +19,68 @@ def read_payment_history(
     db: Session = Depends(get_db),
     skip: int = 0,
     limit: int = 100,
+    status: Optional[PaymentStatus] = None,
+    search: Optional[str] = None,
     current_user: User = Depends(get_current_admin)
 ) -> Any:
     """
     Retrieve payment history. (Admin only)
+
+    Filters:
+    - status: Filter by payment status (PAID, PENDING, FAILED, REFUNDED). Omit for All.
+    - search: Search across invoice ID, retailer name / email / business name, and plan name.
     """
-    # Count total entries
-    total_count = db.query(func.count(Payment.id)).scalar() or 0
+    # Build base query with joins
+    query = (
+        db.query(
+            Payment,
+            User.full_name.label("retailer_name"),
+            User.email.label("retailer_email"),
+            User.business_name.label("retailer_business"),
+            SubscriptionPlan.name.label("plan_name")
+        )
+        .outerjoin(User, Payment.user_id == User.id)
+        .outerjoin(SubscriptionPlan, Payment.plan_id == SubscriptionPlan.id)
+    )
+
+    # --- status filter (None = All) ---
+    if status is not None:
+        query = query.filter(Payment.status == status)
+
+    # --- parallel search across all relevant fields ---
+    if search:
+        term = f"%{search}%"
+        query = query.filter(
+            or_(
+                Payment.invoice_id.ilike(term),
+                User.full_name.ilike(term),
+                User.email.ilike(term),
+                User.business_name.ilike(term),
+                SubscriptionPlan.name.ilike(term),
+                Payment.payment_method.ilike(term),
+            )
+        )
+
+    # Count after filters so pagination total is accurate
+    total_count = query.count()
 
     if total_count == 0:
         return {"success": True, "data": [], "total": 0}
 
     payments_data = (
-        db.query(
-            Payment,
-            User.full_name.label("retailer_name"),
-            SubscriptionPlan.name.label("plan_name")
-        )
-        .outerjoin(User, Payment.user_id == User.id)
-        .outerjoin(SubscriptionPlan, Payment.plan_id == SubscriptionPlan.id)
+        query
         .order_by(desc(Payment.created_at))
         .offset(skip)
         .limit(limit)
         .all()
     )
-    
+
     response_data = []
     for row in payments_data:
         payment = row[0]
-        retailer_name = row[1]
-        plan_name = row[2]
-        
+        retailer_name = row[1] or row[2] or row[3]   # full_name → email → business_name
+        plan_name = row[4]
+
         payment_dict = {
             "id": payment.id,
             "invoice_id": payment.invoice_id,
@@ -64,11 +95,21 @@ def read_payment_history(
             "plan_name": plan_name or "Unknown Plan"
         }
         response_data.append(payment_dict)
-        
+
+    from math import ceil
+    total_pages = ceil(total_count / limit) if limit > 0 else 1
+    page = (skip // limit) + 1 if limit > 0 else 1
+    has_next = page < total_pages
+    has_prev = page > 1
+
     return {
         "success": True,
         "data": response_data,
-        "total": total_count
+        "total": total_count,
+        "page": page,
+        "total_pages": total_pages,
+        "has_next": has_next,
+        "has_prev": has_prev
     }
 
 
