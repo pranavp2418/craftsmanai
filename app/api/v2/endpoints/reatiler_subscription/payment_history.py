@@ -11,7 +11,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib import colors
 
-from app.core.dependencies import get_db, get_current_user
+from app.core.dependencies import get_db, get_current_user, get_current_active_user
 from app.models.user import User
 from app.models.subscription import Payment, PaymentStatus
 
@@ -22,7 +22,7 @@ router = APIRouter()
 @router.get("/payment-history")
 def get_payment_history(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     page: int = 1,
     limit: int = 20,
     status: Optional[str] = Query(None),

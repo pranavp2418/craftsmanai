@@ -1,7 +1,7 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from app.core.dependencies import get_db, get_current_user
+from app.core.dependencies import get_db, get_current_active_user
 from app.schemas.manufacturer import ManufacturerListResponse
 from app.services.manufacturer_service import ManufacturerService
 from app.models.user import User
@@ -15,7 +15,7 @@ def list_manufacturers(
     search: Optional[str] = Query(None),
     status: Optional[str] = Query(None, description="Filter by manufacturer status: active or inactive"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_active_user)
 ):
     normalized_status = status.lower().strip() if status else None
     if normalized_status and normalized_status not in {"active", "inactive"}:

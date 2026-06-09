@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.core.dependencies import get_db, get_current_active_user
+from app.core.dependencies import get_db, get_current_user
 from app.schemas.user_profile import ChangePasswordRequest
 from app.models.user import User
 from app.core.security import verify_password, get_password_hash
@@ -12,7 +12,7 @@ def change_password(
     *,
     db: Session = Depends(get_db),
     password_data: ChangePasswordRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Change the current user's password.

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
-from app.core.dependencies import get_db, get_current_active_user
+from app.core.dependencies import get_db, get_current_user
 from app.core.device_fingerprint import get_device_info_from_request
 from app.models.user import User
 from app.models.user_device import UserDevice
@@ -16,7 +16,7 @@ router = APIRouter()
 def get_active_sessions(
     *,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_user),
     request: Request
 ):
     """

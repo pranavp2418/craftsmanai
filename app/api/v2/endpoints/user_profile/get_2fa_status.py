@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from app.core.dependencies import get_db, get_current_active_user
+from app.core.dependencies import get_db, get_current_user
 from app.models.user import User
 
 router = APIRouter()
@@ -10,7 +10,7 @@ router = APIRouter()
 def get_two_factor_auth_status(
     *,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get the current Two-Factor Authentication status for the logged-in user.

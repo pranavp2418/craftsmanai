@@ -14,7 +14,7 @@ router = APIRouter()
 @router.get("/", response_model=PaginatedInvoicesResponse)
 async def list_user_invoices(
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.get_current_active_user),
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     limit: int = Query(20, ge=1, le=100, description="Number of items per page")
 ) -> PaginatedInvoicesResponse:
