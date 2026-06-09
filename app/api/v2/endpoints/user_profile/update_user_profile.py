@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.core.dependencies import get_db, get_current_active_user
+from app.core.dependencies import get_db, get_current_user
 from app.schemas.user_profile import UserProfileResponse, UserProfileUpdate
 from app.models.user import User
 
@@ -21,7 +21,7 @@ def update_user_profile(
     *,
     db: Session = Depends(get_db),
     profile_data: UserProfileUpdate,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Update the currently logged-in user's profile details.

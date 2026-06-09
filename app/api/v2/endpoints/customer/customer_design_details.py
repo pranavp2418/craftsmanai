@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 import ast
 import json
 
-from app.core.dependencies import get_db, get_current_user
+from app.core.dependencies import get_db, get_current_active_user
 from app.models.user import User
 from app.models.customer import Customer
 from app.models.design import DesignShare, DesignVariant
@@ -17,7 +17,7 @@ router = APIRouter()
 def get_customer_design_shares(
     variant_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     ) -> List[Dict[str, Any]]:
     """Return shared-customer rows for a design variant."""
 

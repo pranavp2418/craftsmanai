@@ -10,8 +10,8 @@ class UserProfileResponse(BaseModel):
     last_name: str
     full_name: Optional[str] = None
     whatsapp_number: Optional[str] = None
-    is_active: bool
-    is_verified: bool
+    # is_active: bool
+    # is_verified: bool
     is_superuser: bool
     role: str
 

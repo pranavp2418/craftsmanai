@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.core.dependencies import get_db, get_current_active_user
+from app.core.dependencies import get_db, get_current_user
 from app.schemas.user_profile import TwoFactorAuthToggleRequest
 from app.models.user import User
 
@@ -11,7 +11,7 @@ def toggle_two_factor_auth(
     *,
     db: Session = Depends(get_db),
     tfa_data: TwoFactorAuthToggleRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Toggle Two-Factor Authentication for the currently logged-in user.

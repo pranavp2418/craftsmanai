@@ -7,7 +7,7 @@ import uuid
 import stripe
 import logging
 
-from app.core.dependencies import get_db, get_current_user
+from app.core.dependencies import get_db, get_current_user, get_current_active_user
 from app.core.config import settings
 from app.core.rate_limiter import limiter
 from app.models.user import User
@@ -475,7 +475,7 @@ def reset_monthly_tokens(
 @router.get("/token-status")
 def get_token_status(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_active_user)
 ) -> Any:
     """
     Get current user's token status including used/remaining tokens from their active subscription.
@@ -526,7 +526,7 @@ def get_token_status(
 @router.get("/my-plan", response_model=List[UserSubscriptionSchema])
 def get_my_subscriptions(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_active_user)
 ) -> Any:
     """
     Get all active and past subscriptions for current retailer.

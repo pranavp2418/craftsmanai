@@ -28,7 +28,7 @@ router = APIRouter()
 async def download_invoice_pdf(
     payment_id: str,
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user)
+    current_user: User = Depends(deps.get_current_active_user)
 ) -> StreamingResponse:
     """
     Download PDF invoice for a specific payment.
