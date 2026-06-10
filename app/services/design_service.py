@@ -167,6 +167,7 @@ class DesignService:
         *,
         user: User,
         status: Optional[DesignStatus] = None,
+        search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[Design], int]:
@@ -180,13 +181,13 @@ class DesignService:
             # Team member: only see designs they personally created
             items = self.design_repo.list_by_created_by(
                 user.id, user.team_owner_id,
-                status=status, limit=limit, offset=offset
+                status=status, search=search, limit=limit, offset=offset
             )
-            total = self.design_repo.count_by_created_by(user.id, user.team_owner_id, status=status)
+            total = self.design_repo.count_by_created_by(user.id, user.team_owner_id, status=status, search=search)
         else:
             # Regular user or team owner: see all designs where user_id matches
-            items = self.design_repo.list_by_user(user.id, status=status, limit=limit, offset=offset)
-            total = self.design_repo.count_by_user(user.id, status=status)
+            items = self.design_repo.list_by_user(user.id, status=status, search=search, limit=limit, offset=offset)
+            total = self.design_repo.count_by_user(user.id, status=status, search=search)
 
         # Attach variants and shared customer info to each design
         for design in items:

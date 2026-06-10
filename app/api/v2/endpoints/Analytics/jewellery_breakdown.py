@@ -55,10 +55,15 @@ async def get_jewellery_breakdown(
 	"""Return last-six-month jewellery mix as category counts and rates."""
 	cutoff = datetime.now(timezone.utc) - timedelta(days=183)
 
+	# Filter based on whether user is team member or team owner/regular user
+	owner_id = admin.team_owner_id if admin.is_team_member and admin.team_owner_id else admin.id
+	design_filter = Design.user_id == owner_id
+
 	result = await db.execute(
 		select(Design.jewellery_type, func.count(Design.id)).where(
 			Design.created_at >= cutoff,
 			Design.is_deleted.is_(False),
+			design_filter,
 		).group_by(Design.jewellery_type)
 	)
 

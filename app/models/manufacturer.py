@@ -1,3 +1,4 @@
+import uuid
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -16,7 +17,7 @@ class Manufacturer(Base):
     phone_number = Column(String(50), nullable=True)
     address = Column(String(500), nullable=True)
     location = Column(String(255), nullable=True)
-    # public_token = Column(String(64), unique=True, nullable=False, index=True)
+    public_token = Column(String(64), unique=True, nullable=False, index=True, default=lambda: f"m-{uuid.uuid4().hex}")
     is_active = Column(Boolean, default=True, nullable=False)
     is_deleted = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

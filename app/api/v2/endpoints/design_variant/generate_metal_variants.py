@@ -77,6 +77,10 @@ def generate_metal_variants(
             "sse_channel": channel,
         }
 
+    # Deduct subscription tokens (1 per missing metal to generate)
+    from app.services.subscription_service import SubscriptionService
+    SubscriptionService.check_and_deduct_tokens(db, current_user, len(missing_metals))
+
     # Dispatch the background Celery task with only the missing metals
     generate_metal_variant_images.delay(
         variant_id=variant.id,
