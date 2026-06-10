@@ -82,10 +82,20 @@ def generate_metal_variants(
     SubscriptionService.check_and_deduct_tokens(db, current_user, len(missing_metals))
 
     # Dispatch the background Celery task with only the missing metals
-    generate_metal_variant_images.delay(
-        variant_id=variant.id,
-        metals=missing_metals,
-        channel=channel,
+    # generate_metal_variant_images.delay(
+    #     variant_id=variant.id,
+    #     metals=missing_metals,
+    #     channel=channel,
+    # Dispatch the background Celery task with only the missing metals.
+    # Route to the dedicated metal-variants queue so it runs on worker-variants
+    # instead of blocking the primary render worker.
+    generate_metal_variant_images.apply_async(
+        kwargs={
+            "variant_id": variant.id,
+            "metals": missing_metals,
+            "channel": channel,
+        },
+        queue="metal_variants",
     )
 
     return {

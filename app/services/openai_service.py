@@ -2257,7 +2257,7 @@ def generate_with_openai_image(
                     headers={"Authorization": f"Bearer {api_key}"},
                     data=data,
                     files=files,
-                    timeout=180,
+                    timeout=(15, 300),
                 )
             else:
                 # Use images/generations endpoint (text-only)
@@ -2275,7 +2275,7 @@ def generate_with_openai_image(
                         "quality": "auto",
                         "background": "opaque",
                     },
-                    timeout=180,
+                    timeout=(15, 300),
                 )
 
             if response.ok:
