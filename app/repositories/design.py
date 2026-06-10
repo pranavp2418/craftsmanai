@@ -78,23 +78,32 @@ class DesignRepository:
 
     def list_archived(
         self,
+        owner_id: int,
         *,
         limit: int = 50,
         offset: int = 0,
     ) -> List[Design]:
         return (
             self.db.query(Design)
-            .filter(Design.is_archived.is_(True), Design.is_deleted.is_(False))
+            .filter(
+                Design.user_id == owner_id,
+                Design.is_archived.is_(True),
+                Design.is_deleted.is_(False),
+            )
             .order_by(Design.created_at.desc())
             .offset(offset)
             .limit(limit)
             .all()
         )
 
-    def count_archived(self) -> int:
+    def count_archived(self, owner_id: int) -> int:
         return (
             self.db.query(func.count(Design.id))
-            .filter(Design.is_archived.is_(True), Design.is_deleted.is_(False))
+            .filter(
+                Design.user_id == owner_id,
+                Design.is_archived.is_(True),
+                Design.is_deleted.is_(False),
+            )
             .scalar()
             or 0
         )

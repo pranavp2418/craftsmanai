@@ -197,11 +197,11 @@ class DesignService:
 
         return items, total
 
-    def list_archived_designs(self, *, limit: int = 50, offset: int = 0):
-        return self.design_repo.list_archived(limit=limit, offset=offset)
+    def list_archived_designs(self, owner_id: int, *, limit: int = 50, offset: int = 0):
+        return self.design_repo.list_archived(owner_id=owner_id, limit=limit, offset=offset)
 
-    def count_archived_designs(self) -> int:
-        return self.design_repo.count_archived()
+    def count_archived_designs(self, owner_id: int) -> int:
+        return self.design_repo.count_archived(owner_id=owner_id)
 
     def get_design_with_relations(self, design_id: int) -> Optional[Design]:
         """Get a single design with variants and shared customers loaded."""
