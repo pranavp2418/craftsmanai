@@ -86,22 +86,6 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
         detected_metal = None
         metal_variations_json = None
         if reference_image_source:
-            # Detect metal tone from reference image first to pass to generator
-            primary_ref = reference_image_source[0] if isinstance(reference_image_source, list) else reference_image_source
-            try:
-                from app.repositories.design_variant import detect_metal_tone
-                metal_dict = detect_metal_tone(prompt, primary_ref)
-                if metal_dict:
-                    detected_key = list(metal_dict.keys())[0]
-                    if detected_key == "gold":
-                        detected_metal = "yellow_gold"
-                    elif detected_key == "silver":
-                        detected_metal = "white_gold"
-                    else:
-                        detected_metal = detected_key
-            except Exception as e:
-                logger.warning(f"Failed to pre-detect metal tone in task: {e}")
-
             # Publish initial stage events
             _publish_sse(
                 channel,
@@ -119,8 +103,11 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                 image_source=reference_image_source,
                 user_prompt=prompt,
                 jewellery_type=design.jewellery_type or "pendant",
-                metal_tone=detected_metal
+                metal_tone=None
             )
+
+            # Retrieve the dynamically detected metal tone from the vision translator
+            detected_metal = getattr(generated_item, "detected_metal", None) or "yellow_gold"
 
             final_image_bytes, content_type = _extract_generated_image_data(generated_item)
             _validate_image_bytes(final_image_bytes, content_type)
@@ -129,9 +116,8 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             bucket_path = f"generated/base/{design.design_code}"
             generated_image_url = upload_image_to_supabase(final_image_bytes, bucket_path)
 
-            if detected_metal:
-                db_key = "gold" if detected_metal == "yellow_gold" else ("silver" if detected_metal == "white_gold" else detected_metal)
-                metal_variations_json = {db_key: generated_image_url}
+            db_key = "gold" if detected_metal == "yellow_gold" else ("silver" if detected_metal == "white_gold" else detected_metal)
+            metal_variations_json = {db_key: generated_image_url}
 
         else:
             # ── Fallback: prompt-only generation (no reference image) ─

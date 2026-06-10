@@ -1669,15 +1669,15 @@ def resolve_image_urls(image_source: Optional[str | list[str]], image_urls: Opti
 
 
 
-def translate_prompt_for_dalle(prompt_text: str, image_urls: list[str] = None) -> str:
+def translate_prompt_for_dalle(prompt_text: str, image_urls: list[str] = None) -> tuple[str, str]:
     """
     Use gpt-4o-mini to convert a complex structured system prompt into a concise, 
-    highly optimized visual-only prompt for DALL-E.
-    Optionally looks at the reference images to generate a more accurate visual description.
+    highly optimized visual-only prompt for DALL-E, and detect the metal tone.
+    Optionally looks at the reference images to generate a more accurate visual description and metal classification.
     """
     client = get_openai_client()
     try:
-        logger.info("[PROMPT TRANSLATION] Cleaning complex prompt using gpt-4o-mini")
+        logger.info("[PROMPT TRANSLATION] Cleaning complex prompt and detecting metal tone using gpt-4o-mini")
         
         # Prepare visual inputs if reference images are available
         image_contents = []
@@ -1712,20 +1712,15 @@ def translate_prompt_for_dalle(prompt_text: str, image_urls: list[str] = None) -
             {
                 "role": "system",
                 "content": (
-                    "You are a prompt translator/optimizer for DALL-E 3. "
-                    "Your job is to read a highly complex, rule-heavy jewelry rendering instruction, "
-                    "optionally view the provided reference image(s), and translate it into a concise (1-2 sentences), "
-                    "visually descriptive prompt optimized for DALL-E 3.\n\n"
-                    "CRITICAL INSTRUCTIONS:\n"
-                    "1. Describe ONLY the physical characteristics of the jewelry (e.g., jewelry type, gold/silver metal, gemstone count/cuts, shape, layout).\n"
-                    "2. Describe the background strictly as: 'isolated on a pure, solid, clean white background (#FFFFFF)'.\n"
-                    "3. Do NOT include any negative instructions (like 'no text', 'no hands', 'do not render'). "
-                    "Avoid all negation words entirely, as they cause DALL-E to hallucinate the prohibited elements.\n"
-                    "4. MULTI-IMAGE COMBINATION: If multiple reference images are provided, pay close attention to how they should be combined based on the user's request. "
-                    "If the user wants to put/embed one image (e.g., a deity, painting, portrait, or engraving) inside or onto the other image's design (e.g., a pendant, medallion, or lock), "
-                    "you MUST describe this combination explicitly, identifying the key subject/deity from the first image by name if possible (e.g., 'featuring a detailed miniature gold engraving/picture of the Radha Krishna deities from the first image embedded in the center/surface of the rose gold heart pendant').\n"
-                    "5. PENDANT BAIL RULE: If the item is a pendant, it must feature exactly one single, clean, structurally realistic bail (such as a single hinge bail, v-bail, or simple loop) connecting the pendant body to the chain. Never describe double bails, duplicate hangers, or multiple overlapping loops.\n"
-                    "6. Output ONLY the clean DALL-E prompt string. Do not include any introductory or explanatory text."
+                    "You are a prompt translator and jewelry analyzer. Read the rendering instruction, "
+                    "view the reference image(s), and output a JSON object with the following fields:\n"
+                    "- 'dalle_prompt': An optimized, highly descriptive prompt for DALL-E 3 (1-2 sentences). Describe the background strictly as 'isolated on a pure, solid, clean white background (#FFFFFF)'. Do NOT include negation words.\n"
+                    "- 'detected_metal': Identify the metal tone from the image/prompt as one of: 'gold' (yellow gold), 'silver' (white gold/silver/platinum), or 'rose_gold'.\n"
+                    "RULES for 'detected_metal':\n"
+                    "1. If a metal tone is explicitly mentioned in the user prompt (e.g. 'rose gold', 'platinum', 'yellow gold', 'silver', 'white gold'), use that.\n"
+                    "2. If no metal tone is specified and the reference image is NOT jewelry (e.g. it is a drawing, sketch, logo, cartoon, deity portrait), default to 'gold'.\n"
+                    "3. If no metal is specified and the reference image IS jewelry, detect the metal tone of the jewelry in the image.\n\n"
+                    "Output MUST be valid JSON only. Do not include markdown block formatting."
                 )
             },
             {
@@ -1733,7 +1728,7 @@ def translate_prompt_for_dalle(prompt_text: str, image_urls: list[str] = None) -
                 "content": [
                     {
                         "type": "text",
-                        "text": f"Translate this jewelry instruction into a clean DALL-E prompt:\n\n{prompt_text}"
+                        "text": f"Analyze and translate this jewelry instruction:\n\n{prompt_text}"
                     }
                 ] + image_contents
             }
@@ -1742,16 +1737,33 @@ def translate_prompt_for_dalle(prompt_text: str, image_urls: list[str] = None) -
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
+            response_format={"type": "json_object"},
             temperature=0.2,
-            max_tokens=150,
+            max_tokens=250,
             timeout=15
         )
-        cleaned_prompt = response.choices[0].message.content.strip()
+        response_text = response.choices[0].message.content.strip()
+        logger.info(f"[PROMPT TRANSLATION] Raw JSON response: {response_text}")
+        
+        import json
+        data = json.loads(response_text)
+        cleaned_prompt = data.get("dalle_prompt", "").strip()
+        detected_metal = data.get("detected_metal", "gold").strip().lower()
+        if detected_metal not in ["gold", "silver", "rose_gold"]:
+            detected_metal = "gold"
+            
         logger.info(f"[PROMPT TRANSLATION] Cleaned prompt: {cleaned_prompt}")
-        return cleaned_prompt
+        logger.info(f"[PROMPT TRANSLATION] Detected metal: {detected_metal}")
+        return cleaned_prompt, detected_metal
     except Exception as e:
-        logger.warning(f"[PROMPT TRANSLATION] Translation failed: {e}. Falling back to original prompt.")
-        return prompt_text
+        logger.warning(f"[PROMPT TRANSLATION] Translation failed: {e}. Falling back to local metal detection and original prompt.")
+        lower = (prompt_text or "").lower()
+        detected_metal = "gold"
+        if "rose gold" in lower or "rose-gold" in lower or "rose_gold" in lower:
+            detected_metal = "rose_gold"
+        elif "white gold" in lower or "white-gold" in lower or "white_gold" in lower or "silver" in lower or "platinum" in lower or "sterling" in lower:
+            detected_metal = "silver"
+        return prompt_text, detected_metal
 
 
 def generate_with_openai_image(
@@ -1799,8 +1811,9 @@ def generate_with_openai_image(
                 logger.warning(f"Failed to fetch reference image {url[:80]}: {e}")
 
     # Clean the prompt using gpt-4o-mini translation layer to optimize for DALL-E unless bypassed
+    detected_metal = None
     if not bypass_translation:
-        dalle_prompt = translate_prompt_for_dalle(prompt_text, image_urls)
+        dalle_prompt, detected_metal = translate_prompt_for_dalle(prompt_text, image_urls)
     else:
         logger.info("[PROMPT TRANSLATION] Bypassing prompt translation layer as requested")
         dalle_prompt = prompt_text
@@ -1851,7 +1864,7 @@ def generate_with_openai_image(
             
             if b64:
                 logger.info(f"OpenAI gpt-image-2 generation succeeded (attempt {attempt})")
-                return b64
+                return b64, detected_metal
 
             raise ValueError("No image payload in OpenAI response")
 
@@ -1940,7 +1953,7 @@ def generate_with_fallback(
     user_prompt: str,
     parsed_data: Optional[Dict[str, Any]] = None,
     image_urls: Optional[List[str]] = None,
-    metal_tone: str = "yellow_gold",
+    metal_tone: Optional[str] = None,
     mode: Optional[str] = None,
     version_number: int = 1,
     refinement_intent_override: Optional[Dict[str, Any]] = None,
@@ -2036,7 +2049,7 @@ def generate_with_fallback(
                     reference_image=image_source,
                     parsed_data=parsed_data,
                     mode=selected_mode,
-                    metal_tone=metal_tone,
+                    metal_tone=metal_tone or "yellow_gold",
                     image_urls=resolved_image_urls,
                     version_number=version_number,
                     refinement_intent=refinement_intent,
@@ -2049,13 +2062,13 @@ def generate_with_fallback(
 
             try:
                 logger.info(f"[PRIMARY OPENAI GENERATION] Attempt {attempt}/{max_attempts_count}")
-                b64_json = generate_with_openai_image(
+                b64_json, detected_metal = generate_with_openai_image(
                     image_urls=resolved_image_urls,
                     prompt_text=final_prompt,
                     bypass_translation=bypass_translation,
                     mode=selected_mode
                 )
-                result = OpenAIImageObject(b64_json=b64_json)
+                result = OpenAIImageObject(b64_json=b64_json, detected_metal=detected_metal)
 
                 if not b64_json:
                     continue
@@ -2126,12 +2139,12 @@ def generate_with_fallback(
         # =====================================================
         try:
             logger.info("[OPENAI FALLBACK GENERATION]")
-            fallback_prompt = build_safe_fallback_prompt(user_prompt, metal_tone=metal_tone)
-            b64 = generate_with_openai_image(
+            fallback_prompt = build_safe_fallback_prompt(user_prompt, metal_tone=metal_tone or "yellow_gold")
+            b64, detected_metal = generate_with_openai_image(
                 image_urls=resolved_image_urls,
                 prompt_text=fallback_prompt
             )
-            return OpenAIImageObject(b64_json=b64)
+            return OpenAIImageObject(b64_json=b64, detected_metal=detected_metal)
         except Exception as openai_error:
             raise Exception(f"OPENAI FALLBACK FAILED: {openai_error}")
 
@@ -2147,9 +2160,10 @@ def generate_with_fallback(
 # OPENAI IMAGE COMPATIBILITY OBJECT
 # =========================================================
 class OpenAIImageObject:
-    def __init__(self, b64_json: Optional[str] = None, url: Optional[str] = None):
+    def __init__(self, b64_json: Optional[str] = None, url: Optional[str] = None, detected_metal: Optional[str] = None):
         self.b64_json = b64_json
         self.url = url
+        self.detected_metal = detected_metal
 
 
 # =========================================================
@@ -2250,41 +2264,29 @@ class OpenAIService:
             else:
                 selected_mode = "initial"
 
-        # Dynamically detect metal tone from reference image if not explicitly passed
-        detected_metal = metal_tone
-        if not detected_metal:
-            primary_ref = image_source[0] if isinstance(image_source, list) and image_source else image_source
-            if primary_ref:
-                try:
-                    from app.repositories.design_variant import detect_metal_tone
-                    metal_dict = detect_metal_tone(user_prompt, primary_ref)
-                    if metal_dict:
-                        detected_key = list(metal_dict.keys())[0]
-                        if detected_key == "gold":
-                            detected_metal = "yellow_gold"
-                        elif detected_key == "silver":
-                            detected_metal = "white_gold"
-                        else:
-                            detected_metal = detected_key
-                except Exception as e:
-                    logger.warning(f"Failed to pre-detect metal tone in generate_base_image: {e}")
-
-        normalized_metal_tone = detected_metal or "yellow_gold"
-
-        # Look up parent variant version number for proper prompt thresholds
-        version_number = 1
-
+        # Let the vision translator detect the metal tone dynamically, or use explicitly passed metal tone
         result = generate_with_fallback(
             image_source=image_source,
             user_prompt=user_prompt,
             parsed_data={"item_type": jewellery_type} if jewellery_type else None,
-            metal_tone=normalized_metal_tone,
+            metal_tone=metal_tone,
             mode=selected_mode,
-            version_number=version_number
+            version_number=1
         )
         
         b64 = extract_b64_from_result(result)
-        return OpenAIImageObject(b64_json=b64)
+        
+        # Resolve the final metal tone to yellow_gold/white_gold/rose_gold for task logging & storage
+        detected_metal = getattr(result, "detected_metal", None)
+        if not detected_metal:
+            detected_metal = metal_tone or "yellow_gold"
+        
+        if detected_metal == "gold":
+            detected_metal = "yellow_gold"
+        elif detected_metal == "silver":
+            detected_metal = "white_gold"
+            
+        return OpenAIImageObject(b64_json=b64, detected_metal=detected_metal)
     
     def generate_side_view(
         self,
