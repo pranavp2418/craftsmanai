@@ -215,6 +215,9 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             base_design_image_url=generated_image_url,
             prompt_used=prompt,
             model_used=openai_service.model,
+            # Seed ONLY the detected base metal so the other metal swatches are "missing" and
+            # regenerate on click. Passing this also skips the repo's auto-detect seeding.
+            metal_variations_json={base_metal: generated_image_url},
         )
 
         # Persist the detected base metal and register the base image under that metal.
