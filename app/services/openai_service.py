@@ -1,6 +1,6 @@
 """
-OpenAI Service - Centralized service supporting both OpenAI and Gemini rendering pipeline.
-Uses the tested high-fidelity Gemini rendering, refinement interpretation, and QA Auditor flow.
+OpenAI Service - Centralized service supporting OpenAI rendering pipeline.
+Uses the high-fidelity rendering, refinement interpretation, and QA Auditor flow.
 """
 
 import logging
@@ -16,7 +16,6 @@ from io import BytesIO
 from typing import List, Dict, Any, Optional, Tuple
 
 import imagehash
-import google.generativeai as genai
 from PIL import Image
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -24,6 +23,12 @@ from dotenv import load_dotenv
 from app.core.config import settings
 
 load_dotenv()
+
+def get_openai_client() -> OpenAI:
+    api_key = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY missing from environment")
+    return OpenAI(api_key=api_key)
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +145,7 @@ HARD CONSTRAINTS:
 - no distorted typography
 - no random asymmetry
 - no non-manufacturable structures
+- no duplicate, double, or overlapping bails/loops on pendants; a pendant must have exactly one single, clean, structurally sound bail (such as a hinge bail, v-bail, or simple loop) connecting it to the chain.
 
 FINAL INTERNAL VALIDATION CHECKLIST (must all be YES before finalizing):
 - type correct?
@@ -165,6 +171,7 @@ Rules:
 - Favor realistic proportions, small-to-mid stones by default, and premium metal realism
 - Use clean white background, flat studio lighting, minimal reflections
 - If the description is sparse, infer conservatively and keep designs simple
+- Absolutely NO text annotations, captions, callouts, labels, numbers, letters, or watermarks are allowed in the background or around the jewelry.
 """
 
 SUPPORTED_TAXONOMY = """
@@ -173,16 +180,17 @@ Rings (Band, Bust Down, Signet, Statement, Wedding, Engagement, Custom Shape) ·
 """
 
 OUTPUT_CONTRACT = """
-OUTPUT: Exactly ONE image. Size must be exactly 1024x1024 pixels. Front-facing hero angle. CAD-styled approval render on a clean white background. Centered piece, no environment. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece.
+OUTPUT: Exactly ONE image. Size must be exactly 1024x1024 pixels. Front-facing hero angle. CAD-styled approval render on a clean white background. Centered piece, no environment. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece. Absolutely NO floating text, watermarks, annotations, labels, captions, or callouts are allowed in the output image.
 """
 
 HOUSE_STYLE = """
 STYLE: Clean CAD-styled jewelry approval render. Isolated piece on a pure, solid, clean white background (#FFFFFF).
 - Image size must be exactly 1024x1024 pixels.
-- Absolutely NO hands, fingers, skin, neck, body parts, props, display boxes, or real-world environments.
-- Even if the reference image shows the jewelry on a hand/body or in a box, you MUST remove/strip the hand/body/box and render the jewelry piece completely isolated.
+- Absolutely NO hands, fingers, nails, fingernails, nail polish, manicured fingers, skin, neck, body parts, props, display boxes, or real-world environments.
+- Even if the reference image shows the jewelry on a hand/body or in a box, you MUST remove/strip the hand/body/box/nails/fingers and render the jewelry piece completely isolated.
 - The render MUST be a clean, front-facing hero angle, centered, with crisp edges and a premium, manufacturable look.
 - Realistic metal and stones. No cinematic atmosphere or heavy shadows. Always ignore the background/props/hands of any reference image and render the piece on pure solid white.
+- Absolutely NO text labels, names, numbers, annotations, captions, scale bars, or callouts floating in the background or around the jewelry. The image must be completely clean, featuring ONLY the isolated jewelry piece itself.
 """
 
 STONE_RULES = """
@@ -205,6 +213,9 @@ HARD NEGATIVE CONSTRAINTS (mandatory — never violate):
 - Do NOT alter unchanged parts during refinement
 - Do NOT creatively reinterpret the piece beyond the prompt
 - Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output image must contain ONLY the single new/modified jewelry design on a solid white background.
+- Do NOT render any text labels, annotations, captions, titles, letters, numbers, callouts, arrows, or watermarks floating in the air or background around the jewelry piece. The image must contain ONLY the physical jewelry itself, with no text overlays or annotations whatsoever.
+- Do NOT render any human body parts, hands, fingers, fingernails, nails, nail polish, manicured hands, skin textures, display boxes, or background props. The output must show ONLY the clean, isolated jewelry design on a solid, clean, seamless white background.
+- Do NOT render duplicate, double, or overlapping bails or loops at the top of a pendant. Renders of pendants must feature exactly one single, well-proportioned, structurally realistic bail (e.g., a single hinge bail, v-bail, or simple loop) connecting it to the chain.
 """
 
 SHARED_RULES = f"""{SUPPORTED_TAXONOMY}
@@ -700,10 +711,6 @@ Locked elements: {locked_elements}
 Generate ONE front-facing hero render of this CLASS / SIGNET RING — planar face, symmetrical shoulders, premium {metal}, clean background, exactly 1024x1024 pixels, approval-ready."""
 
 def interpret_refinement(params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
-    if not gemini_api_key:
-        return None
-
     pd = params.get("parsedData") or {}
     baseline_summary = "\n".join([
         f"Item type: {pd.get('item_type')}" if pd.get("item_type") else "",
@@ -763,30 +770,26 @@ def interpret_refinement(params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }]
 
     try:
-        resp = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-            headers={"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"},
-            json={
-                "model": "gemini-1.5-flash",
-                "messages": [
-                    {"role": "system", "content": REFINEMENT_INTERPRETER_SYSTEM},
-                    {"role": "user", "content": user_content},
-                ],
-                "tools": tools,
-                "tool_choice": {"type": "function", "function": {"name": "emit_refinement_intent"}},
-            },
+        client = get_openai_client()
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": REFINEMENT_INTERPRETER_SYSTEM},
+                {"role": "user", "content": user_content},
+            ],
+            tools=tools,
+            tool_choice={"type": "function", "function": {"name": "emit_refinement_intent"}},
             timeout=25,
         )
-        if not resp.ok:
-            return None
-        j = resp.json()
-        args = j.get("choices", [{}])[0].get("message", {}).get("tool_calls", [{}])[0].get("function", {}).get("arguments")
+        tool_call = resp.choices[0].message.tool_calls[0]
+        args = tool_call.function.arguments
         if not args:
             return None
         intent = args if isinstance(args, dict) else json.loads(args)
         intent["raw_user_prompt"] = intent.get("raw_user_prompt") or params.get("note", "")
         return intent
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error in interpret_refinement: {e}")
         return None
 
 def build_focused_refinement_prompt(intent: Dict[str, Any], base_fallback: str, attempt: int, version_number: int = 1) -> str:
@@ -874,10 +877,6 @@ The output must look like a premium CAD-style jewelry render, physically plausib
 {base_fallback}"""
 
 def qa_refinement_check(params: Dict[str, Any]) -> Dict[str, Any]:
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
-    if not gemini_api_key:
-        return {"passed": True, "reason": "qa_skipped_no_key", "failed_checks": [], "retry_recommended": False}
-
     intent = params.get("intent") or {}
     previous_ref_url = params.get("previousRefUrl")
     new_image_b64 = params.get("newImageB64")
@@ -918,24 +917,19 @@ def qa_refinement_check(params: Dict[str, Any]) -> Dict[str, Any]:
     }]
 
     try:
-        resp = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-            headers={"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"},
-            json={
-                "model": "gemini-1.5-flash",
-                "messages": [
-                    {"role": "system", "content": "You are a strict jewelry-render QA inspector. You only call the emit_qa_verdict tool."},
-                    {"role": "user", "content": user_content},
-                ],
-                "tools": tools,
-                "tool_choice": {"type": "function", "function": {"name": "emit_qa_verdict"}},
-            },
+        client = get_openai_client()
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a strict jewelry-render QA inspector. You only call the emit_qa_verdict tool."},
+                {"role": "user", "content": user_content},
+            ],
+            tools=tools,
+            tool_choice={"type": "function", "function": {"name": "emit_qa_verdict"}},
             timeout=30,
         )
-        if not resp.ok:
-            return {"passed": True, "reason": "qa_gateway_error", "failed_checks": [], "retry_recommended": False}
-        j = resp.json()
-        args = j.get("choices", [{}])[0].get("message", {}).get("tool_calls", [{}])[0].get("function", {}).get("arguments")
+        tool_call = resp.choices[0].message.tool_calls[0]
+        args = tool_call.function.arguments
         if not args:
             return {"passed": True, "reason": "qa_no_tool_call", "failed_checks": [], "retry_recommended": False}
         verdict = args if isinstance(args, dict) else json.loads(args)
@@ -945,7 +939,8 @@ def qa_refinement_check(params: Dict[str, Any]) -> Dict[str, Any]:
             "failed_checks": verdict.get("failed_checks") or [],
             "retry_recommended": bool(verdict.get("retry_recommended")),
         }
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error in qa_refinement_check: {e}")
         return {"passed": True, "reason": "qa_exception", "failed_checks": [], "retry_recommended": False}
 
 def build_prompt_from_dummy(params: Dict[str, Any]) -> str:
@@ -1471,9 +1466,9 @@ def build_prompt(
 
     is_refine = mode == "refine"
     system_preamble = (
-        "REFINEMENT MODE. The first attached image is the CURRENT RENDER. Apply ONLY the change described. Keep the design structure identical, BUT you MUST render the piece isolated and centered on a pure, solid, clean white background (#FFFFFF). Do NOT copy the background, shadows, lighting environment, hands, fingers, skin, or props from the reference. You MUST strip away any hands or body parts and render ONLY the jewelry piece itself as a clean, front-facing hero view on pure solid white. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece."
+        "REFINEMENT MODE. The first attached image is the CURRENT RENDER. Apply ONLY the change described. Keep the design structure identical, BUT you MUST render the piece isolated and centered on a pure, solid, clean white background (#FFFFFF). Do NOT copy the background, shadows, lighting environment, hands, fingers, fingernails, nail polish, skin, or props from the reference. You MUST strip away any hands, body parts, fingernails, or polish and render ONLY the jewelry piece itself as a clean, front-facing hero view on pure solid white. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece."
         if is_refine
-        else "JEWELRY RENDER. If reference image(s) are attached, the FIRST is the master reference. Reproduce the design structure as faithfully as possible, BUT render it isolated and centered on a pure, solid, clean white background (#FFFFFF). Do NOT copy the background, environment, lighting, hands, fingers, skin, or props from the reference. You MUST strip away any hands or body parts and render ONLY the jewelry piece itself as a clean, front-facing hero view on pure solid white. Never refuse. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece."
+        else "JEWELRY RENDER. If reference image(s) are attached, the FIRST is the master reference. Reproduce the design structure as faithfully as possible, BUT render it isolated and centered on a pure, solid, clean white background (#FFFFFF). Do NOT copy the background, environment, lighting, hands, fingers, fingernails, nail polish, skin, or props from the reference. You MUST strip away any hands, body parts, fingernails, or nail polish and render ONLY the jewelry piece itself as a clean, front-facing hero view on pure solid white. Never refuse. Do NOT output a split-screen, grid layout, side-by-side comparison, or before-and-after panels showing the reference image next to the new design. The output must contain ONLY the new jewelry piece."
     )
 
     resolved_item_type = str(pd.get("item_type") or infer_item_type_from_prompt(note)).lower()
@@ -1673,73 +1668,201 @@ def resolve_image_urls(image_source: Optional[str | list[str]], image_urls: Opti
     return []
 
 
-def generate_with_gemini(
-    image_source: Optional[str | list[str]],
-    user_prompt: str,
-    prompt_override: Optional[str] = None,
-    metal_tone: Optional[str] = None
-) -> Any:
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
-    gemini_model_name = os.getenv("GEMINI_IMAGE_MODEL")
 
-    if not gemini_api_key:
-        raise Exception("GEMINI_API_KEY missing")
-    if not gemini_model_name:
-        raise Exception("GEMINI_IMAGE_MODEL missing")
-
-    genai.configure(api_key=gemini_api_key)
-    model = genai.GenerativeModel(gemini_model_name)
-
-    fallback_prompt = prompt_override or build_safe_fallback_prompt(user_prompt, metal_tone=metal_tone)
-
-    sources = []
-    if image_source:
-        if isinstance(image_source, list):
-            sources = [s for s in image_source if s]
-        else:
-            sources = [image_source]
-
-    temp_files = []
-    uploaded_files = []
-
+def translate_prompt_for_dalle(prompt_text: str, image_urls: list[str] = None) -> str:
+    """
+    Use gpt-4o-mini to convert a complex structured system prompt into a concise, 
+    highly optimized visual-only prompt for DALL-E.
+    Optionally looks at the reference images to generate a more accurate visual description.
+    """
+    client = get_openai_client()
     try:
-        for src in sources:
-            image_path = None
-            if src.startswith("http"):
+        logger.info("[PROMPT TRANSLATION] Cleaning complex prompt using gpt-4o-mini")
+        
+        # Prepare visual inputs if reference images are available
+        image_contents = []
+        if image_urls:
+            for url in image_urls:
                 try:
-                    resp = requests.get(src, timeout=20)
+                    if url.startswith("data:"):
+                        _, encoded = url.split(",", 1)
+                        img_bytes = base64.b64decode(encoded)
+                    elif url.startswith("http"):
+                        resp = requests.get(url, timeout=10)
+                        resp.raise_for_status()
+                        img_bytes = resp.content
+                    elif os.path.exists(url):
+                        with open(url, "rb") as f:
+                            img_bytes = f.read()
+                    else:
+                        continue
+                    
+                    # Encode to base64 data URL
+                    b64_str = base64.b64encode(img_bytes).decode('utf-8')
+                    image_contents.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{b64_str}"
+                        }
+                    })
+                except Exception as ex:
+                    logger.warning(f"[PROMPT TRANSLATION] Failed to load image {url[:50]} for prompt translator: {ex}")
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a prompt translator/optimizer for DALL-E 3. "
+                    "Your job is to read a highly complex, rule-heavy jewelry rendering instruction, "
+                    "optionally view the provided reference image(s), and translate it into a concise (1-2 sentences), "
+                    "visually descriptive prompt optimized for DALL-E 3.\n\n"
+                    "CRITICAL INSTRUCTIONS:\n"
+                    "1. Describe ONLY the physical characteristics of the jewelry (e.g., jewelry type, gold/silver metal, gemstone count/cuts, shape, layout).\n"
+                    "2. Describe the background strictly as: 'isolated on a pure, solid, clean white background (#FFFFFF)'.\n"
+                    "3. Do NOT include any negative instructions (like 'no text', 'no hands', 'do not render'). "
+                    "Avoid all negation words entirely, as they cause DALL-E to hallucinate the prohibited elements.\n"
+                    "4. MULTI-IMAGE COMBINATION: If multiple reference images are provided, pay close attention to how they should be combined based on the user's request. "
+                    "If the user wants to put/embed one image (e.g., a deity, painting, portrait, or engraving) inside or onto the other image's design (e.g., a pendant, medallion, or lock), "
+                    "you MUST describe this combination explicitly, identifying the key subject/deity from the first image by name if possible (e.g., 'featuring a detailed miniature gold engraving/picture of the Radha Krishna deities from the first image embedded in the center/surface of the rose gold heart pendant').\n"
+                    "5. PENDANT BAIL RULE: If the item is a pendant, it must feature exactly one single, clean, structurally realistic bail (such as a single hinge bail, v-bail, or simple loop) connecting the pendant body to the chain. Never describe double bails, duplicate hangers, or multiple overlapping loops.\n"
+                    "6. Output ONLY the clean DALL-E prompt string. Do not include any introductory or explanatory text."
+                )
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Translate this jewelry instruction into a clean DALL-E prompt:\n\n{prompt_text}"
+                    }
+                ] + image_contents
+            }
+        ]
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.2,
+            max_tokens=150,
+            timeout=15
+        )
+        cleaned_prompt = response.choices[0].message.content.strip()
+        logger.info(f"[PROMPT TRANSLATION] Cleaned prompt: {cleaned_prompt}")
+        return cleaned_prompt
+    except Exception as e:
+        logger.warning(f"[PROMPT TRANSLATION] Translation failed: {e}. Falling back to original prompt.")
+        return prompt_text
+
+
+def generate_with_openai_image(
+    image_urls: list[str],
+    prompt_text: str,
+    bypass_translation: bool = False,
+    mode: str = "initial"
+) -> str:
+    """Generate image using OpenAI gpt-image-2.
+
+    Uses images.edit when reference images are provided,
+    images.generate otherwise.
+    Returns base64-encoded PNG image data.
+    """
+    client = get_openai_client()
+    
+    # Download/process all reference images as file tuples
+    image_files = []
+    if image_urls:
+        for idx, url in enumerate(image_urls):
+            try:
+                if url.startswith("data:"):
+                    # Data URI — extract base64 payload
+                    _, encoded = url.split(",", 1)
+                    img_bytes = base64.b64decode(encoded)
+                elif url.startswith("http"):
+                    resp = requests.get(url, timeout=20)
                     resp.raise_for_status()
-                    ext = ".png"
-                    content_type = resp.headers.get("Content-Type", "")
-                    if "image/jpeg" in content_type:
-                        ext = ".jpg"
-                    elif "image/webp" in content_type:
-                        ext = ".webp"
-                    fd, temp_path = tempfile.mkstemp(suffix=ext)
-                    with os.fdopen(fd, "wb") as tmp:
-                        tmp.write(resp.content)
-                    image_path = temp_path
-                    temp_files.append(temp_path)
-                except Exception as e:
-                    logger.error(f"Failed to download image_source URL to local temp file: {e}")
-                    image_path = None
+                    img_bytes = resp.content
+                elif os.path.exists(url):
+                    with open(url, "rb") as f:
+                        img_bytes = f.read()
+                else:
+                    img_bytes = None
+
+                if img_bytes:
+                    img = Image.open(BytesIO(img_bytes))
+                    img = img.convert("RGBA")
+                    img = img.resize((1024, 1024))
+                    buf = BytesIO()
+                    img.save(buf, format="PNG")
+                    buf.seek(0)
+                    image_files.append((f"image_{idx}.png", buf, "image/png"))
+            except Exception as e:
+                logger.warning(f"Failed to fetch reference image {url[:80]}: {e}")
+
+    # Clean the prompt using gpt-4o-mini translation layer to optimize for DALL-E unless bypassed
+    if not bypass_translation:
+        dalle_prompt = translate_prompt_for_dalle(prompt_text, image_urls)
+    else:
+        logger.info("[PROMPT TRANSLATION] Bypassing prompt translation layer as requested")
+        dalle_prompt = prompt_text
+    truncated_prompt = dalle_prompt[:32000]
+    max_attempts = 3
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            img_kwargs = {
+                "model": "gpt-image-2",
+                "n": 1,
+                "size": "1024x1024"
+            }
+            # Omit response_format for gpt-image models to avoid API parameter errors
+            if "gpt-image" not in img_kwargs["model"]:
+                img_kwargs["response_format"] = "b64_json"
+
+            if image_files:
+                # Reset all file buffer positions for retry
+                for file_tuple in image_files:
+                    file_tuple[1].seek(0)
+                
+                # Pass list of files if multiple, otherwise the single tuple
+                image_arg = image_files if len(image_files) > 1 else image_files[0]
+                result = client.images.edit(
+                    image=image_arg,
+                    prompt=truncated_prompt,
+                    **img_kwargs
+                )
             else:
-                image_path = src
+                result = client.images.generate(
+                    prompt=truncated_prompt,
+                    **img_kwargs
+                )
 
-            if image_path and os.path.exists(image_path):
-                uploaded_file = genai.upload_file(image_path)
-                uploaded_files.append(uploaded_file)
+            data_item = result.data[0]
+            b64 = getattr(data_item, "b64_json", None) or (
+                data_item.get("b64_json") if isinstance(data_item, dict) else None
+            )
+            if not b64:
+                url = getattr(data_item, "url", None) or (
+                    data_item.get("url") if isinstance(data_item, dict) else None
+                )
+                if url:
+                    resp = requests.get(url, timeout=20)
+                    resp.raise_for_status()
+                    b64 = base64.b64encode(resp.content).decode("utf-8")
+            
+            if b64:
+                logger.info(f"OpenAI gpt-image-2 generation succeeded (attempt {attempt})")
+                return b64
 
-        contents = [fallback_prompt] + uploaded_files
-        response = model.generate_content(contents)
-        return response
-    finally:
-        for temp_file in temp_files:
-            if temp_file and os.path.exists(temp_file):
-                try:
-                    os.remove(temp_file)
-                except Exception:
-                    pass
+            raise ValueError("No image payload in OpenAI response")
+
+        except Exception as e:
+            if attempt == max_attempts:
+                raise
+            logger.warning(f"OpenAI attempt {attempt} failed: {e} — retrying")
+            import time
+            time.sleep(1.2 * attempt)
+
+    raise ValueError("OpenAI gpt-image-2 generation failed after all attempts")
 
 def build_safe_fallback_prompt(user_prompt: str, metal_tone: Optional[str] = None) -> str:
     metal_line = ""
@@ -1820,7 +1943,9 @@ def generate_with_fallback(
     metal_tone: str = "yellow_gold",
     mode: Optional[str] = None,
     version_number: int = 1,
-    refinement_intent_override: Optional[Dict[str, Any]] = None
+    refinement_intent_override: Optional[Dict[str, Any]] = None,
+    max_attempts: int = 3,
+    bypass_translation: bool = False
 ) -> Any:
     # Force refinement mode if we have a reference image and the user prompt requests an edit/change/conversion
     has_reference_image = bool(image_source or image_urls)
@@ -1834,6 +1959,9 @@ def generate_with_fallback(
             selected_mode = "refine"
         else:
             selected_mode = "initial"
+
+    if selected_mode == "refine":
+        bypass_translation = True
 
     resolved_image_urls = resolve_image_urls(image_source, image_urls)
 
@@ -1894,33 +2022,41 @@ def generate_with_fallback(
 
     try:
         # =====================================================
-        # PRIMARY GEMINI GENERATION LOOP WITH AUDITING & SIMILARITY CHECK
+        # PRIMARY OPENAI GENERATION LOOP WITH AUDITING & SIMILARITY CHECK
         # =====================================================
-        max_attempts = 3
+        max_attempts_count = max_attempts
         previous_ref_url = resolved_image_urls[0] if resolved_image_urls else None
 
-        for attempt in range(1, max_attempts + 1):
-            final_prompt = build_prompt(
-                user_prompt=user_prompt,
-                reference_image=image_source,
-                parsed_data=parsed_data,
-                mode=selected_mode,
-                metal_tone=metal_tone,
-                image_urls=resolved_image_urls,
-                version_number=version_number,
-                refinement_intent=refinement_intent,
-                attempt=attempt,
-            )
-
-            try:
-                logger.info(f"[PRIMARY GEMINI GENERATION] Attempt {attempt}/{max_attempts}")
-                result = generate_with_gemini(
-                    image_source=image_source,
+        for attempt in range(1, max_attempts_count + 1):
+            if bypass_translation:
+                final_prompt = user_prompt
+            else:
+                final_prompt = build_prompt(
                     user_prompt=user_prompt,
-                    prompt_override=final_prompt
+                    reference_image=image_source,
+                    parsed_data=parsed_data,
+                    mode=selected_mode,
+                    metal_tone=metal_tone,
+                    image_urls=resolved_image_urls,
+                    version_number=version_number,
+                    refinement_intent=refinement_intent,
+                    attempt=attempt,
                 )
 
-                b64_json = extract_b64_from_result(result)
+            # Append front-facing and text attachment guidelines if we are refining/editing
+            if selected_mode == "refine" and final_prompt:
+                final_prompt += "\n\nThe render MUST remain in a front-facing hero angle. Any new or modified text or lettering must be physically attached, connected, and merged cleanly with the surrounding metal structure."
+
+            try:
+                logger.info(f"[PRIMARY OPENAI GENERATION] Attempt {attempt}/{max_attempts_count}")
+                b64_json = generate_with_openai_image(
+                    image_urls=resolved_image_urls,
+                    prompt_text=final_prompt,
+                    bypass_translation=bypass_translation,
+                    mode=selected_mode
+                )
+                result = OpenAIImageObject(b64_json=b64_json)
+
                 if not b64_json:
                     continue
 
@@ -1944,22 +2080,10 @@ def generate_with_fallback(
                         ssim_score = calculate_ssim_similarity(local_ref_path, local_gen_path)
                         logger.info(f"[ATTEMPT {attempt}] HASH SIMILARITY: {hash_score}, SSIM SIMILARITY: {ssim_score}")
                         
-                        if selected_mode == "refine":
-                            is_v1_raw_ref = (version_number <= 1)
-                            is_text_or_major_change = any(k in lower_prompt for k in ["change text", "change name", "instead of", "replace", "convert"])
-                            
-                            if is_v1_raw_ref:
-                                threshold = 20.0
-                                hash_threshold = 20
-                            elif is_text_or_major_change:
-                                threshold = 35.0
-                                hash_threshold = 30
-                            else:
-                                threshold = 60.0
-                                hash_threshold = 40
-                            similarity_passed = (ssim_score >= threshold and hash_score >= hash_threshold)
+                        if ssim_score < 30.0 or hash_score < 60.0:
+                            similarity_passed = False
                         else:
-                            similarity_passed = (60.0 <= ssim_score <= 65.0 and hash_score >= 40)
+                            similarity_passed = True
                     finally:
                         if gen_temp_cleanup and os.path.exists(gen_temp_cleanup):
                             try:
@@ -1970,52 +2094,46 @@ def generate_with_fallback(
                 overall_score = ssim_score + hash_score
                 candidates.append((result, ssim_score, hash_score, overall_score, qa_passed))
 
-                if qa_passed and similarity_passed:
-                    logger.info(f"[ATTEMPT {attempt}] Passed both QA and similarity checks. Returning result.")
-                    return result
+                # Return immediately if:
+                # 1. We have a reference image and both SSIM >= 30 & Hash similarity >= 60
+                # 2. We don't have a reference image and QA check passes
+                if local_ref_path and os.path.exists(local_ref_path):
+                    if similarity_passed:
+                        logger.info(f"[ATTEMPT {attempt}] Similarity passed (SSIM: {ssim_score} >= 30, HASH: {hash_score} >= 60). Returning image.")
+                        return result
+                    else:
+                        logger.info(f"[ATTEMPT {attempt}] Similarity below threshold (SSIM: {ssim_score} < 30 or HASH: {hash_score} < 60). Retrying...")
                 else:
-                    logger.info(f"[ATTEMPT {attempt}] Failed checks. QA passed: {qa_passed}, Similarity passed: {similarity_passed}. Retrying...")
+                    if qa_passed:
+                        logger.info(f"[ATTEMPT {attempt}] Prompt-only mode: QA check passed. Returning image.")
+                        return result
+                    else:
+                        logger.info(f"[ATTEMPT {attempt}] Prompt-only mode: QA check failed. Retrying...")
 
             except Exception as e:
-                logger.error(f"[PRIMARY GEMINI ERROR] Attempt {attempt} failed: {e}")
+                logger.error(f"[PRIMARY OPENAI ERROR] Attempt {attempt} failed: {e}")
 
         # If we completed all attempts and have some candidates but none passed both checks perfectly
         if candidates:
-            if selected_mode == "refine":
-                # For refinements, we prefer candidates that passed visual QA check (True first),
-                # followed by highest SSIM similarity.
-                candidates.sort(key=lambda x: (not x[4], -x[1], -x[2]))
-                best_candidate = candidates[0]
-                logger.info(f"All attempts completed. None passed all checks. Returning best candidate (QA passed: {best_candidate[4]}, HASH: {best_candidate[2]}, SSIM: {best_candidate[1]})")
-                return best_candidate[0]
-            else:
-                # Sort by ssim distance to [60.0, 65.0] range (ascending), and tie-break by hash score (descending)
-                def get_distance_to_60_65(c):
-                    ssim = c[1]
-                    if 60.0 <= ssim <= 65.0:
-                        return 0.0
-                    return min(abs(ssim - 60.0), abs(ssim - 65.0))
-
-                candidates.sort(key=lambda x: (get_distance_to_60_65(x), -x[2]))
-                best_candidate = candidates[0]
-                if best_candidate[1] <= 70.0 or not local_ref_path:
-                    logger.info(f"All attempts completed. None passed all checks. Returning closest similarity image (Attempt with HASH: {best_candidate[2]}, SSIM: {best_candidate[1]})")
-                    return best_candidate[0]
-                else:
-                    logger.info(f"All candidates had SSIM above 70% (lazy copy of reference/background). Discarding candidates and triggering fallback generation.")
+            # Sort by highest ssim, then highest hash
+            candidates.sort(key=lambda x: (-x[1], -x[2]))
+            best_candidate = candidates[0]
+            logger.info(f"All attempts completed. Returning best candidate based on highest similarity (HASH: {best_candidate[2]}, SSIM: {best_candidate[1]}, QA passed: {best_candidate[4]})")
+            return best_candidate[0]
 
         # =====================================================
-        # GEMINI FALLBACK
+        # OPENAI FALLBACK
         # =====================================================
         try:
-            logger.info("[GEMINI FALLBACK GENERATION]")
-            return generate_with_gemini(
-                image_source=image_source,
-                user_prompt=user_prompt,
-                metal_tone=metal_tone
+            logger.info("[OPENAI FALLBACK GENERATION]")
+            fallback_prompt = build_safe_fallback_prompt(user_prompt, metal_tone=metal_tone)
+            b64 = generate_with_openai_image(
+                image_urls=resolved_image_urls,
+                prompt_text=fallback_prompt
             )
-        except Exception as gemini_error:
-            raise Exception(f"GEMINI FALLBACK FAILED: {gemini_error}")
+            return OpenAIImageObject(b64_json=b64)
+        except Exception as openai_error:
+            raise Exception(f"OPENAI FALLBACK FAILED: {openai_error}")
 
     finally:
         if ref_temp_cleanup and os.path.exists(ref_temp_cleanup):
@@ -2053,7 +2171,7 @@ class OpenAIService:
         return cls._instance
     
     def _initialize_client(self):
-        """Initialize the OpenAI client and configure the Gemini API."""
+        """Initialize the OpenAI client."""
         if not self._client:
             api_key = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
             if not api_key:
@@ -2061,13 +2179,6 @@ class OpenAIService:
             else:
                 self._client = OpenAI(api_key=api_key)
                 logger.info("OpenAI client initialized")
-                
-        gemini_api_key = os.getenv("GEMINI_API_KEY")
-        if gemini_api_key:
-            genai.configure(api_key=gemini_api_key)
-            logger.info("Gemini API configured successfully")
-        else:
-            logger.warning("GEMINI_API_KEY missing from environment")
     
     @property
     def client(self):
@@ -2077,7 +2188,7 @@ class OpenAIService:
     @property
     def model(self) -> str:
         """Get the image generation model name used."""
-        return os.getenv("GEMINI_IMAGE_MODEL") or "gemini-1.5-flash"
+        return "gpt-image-2"
     
     def _load_image_buffer_from_source(self, source: str) -> tuple:
         """
@@ -2101,13 +2212,16 @@ class OpenAIService:
         
         return ("image.png", buf, "image/png")
 
-    def _load_image_bytes_from_source(self, source: str) -> bytes:
+    def _load_image_bytes_from_source(self, source: str | list[str]) -> bytes:
         """Load image bytes from URL or local path."""
-        if source.startswith("http"):
-            resp = requests.get(source)
+        src = source
+        if isinstance(source, list):
+            src = source[0] if source else ""
+        if isinstance(src, str) and src.startswith("http"):
+            resp = requests.get(src)
             resp.raise_for_status()
             return resp.content
-        with open(source, "rb") as f:
+        with open(src, "rb") as f:
             return f.read()
 
     def _encode_image_to_base64(self, image_bytes: bytes) -> str:
@@ -2124,9 +2238,9 @@ class OpenAIService:
         metal_tone: Optional[str] = None
     ) -> OpenAIImageObject:
         """
-        Generate base image using full Gemini pipeline (Primary + Fallback + QA checks).
+        Generate base image using full OpenAI pipeline (Primary + Fallback + QA checks).
         """
-        logger.info("Generating base image using Gemini Pipeline")
+        logger.info("Generating base image using OpenAI Pipeline")
         
         selected_mode = mode
         if not selected_mode:
@@ -2139,15 +2253,7 @@ class OpenAIService:
         # Dynamically detect metal tone from reference image if not explicitly passed
         detected_metal = metal_tone
         if not detected_metal:
-            detected_metal = "yellow_gold"
-            primary_ref = None
-            if image_source:
-                if isinstance(image_source, list):
-                    if image_source:
-                        primary_ref = image_source[0]
-                else:
-                    primary_ref = image_source
-                    
+            primary_ref = image_source[0] if isinstance(image_source, list) and image_source else image_source
             if primary_ref:
                 try:
                     from app.repositories.design_variant import detect_metal_tone
@@ -2161,14 +2267,20 @@ class OpenAIService:
                         else:
                             detected_metal = detected_key
                 except Exception as e:
-                    logger.warning(f"Failed to detect metal tone in generate_base_image: {e}")
+                    logger.warning(f"Failed to pre-detect metal tone in generate_base_image: {e}")
+
+        normalized_metal_tone = detected_metal or "yellow_gold"
+
+        # Look up parent variant version number for proper prompt thresholds
+        version_number = 1
 
         result = generate_with_fallback(
             image_source=image_source,
             user_prompt=user_prompt,
             parsed_data={"item_type": jewellery_type} if jewellery_type else None,
-            metal_tone=detected_metal,
-            mode=selected_mode
+            metal_tone=normalized_metal_tone,
+            mode=selected_mode,
+            version_number=version_number
         )
         
         b64 = extract_b64_from_result(result)
@@ -2177,39 +2289,36 @@ class OpenAIService:
     def generate_side_view(
         self,
         base_image_source: str,
-        angle_description: str = "rotate 90 degrees to the right, full side profile view, camera at same height",
+        angle_description: str = "",
+        user_prompt: str = "",
         jewellery_type: str = "",
         size: str = "1024x1024",
         metal_tone: Optional[str] = None
     ) -> OpenAIImageObject:
         """
-        Generate side view using Gemini Pipeline.
+        Generate side view using OpenAI Pipeline.
         """
-        logger.info("Generating side view using Gemini Pipeline")
+        logger.info("Generating side view using OpenAI Pipeline")
         
+        # Dynamically detect metal tone
         detected_metal = metal_tone
         if not detected_metal:
-            detected_metal = "yellow_gold"
-            if base_image_source:
-                try:
-                    from app.repositories.design_variant import detect_metal_tone
-                    metal_dict = detect_metal_tone(angle_description, base_image_source)
-                    if metal_dict:
-                        detected_key = list(metal_dict.keys())[0]
-                        if detected_key == "gold":
-                            detected_metal = "yellow_gold"
-                        elif detected_key == "silver":
-                            detected_metal = "white_gold"
-                        else:
-                            detected_metal = detected_key
-                except Exception as e:
-                    logger.warning(f"Failed to detect metal tone in generate_side_view: {e}")
+            try:
+                from app.repositories.design_variant import detect_metal_tone
+                metal_dict = detect_metal_tone(user_prompt or angle_description, base_image_source)
+                if metal_dict:
+                    detected_key = list(metal_dict.keys())[0]
+                    detected_metal = "yellow_gold" if detected_key == "gold" else ("white_gold" if detected_key == "silver" else detected_key)
+            except Exception:
+                pass
+        normalized_metal = detected_metal or "yellow_gold"
 
+        prompt = f"Generate ONE side profile view of the jewelry design shown in the reference image. The structure, design pattern, and details must match perfectly, but viewed directly from the side. Solid clean white background (#FFFFFF). Isolated CAD style render."
         result = generate_with_fallback(
             image_source=base_image_source,
-            user_prompt=angle_description,
+            user_prompt=prompt,
             parsed_data={"item_type": jewellery_type} if jewellery_type else None,
-            metal_tone=detected_metal,
+            metal_tone=normalized_metal,
             mode="initial"
         )
         b64 = extract_b64_from_result(result)
@@ -2218,39 +2327,36 @@ class OpenAIService:
     def generate_top_view(
         self,
         base_image_source: str,
-        angle_description: str = "top-down view, camera positioned directly above at 90 degrees looking down",
+        angle_description: str = "",
+        user_prompt: str = "",
         jewellery_type: str = "",
         size: str = "1024x1024",
         metal_tone: Optional[str] = None
     ) -> OpenAIImageObject:
         """
-        Generate top view using Gemini Pipeline.
+        Generate top view using OpenAI Pipeline.
         """
-        logger.info("Generating top view using Gemini Pipeline")
+        logger.info("Generating top view using OpenAI Pipeline")
         
+        # Dynamically detect metal tone
         detected_metal = metal_tone
         if not detected_metal:
-            detected_metal = "yellow_gold"
-            if base_image_source:
-                try:
-                    from app.repositories.design_variant import detect_metal_tone
-                    metal_dict = detect_metal_tone(angle_description, base_image_source)
-                    if metal_dict:
-                        detected_key = list(metal_dict.keys())[0]
-                        if detected_key == "gold":
-                            detected_metal = "yellow_gold"
-                        elif detected_key == "silver":
-                            detected_metal = "white_gold"
-                        else:
-                            detected_metal = detected_key
-                except Exception as e:
-                    logger.warning(f"Failed to detect metal tone in generate_top_view: {e}")
+            try:
+                from app.repositories.design_variant import detect_metal_tone
+                metal_dict = detect_metal_tone(user_prompt or angle_description, base_image_source)
+                if metal_dict:
+                    detected_key = list(metal_dict.keys())[0]
+                    detected_metal = "yellow_gold" if detected_key == "gold" else ("white_gold" if detected_key == "silver" else detected_key)
+            except Exception:
+                pass
+        normalized_metal = detected_metal or "yellow_gold"
 
+        prompt = f"Generate ONE top-down view (bird's-eye view looking directly down onto the top face) of the jewelry design shown in the reference image. Every design motif, letter shape, and stone layout must match the reference image exactly. Solid clean white background (#FFFFFF). Isolated CAD style render."
         result = generate_with_fallback(
             image_source=base_image_source,
-            user_prompt=angle_description,
+            user_prompt=prompt,
             parsed_data={"item_type": jewellery_type} if jewellery_type else None,
-            metal_tone=detected_metal,
+            metal_tone=normalized_metal,
             mode="initial"
         )
         b64 = extract_b64_from_result(result)
@@ -2259,40 +2365,92 @@ class OpenAIService:
     def generate_custom_angle(
         self,
         base_image_source: str,
-        angle_description: str,
+        angle_description: str = "",
+        user_prompt: str = "",
         jewellery_type: str = "",
         size: str = "1024x1024",
         metal_tone: Optional[str] = None
     ) -> OpenAIImageObject:
         """
-        Generate custom angle view using Gemini Pipeline.
+        Generate custom angle view using OpenAI Pipeline.
         """
-        logger.info(f"Generating custom angle using Gemini Pipeline: {angle_description}")
+        logger.info(f"Generating custom angle using OpenAI Pipeline: {angle_description}")
         
+        # Dynamically detect metal tone
         detected_metal = metal_tone
         if not detected_metal:
-            detected_metal = "yellow_gold"
-            if base_image_source:
-                try:
-                    from app.repositories.design_variant import detect_metal_tone
-                    metal_dict = detect_metal_tone(angle_description, base_image_source)
-                    if metal_dict:
-                        detected_key = list(metal_dict.keys())[0]
-                        if detected_key == "gold":
-                            detected_metal = "yellow_gold"
-                        elif detected_key == "silver":
-                            detected_metal = "white_gold"
-                        else:
-                            detected_metal = detected_key
-                except Exception as e:
-                    logger.warning(f"Failed to detect metal tone in generate_custom_angle: {e}")
+            try:
+                from app.repositories.design_variant import detect_metal_tone
+                metal_dict = detect_metal_tone(user_prompt or angle_description, base_image_source)
+                if metal_dict:
+                    detected_key = list(metal_dict.keys())[0]
+                    detected_metal = "yellow_gold" if detected_key == "gold" else ("white_gold" if detected_key == "silver" else detected_key)
+            except Exception:
+                pass
+        normalized_metal = detected_metal or "yellow_gold"
+
+        prompt = f"Generate ONE CAD style render of the jewelry piece in the reference image, viewed from this custom angle: {angle_description}. Solid clean white background (#FFFFFF). Centered, professional studio lighting."
+        result = generate_with_fallback(
+            image_source=base_image_source,
+            user_prompt=prompt,
+            parsed_data={"item_type": jewellery_type} if jewellery_type else None,
+            metal_tone=normalized_metal,
+            mode="initial"
+        )
+        b64 = extract_b64_from_result(result)
+        return OpenAIImageObject(b64_json=b64)
+
+    # Alias generate_custom_view to generate_custom_angle for backwards-compatibility
+    generate_custom_view = generate_custom_angle
+
+    def generate_metal_swatch(
+        self,
+        base_image_source: str,
+        metal: str,
+        user_prompt: str = "",
+        jewellery_type: str = "",
+        size: str = "1024x1024"
+    ) -> OpenAIImageObject:
+        """
+        Generate a metal variation of the base image.
+        Uses the high-fidelity refinement interpreter flow to change only the metal color,
+        freezing all other aspects.
+        """
+        logger.info(f"Generating metal variation '{metal}' using OpenAI Refine Pipeline")
+        
+        normalized_metal_tone = metal
+        if metal == "gold":
+            normalized_metal_tone = "yellow_gold"
+        elif metal == "silver":
+            normalized_metal_tone = "white_gold"
+
+        # Explicitly describe the color conversion for the refinement interpreter
+        refinement_intent = {
+            "normalized_prompt": f"Change ONLY the metal parts to {normalized_metal_tone.replace('_', ' ')}. Do not change stones, layout, design, text, background, or camera angle.",
+            "raw_user_prompt": f"Convert to {normalized_metal_tone}",
+            "target_components": ["all metal structures"],
+            "attribute_to_change": "metal color / swatch conversion",
+            "from_state": "original metal color",
+            "to_state": normalized_metal_tone,
+            "render_strategy": "color_only_edit",
+            "target_regions": ["global_cosmetic"],
+            "preserve_components": ["stones", "text", "shape", "silhouette", "bail", "background"],
+            "qa_checks": [
+                f"The metal color is visibly converted to {normalized_metal_tone.replace('_', ' ')}.",
+                "Stones, text, shape, background, and camera angle remain exactly identical to the previous render."
+            ],
+            "retry_prompt_if_failed": f"Change the metal color to {normalized_metal_tone.replace('_', ' ')} while preserving the exact layout, stones, background, and structure."
+        }
 
         result = generate_with_fallback(
             image_source=base_image_source,
-            user_prompt=angle_description,
+            user_prompt=f"convert metal to {normalized_metal_tone}",
             parsed_data={"item_type": jewellery_type} if jewellery_type else None,
-            metal_tone=detected_metal,
-            mode="initial"
+            metal_tone=normalized_metal_tone,
+            mode="refine",
+            refinement_intent_override=refinement_intent,
+            max_attempts=1,
+            bypass_translation=True
         )
         b64 = extract_b64_from_result(result)
         return OpenAIImageObject(b64_json=b64)
@@ -2301,63 +2459,20 @@ class OpenAIService:
         self,
         base_image_source: str,
         metal: str,
+        user_prompt: str = "",
         jewellery_type: str = "",
         size: str = "1024x1024"
     ) -> OpenAIImageObject:
         """
-        Generate metal tone variation of the jewelry using the refine mode
-        to lock down the design structure and only change the color.
+        Alias for generate_metal_swatch, supporting background celery task interface.
         """
-        logger.info(f"Generating metal variation '{metal}' using Gemini Refine Pipeline")
-        
-        metal_names = {
-            "gold": "18K yellow gold",
-            "rose_gold": "18K rose gold",
-            "silver": "sterling silver",
-            "platinum": "platinum",
-            "white_gold": "18K white gold"
-        }
-        target_metal = metal_names.get(metal, metal.replace("_", " ").title())
-        
-        # Build the exact refinement prompt
-        user_prompt = f"Change the metal tone of the jewelry to {target_metal}. Do NOT change any other part of the jewelry. Keep all stones, diamonds, engravings, geometry, background, and structure completely identical."
-        
-        # Synthesize a precise refinement intent to freeze all non-color features
-        refinement_intent = {
-            "normalized_prompt": user_prompt,
-            "raw_user_prompt": user_prompt,
-            "target_components": ["all metal surfaces"],
-            "attribute_to_change": "metal tone",
-            "from_state": "original metal tone",
-            "to_state": target_metal,
-            "render_strategy": "color_only_edit",  # Maps to LOCAL_EDIT cosmetic refinement mode
-            "target_regions": ["global_cosmetic"],
-            "preserve_components": ["diamonds", "gemstones", "engravings", "layout", "overall geometry"],
-            "qa_checks": [
-                f"All metal parts are rendered in {target_metal}.",
-                "All diamonds, stones, and settings remain exactly unchanged.",
-                "The geometry, structure, camera angle, and background are identical to the source image."
-            ],
-            "retry_prompt_if_failed": f"Change the metal to {target_metal}. Do not touch or redesign the stones or structure."
-        }
-        
-        # Normalize the metal tone argument to what build_prompt expects (yellow_gold, rose_gold, white_gold, platinum)
-        normalized_metal_tone = metal
-        if metal == "gold":
-            normalized_metal_tone = "yellow_gold"
-        elif metal == "silver":
-            normalized_metal_tone = "white_gold"
-
-        result = generate_with_fallback(
-            image_source=base_image_source,
+        return self.generate_metal_swatch(
+            base_image_source=base_image_source,
+            metal=metal,
             user_prompt=user_prompt,
-            parsed_data={"item_type": jewellery_type} if jewellery_type else None,
-            metal_tone=normalized_metal_tone,
-            mode="refine",
-            refinement_intent_override=refinement_intent
+            jewellery_type=jewellery_type,
+            size=size
         )
-        b64 = extract_b64_from_result(result)
-        return OpenAIImageObject(b64_json=b64)
 
 
     def generate_image_from_prompt(
@@ -2366,9 +2481,9 @@ class OpenAIService:
         size: str = "1024x1024"
     ) -> OpenAIImageObject:
         """
-        Generate image using prompt only (no reference image) via Gemini Pipeline.
+        Generate image using prompt only (no reference image) via OpenAI Pipeline.
         """
-        logger.info("Generating prompt-only image using Gemini Pipeline")
+        logger.info("Generating prompt-only image using OpenAI Pipeline")
         result = generate_with_fallback(
             image_source=None,
             user_prompt=user_prompt,
@@ -2395,59 +2510,56 @@ class OpenAIService:
 
     def analyze_changes_with_vision(
         self,
-        image_source: str,
+        image_source: str | list[str],
         user_request: str,
     ) -> dict:
         """
-        Analyze changes using Gemini vision.
+        Analyze changes using GPT-4o-mini vision. Supports multiple reference images.
         """
         logger.info("Analyzing changes with vision for request: %s", user_request)
         try:
-            image_bytes = self._load_image_bytes_from_source(image_source)
-            base64_image = self._encode_image_to_base64(image_bytes)
-            data_url = f"data:image/png;base64,{base64_image}"
-
-            gemini_api_key = os.getenv("GEMINI_API_KEY")
-            
-            resp = requests.post(
-                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                headers={"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": "gemini-1.5-flash",
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "You are a master jewelry designer analyzing images for modifications. Examine the reference jewelry image carefully, parse the user's modification request, identify EXACTLY what needs to change, specify what must remain unchanged, and note any complex elements. Respond ONLY with raw JSON structure."
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Analyze this jewelry image and the user's request: '{user_request}'\n\nProvide a detailed JSON analysis of what needs to change and what must be preserved with fields: changes_needed, must_preserve, complex_elements, metal_type, stone_type, design_style."
-                                },
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": data_url
-                                    }
-                                }
-                            ]
+            sources = image_source if isinstance(image_source, list) else [image_source]
+            image_contents = []
+            for src in sources:
+                if src:
+                    img_bytes = self._load_image_bytes_from_source(src)
+                    base64_img = self._encode_image_to_base64(img_bytes)
+                    image_contents.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{base64_img}"
                         }
-                    ],
-                    "response_format": {"type": "json_object"}
-                },
+                    })
+
+            client = self._client
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a master jewelry designer analyzing images for modifications. Examine the reference jewelry image(s) carefully, parse the user's modification request, identify EXACTLY what needs to change, specify what must remain unchanged, and note any complex elements. Respond ONLY with raw JSON structure."
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"Analyze these jewelry reference image(s) and the user's request: '{user_request}'\n\nProvide a detailed JSON analysis of what needs to change and what must be preserved with fields: changes_needed, must_preserve, complex_elements, metal_type, stone_type, design_style."
+                            }
+                        ] + image_contents
+                    }
+                ],
+                response_format={"type": "json_object"},
                 timeout=25,
             )
-            if resp.ok:
-                analysis = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                try:
-                    start_idx = analysis.find('{')
-                    end_idx = analysis.rfind('}') + 1
-                    if start_idx != -1 and end_idx != 0:
-                        return json.loads(analysis[start_idx:end_idx])
-                except Exception:
-                    pass
+            analysis = resp.choices[0].message.content or ""
+            try:
+                start_idx = analysis.find('{')
+                end_idx = analysis.rfind('}') + 1
+                if start_idx != -1 and end_idx != 0:
+                    return json.loads(analysis[start_idx:end_idx])
+            except Exception:
+                pass
 
             return {
                 "changes_needed": [user_request],
@@ -2475,7 +2587,7 @@ class OpenAIService:
         analysis: dict,
     ) -> dict:
         """
-        Compare generated image with requirements and identify issues.
+        Compare generated image with requirements and identify issues using GPT-4o-mini vision.
         """
         logger.info("Comparing and validating generated image")
         try:
@@ -2486,53 +2598,48 @@ class OpenAIService:
             base64_generated = self._encode_image_to_base64(generated_bytes)
 
             changes_text = ", ".join(analysis.get("changes_needed", []))
-            gemini_api_key = os.getenv("GEMINI_API_KEY")
 
-            resp = requests.post(
-                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                headers={"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": "gemini-1.5-flash",
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "You are a quality control expert for jewelry CAD renders. Compare the base image with the generated image. Verify all requested changes are implemented. Check for quality issues (floating elements, incomplete bands, etc.). Identify what needs refinement. Respond ONLY with raw JSON structure."
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Compare these images. Base (left) vs Generated (right). Required changes: {changes_text}\n\nAnalyze if all changes are implemented and identify any quality issues using JSON fields: changes_implemented, missing_changes, quality_issues, needs_refinement, refinement_notes."
-                                },
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/png;base64,{base64_base}"
-                                    }
-                                },
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/png;base64,{base64_generated}"
-                                    }
+            client = self._client
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a quality control expert for jewelry CAD renders. Compare the base image with the generated image. Verify all requested changes are implemented. Check for quality issues (floating elements, incomplete bands, etc.). Identify what needs refinement. Respond ONLY with raw JSON structure."
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"Compare these images. Base (left) vs Generated (right). Required changes: {changes_text}\n\nAnalyze if all changes are implemented and identify any quality issues using JSON fields: changes_implemented, missing_changes, quality_issues, needs_refinement, refinement_notes."
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_base}"
                                 }
-                            ]
-                        }
-                    ],
-                    "response_format": {"type": "json_object"}
-                },
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_generated}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                response_format={"type": "json_object"},
                 timeout=25,
             )
-            if resp.ok:
-                comparison_text = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                try:
-                    start_idx = comparison_text.find('{')
-                    end_idx = comparison_text.rfind('}') + 1
-                    if start_idx != -1 and end_idx != 0:
-                        return json.loads(comparison_text[start_idx:end_idx])
-                except Exception:
-                    pass
+            comparison_text = resp.choices[0].message.content or ""
+            try:
+                start_idx = comparison_text.find('{')
+                end_idx = comparison_text.rfind('}') + 1
+                if start_idx != -1 and end_idx != 0:
+                    return json.loads(comparison_text[start_idx:end_idx])
+            except Exception:
+                pass
 
             return {
                 "changes_implemented": ["basic_changes"],
