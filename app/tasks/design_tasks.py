@@ -109,7 +109,7 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                     "design_id": design.id,
                     "design_code": design.design_code,
                     "stage": "generating",
-                    "message": "Generating jewelry render with Gemini...",
+                    "message": "Generating jewelry render with OpenAI...",
                 },
                 event="design.generating",
             )
