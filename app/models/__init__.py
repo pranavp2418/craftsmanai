@@ -40,6 +40,7 @@ from .retailer_team import (
 )
 from .team_settings import AccountMember, MemberInvitation, TeamRole
 from .settings import SystemSettings, SystemSettingsLog
+from .contact import ContactSubmission
 
 __all__ = [
     "SystemSettings",
@@ -86,4 +87,5 @@ __all__ = [
     "Payment",
     "SubscriptionActivityLog",
     "ProductionSheet",
+    "ContactSubmission",
 ]

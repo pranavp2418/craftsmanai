@@ -369,6 +369,109 @@ class EmailService:
             raise e
 
     @staticmethod
+    async def send_contact_notification(
+        name: str,
+        email: str,
+        phone: str = None,
+        subject: str = "",
+        message: str = "",
+    ):
+        """Send a notification email when someone submits the contact form."""
+        from app.models.email_log import EmailStatus
+
+        to_email = settings.CONTACT_NOTIFICATION_EMAIL
+        log_id = EmailService._create_email_log(
+            to_email=to_email,
+            template_name="contact_notification",
+            subject=f"Contact Form: {subject}",
+            variables={
+                "name": name,
+                "email": email,
+                "phone": phone or "Not provided",
+                "subject": subject,
+                "message": message,
+            },
+        )
+        try:
+            logger.info(f"SENDING CONTACT NOTIFICATION: From={name} ({email}), Subject={subject}")
+
+            email_subject = f"New Contact Form Submission: {subject} - Craftmen"
+
+            html_content = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+                <h2 style="color: #1a1a2e;">New Contact Form Submission</h2>
+                <hr style="border: 1px solid #eee;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="padding: 10px; font-weight: bold; width: 120px; color: #555;">Name:</td>
+                        <td style="padding: 10px;">{name}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; font-weight: bold; color: #555;">Email:</td>
+                        <td style="padding: 10px;"><a href="mailto:{email}">{email}</a></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; font-weight: bold; color: #555;">Phone:</td>
+                        <td style="padding: 10px;">{phone or "Not provided"}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; font-weight: bold; color: #555;">Subject:</td>
+                        <td style="padding: 10px;">{subject}</td>
+                    </tr>
+                </table>
+                <hr style="border: 1px solid #eee;">
+                <h3 style="color: #1a1a2e;">Message:</h3>
+                <p style="padding: 10px; background-color: #f9f9f9; border-left: 4px solid #1a1a2e; line-height: 1.6;">
+                    {message}
+                </p>
+                <hr style="border: 1px solid #eee;">
+                <p style="color: #999; font-size: 12px;">
+                    This email was sent from the Craftmen contact form.
+                </p>
+            </body>
+            </html>
+            """
+
+            text_body = f"""
+New Contact Form Submission
+
+Name: {name}
+Email: {email}
+Phone: {phone or "Not provided"}
+Subject: {subject}
+
+Message:
+{message}
+            """.strip()
+
+            result = await EmailService._send_via_zeptomail(
+                to_email=to_email,
+                subject=email_subject,
+                html_content=html_content,
+                text_body=text_body,
+            )
+
+            if result["success"]:
+                logger.info(f"Successfully sent contact notification email to {to_email}")
+                EmailService._update_email_log_status(
+                    log_id=log_id,
+                    status=EmailStatus.SENT,
+                    smtp_response=result["message"],
+                )
+            else:
+                raise Exception(result["message"])
+
+        except Exception as e:
+            logger.error(f"Failed to send contact notification email: {str(e)}")
+            EmailService._update_email_log_status(
+                log_id=log_id,
+                status=EmailStatus.FAILED,
+                error_message=str(e),
+            )
+            raise e
+
+    @staticmethod
     async def send_welcome_email(to: str, user_name: str, dashboard_url: str = "#"):
         """Send welcome email after successful verification"""
         from app.models.email_log import EmailStatus

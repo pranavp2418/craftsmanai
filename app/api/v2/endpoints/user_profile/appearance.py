@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.core.dependencies import get_db, get_current_active_user
+from app.core.dependencies import get_db, get_current_user
 from app.schemas.user_profile import AppearanceSettingsUpdate, AppearanceSettingsResponse
 from app.models.user import User
 
@@ -9,7 +9,7 @@ router = APIRouter()
 @router.get("/appearance", response_model=AppearanceSettingsResponse, status_code=status.HTTP_200_OK)
 def get_appearance_settings(
     *,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get the current user's appearance settings (Theme, Navigation Color).
@@ -24,7 +24,7 @@ def update_appearance_settings(
     *,
     db: Session = Depends(get_db),
     appearance_data: AppearanceSettingsUpdate,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Update the current user's appearance settings.
