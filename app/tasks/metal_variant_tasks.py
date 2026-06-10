@@ -44,7 +44,20 @@ def _build_metal_variant_prompt(metal: str, jewellery_type: str = "pendant") -> 
     """Build a concise metal variant prompt — minimal like ChatGPT for best results."""
     metal_desc = METAL_DESCRIPTIONS.get(metal, f"{metal.replace('_', ' ').title()} metal with a high-polish finish")
 
-    return f"""Recolor the metal of this {jewellery_type} to {metal_desc}. Change the metal color completely to this new color, including all metal surfaces, prongs, and settings.
+    # gpt-image-2 struggles to convert a YELLOW-GOLD piece to a WHITE metal (it leaves gold
+    # tones). For white metals, force a complete white conversion with NO warm tones left.
+    white_clause = ""
+    if metal in ("silver", "white_gold", "platinum"):
+        white_clause = (
+            "\n\nCRITICAL — FULL WHITE-METAL CONVERSION: the reference piece is YELLOW GOLD. Convert EVERY metal "
+            "surface — the whole frame, every letter/number body, prong, bezel, border, edge, channel wall, the "
+            "bail and the back — to a BRIGHT, COOL, SILVERY-WHITE metal (white gold / rhodium / platinum / silver). "
+            "There must be absolutely NO yellow, NO gold, NO brass, NO warm or champagne tint left ANYWHERE on the "
+            "metal — not even a faint one. 100% of the metal must read as clean white/silver. The diamonds stay "
+            "clear and white as before. Do NOT leave any part gold-coloured."
+        )
+
+    return f"""Recolor the metal of this {jewellery_type} to {metal_desc}. Change the metal color completely to this new color, including all metal surfaces, prongs, and settings.{white_clause}
 
 Keep EVERYTHING else exactly the same — same overall design, same components, same shape and silhouette, same proportions, same stones (count, cut, arrangement and setting), same engraving/text, same borders and edges, same structure, same viewpoint. Only the metal COLOR changes; do not redesign or alter any other part.
 
