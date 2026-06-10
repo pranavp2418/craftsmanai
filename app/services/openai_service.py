@@ -2076,130 +2076,103 @@ def resolve_image_urls(image_source: Optional[str | list[str]], image_urls: Opti
         return [data_url] if data_url else []
     return []
 
-def extract_b64_from_result(result: Any) -> Optional[str]:
-    b64 = getattr(result, "b64_json", None) or (
-        result.get("b64_json")
-        if isinstance(result, dict)
-        else None
-    )
-    if b64:
-        return b64
-
-    try:
-        if hasattr(result, "candidates"):
-            for candidate in result.candidates:
-                for part in candidate.content.parts:
-                    inline_data = getattr(part, "inline_data", None)
-                    if inline_data and hasattr(inline_data, "data"):
-                        return base64.b64encode(inline_data.data).decode("utf-8")
-    except Exception:
-        pass
-
-    return None
-
-def _border_avg_brightness(img: "Image.Image") -> float:
-    """Sample the image border pixels and return their average brightness (0-255)."""
-    w, h = img.size
-    samples = []
-    step_x = max(1, w // 60)
-    step_y = max(1, h // 60)
-    for x in range(0, w, step_x):
-        samples.append(img.getpixel((x, 0)))
-        samples.append(img.getpixel((x, h - 1)))
-    for y in range(0, h, step_y):
-        samples.append(img.getpixel((0, y)))
-        samples.append(img.getpixel((w - 1, y)))
-    if not samples:
-        return 255.0
-    total = sum((p[0] + p[1] + p[2]) / 3 for p in samples)
-    return total / len(samples)
 
 
-def _whiten_background(image_bytes: bytes, tag: str = "bg") -> bytes:
-    """Replace a dark/colored background with pure white using a border flood-fill.
-
-    Why flood-fill (not pixel thresholding): flood-fill starts from the image
-    BORDER and only spreads through CONNECTED background pixels. The centered
-    jewelry is never touched — even if it contains dark shadows or black accents —
-    because it is not connected to the border. This reliably produces a pure white
-    (#FFFFFF) background while fully preserving the design.
-
-    gpt-image-2's /images/edits endpoint copies the reference background color and
-    its outputs sometimes carry a dark backdrop, so we run this on BOTH the input
-    references and the generated output to guarantee white everywhere.
+def translate_prompt_for_dalle(prompt_text: str, image_urls: list[str] = None) -> tuple[str, str]:
     """
+    Use gpt-4o-mini to convert a complex structured system prompt into a concise, 
+    highly optimized visual-only prompt for DALL-E, and detect the metal tone.
+    Optionally looks at the reference images to generate a more accurate visual description and metal classification.
+    """
+    client = get_openai_client()
     try:
-        from PIL import ImageDraw
+        logger.info("[PROMPT TRANSLATION] Cleaning complex prompt and detecting metal tone using gpt-4o-mini")
+        
+        # Prepare visual inputs if reference images are available
+        image_contents = []
+        if image_urls:
+            for url in image_urls:
+                try:
+                    if url.startswith("data:"):
+                        _, encoded = url.split(",", 1)
+                        img_bytes = base64.b64decode(encoded)
+                    elif url.startswith("http"):
+                        resp = requests.get(url, timeout=10)
+                        resp.raise_for_status()
+                        img_bytes = resp.content
+                    elif os.path.exists(url):
+                        with open(url, "rb") as f:
+                            img_bytes = f.read()
+                    else:
+                        continue
+                    
+                    # Encode to base64 data URL
+                    b64_str = base64.b64encode(img_bytes).decode('utf-8')
+                    image_contents.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{b64_str}"
+                        }
+                    })
+                except Exception as ex:
+                    logger.warning(f"[PROMPT TRANSLATION] Failed to load image {url[:50]} for prompt translator: {ex}")
 
-        img = Image.open(BytesIO(image_bytes)).convert("RGB")
-        w, h = img.size
-
-        avg_brightness = _border_avg_brightness(img)
-        if avg_brightness >= 215:
-            # Border is already essentially white — nothing to do
-            return image_bytes
-
-        logger.info("[%s] Non-white background detected (border brightness=%.0f) → flooding to white", tag, avg_brightness)
-
-        # Flood-fill from many border seed points so we catch the whole backdrop
-        # even if a piece of jewelry touches one edge. thresh controls how far the
-        # fill spreads from each seed's colour — generous enough to swallow shadows
-        # and gradients, but it still stops at the bright jewelry.
-        seeds = [
-            (1, 1), (w - 2, 1), (1, h - 2), (w - 2, h - 2),          # corners
-            (w // 2, 1), (w // 2, h - 2), (1, h // 2), (w - 2, h // 2),  # edge midpoints
-            (w // 4, 1), (3 * w // 4, 1), (w // 4, h - 2), (3 * w // 4, h - 2),
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a prompt translator and jewelry analyzer. Read the rendering instruction, "
+                    "view the reference image(s), and output a JSON object with the following fields:\n"
+                    "- 'dalle_prompt': An optimized, highly descriptive prompt for DALL-E 3 (1-2 sentences). Describe the background strictly as 'isolated on a pure, solid, clean white background (#FFFFFF)'. Do NOT include negation words.\n"
+                    "- 'detected_metal': Identify the metal tone from the image/prompt as one of: 'gold' (yellow gold), 'silver' (white gold/silver/platinum), or 'rose_gold'.\n"
+                    "RULES for 'detected_metal':\n"
+                    "1. If a metal tone is explicitly mentioned in the user prompt (e.g. 'rose gold', 'platinum', 'yellow gold', 'silver', 'white gold'), use that.\n"
+                    "2. If no metal tone is specified and the reference image is NOT jewelry (e.g. it is a drawing, sketch, logo, cartoon, deity portrait), default to 'gold'.\n"
+                    "3. If no metal is specified and the reference image IS jewelry, detect the metal tone of the jewelry in the image.\n\n"
+                    "Output MUST be valid JSON only. Do not include markdown block formatting."
+                )
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Analyze and translate this jewelry instruction:\n\n{prompt_text}"
+                    }
+                ] + image_contents
+            }
         ]
-        for seed in seeds:
-            try:
-                ImageDraw.floodfill(img, seed, (255, 255, 255), thresh=90)
-            except Exception:
-                pass
-
-        buf = BytesIO()
-        img.save(buf, format="PNG")
-        buf.seek(0)
-        logger.info("[%s] Background flooded to white", tag)
-        return buf.getvalue()
-
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            response_format={"type": "json_object"},
+            temperature=0.2,
+            max_tokens=250,
+            timeout=15
+        )
+        response_text = response.choices[0].message.content.strip()
+        logger.info(f"[PROMPT TRANSLATION] Raw JSON response: {response_text}")
+        
+        import json
+        data = json.loads(response_text)
+        cleaned_prompt = data.get("dalle_prompt", "").strip()
+        detected_metal = data.get("detected_metal", "gold").strip().lower()
+        if detected_metal not in ["gold", "silver", "rose_gold"]:
+            detected_metal = "gold"
+            
+        logger.info(f"[PROMPT TRANSLATION] Cleaned prompt: {cleaned_prompt}")
+        logger.info(f"[PROMPT TRANSLATION] Detected metal: {detected_metal}")
+        return cleaned_prompt, detected_metal
     except Exception as e:
-        logger.warning("[%s] Failed to whiten background: %s — using original", tag, e)
-        return image_bytes
-
-
-def _ensure_white_background(image_bytes: bytes) -> bytes:
-    """Whiten the background of a reference image before sending it to the API."""
-    return _whiten_background(image_bytes, tag="white_bg_input")
-
-
-def download_reference_images(image_urls: list[str]) -> list[bytes]:
-    """Pre-download reference images and ensure white backgrounds.
-    Use with generate_with_openai_image's pre_downloaded_blobs parameter
-    to avoid redundant downloads in parallel calls."""
-    blobs: list[bytes] = []
-    for url in (image_urls or [])[:10]:
-        if not url:
-            continue
-        try:
-            raw_bytes = None
-            if url.startswith("data:"):
-                _, encoded = url.split(",", 1)
-                raw_bytes = base64.b64decode(encoded)
-            elif url.startswith("http"):
-                resp = requests.get(url, timeout=20)
-                resp.raise_for_status()
-                raw_bytes = resp.content
-            elif os.path.exists(url):
-                with open(url, "rb") as f:
-                    raw_bytes = f.read()
-
-            if raw_bytes:
-                # Pre-process to ensure white background
-                processed = _ensure_white_background(raw_bytes)
-                blobs.append(processed)
-        except Exception as e:
-            logger.warning("Failed to fetch reference image %s: %s", url[:80], e)
-    return blobs
+        logger.warning(f"[PROMPT TRANSLATION] Translation failed: {e}. Falling back to local metal detection and original prompt.")
+        lower = (prompt_text or "").lower()
+        detected_metal = "gold"
+        if "rose gold" in lower or "rose-gold" in lower or "rose_gold" in lower:
+            detected_metal = "rose_gold"
+        elif "white gold" in lower or "white-gold" in lower or "white_gold" in lower or "silver" in lower or "platinum" in lower or "sterling" in lower:
+            detected_metal = "silver"
+        return prompt_text, detected_metal
 
 
 def generate_with_openai_image(
@@ -2213,27 +2186,47 @@ def generate_with_openai_image(
     Uses /v1/images/edits when reference images are provided,
     /v1/images/generations for text-only requests.
     Returns base64-encoded PNG image data.
-
-    Args:
-        image_urls: Reference image URLs (downloaded if pre_downloaded_blobs is None).
-        prompt_text: The generation prompt.
-        pre_downloaded_blobs: Pre-downloaded image bytes to skip redundant downloads
-                             when calling this function in parallel.
-        whiten_output: Force a pure white background on the result. Set False for
-                       lifestyle / worn shots that have a natural background and skin,
-                       where the flood-fill would bleed into the photo.
     """
-    api_key = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
-    if not api_key:
-        raise Exception("OPENAI_API_KEY missing")
+    client = get_openai_client()
+    
+    # Download/process all reference images as file tuples
+    image_files = []
+    if image_urls:
+        for idx, url in enumerate(image_urls):
+            try:
+                if url.startswith("data:"):
+                    # Data URI — extract base64 payload
+                    _, encoded = url.split(",", 1)
+                    img_bytes = base64.b64decode(encoded)
+                elif url.startswith("http"):
+                    resp = requests.get(url, timeout=20)
+                    resp.raise_for_status()
+                    img_bytes = resp.content
+                elif os.path.exists(url):
+                    with open(url, "rb") as f:
+                        img_bytes = f.read()
+                else:
+                    img_bytes = None
 
-    # Use pre-downloaded blobs if provided, otherwise download fresh
-    if pre_downloaded_blobs is not None:
-        image_blobs = list(pre_downloaded_blobs)
+                if img_bytes:
+                    img = Image.open(BytesIO(img_bytes))
+                    img = img.convert("RGBA")
+                    img = img.resize((1024, 1024))
+                    buf = BytesIO()
+                    img.save(buf, format="PNG")
+                    buf.seek(0)
+                    image_files.append((f"image_{idx}.png", buf, "image/png"))
+            except Exception as e:
+                logger.warning(f"Failed to fetch reference image {url[:80]}: {e}")
+
+    # Clean the prompt using gpt-4o-mini translation layer to optimize for DALL-E unless bypassed
+    detected_metal = None
+    if not bypass_translation:
+        dalle_prompt, detected_metal = translate_prompt_for_dalle(prompt_text, image_urls)
     else:
-        image_blobs = download_reference_images(image_urls)
-
-    truncated_prompt = prompt_text[:32000]
+        logger.info("[PROMPT TRANSLATION] Bypassing prompt translation layer as requested")
+        dalle_prompt = prompt_text
+    truncated_prompt = dalle_prompt[:32000]
     max_attempts = 3
 
     for attempt in range(1, max_attempts + 1):
@@ -2260,53 +2253,29 @@ def generate_with_openai_image(
                     timeout=180,
                 )
             else:
-                # Use images/generations endpoint (text-only)
-                response = requests.post(
-                    "https://api.openai.com/v1/images/generations",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": "gpt-image-2",
-                        "prompt": truncated_prompt,
-                        "n": 1,
-                        "size": "1024x1024",
-                        "quality": "auto",
-                        "background": "opaque",
-                    },
-                    timeout=180,
+                result = client.images.generate(
+                    prompt=truncated_prompt,
+                    **img_kwargs
                 )
 
-            if response.ok:
-                resp_data = response.json()
-                b64 = resp_data.get("data", [{}])[0].get("b64_json")
-                if b64:
-                    logger.info("OpenAI gpt-image-2 generation succeeded (attempt %d)", attempt)
-                    # Force a pure white background on the generated output. gpt-image-2
-                    # sometimes returns a dark backdrop even when asked for white — the
-                    # border flood-fill guarantees #FFFFFF without touching the jewelry.
-                    # Skipped for lifestyle/worn shots (whiten_output=False) where the
-                    # flood-fill would eat into the skin and natural background.
-                    if whiten_output:
-                        try:
-                            whitened = _whiten_background(base64.b64decode(b64), tag="white_bg_output")
-                            b64 = base64.b64encode(whitened).decode("utf-8")
-                        except Exception as _wb_err:
-                            logger.warning("Output white-bg post-process skipped: %s", _wb_err)
-                    return b64
-                raise ValueError("No b64_json in OpenAI response")
-
-            transient = response.status_code in [408, 429, 500, 502, 503, 504]
-            error_text = response.text[:300]
-            logger.error(
-                "OpenAI image error (attempt %d/%d): %d %s",
-                attempt, max_attempts, response.status_code, error_text,
+            data_item = result.data[0]
+            b64 = getattr(data_item, "b64_json", None) or (
+                data_item.get("b64_json") if isinstance(data_item, dict) else None
             )
-            if not transient or attempt == max_attempts:
-                raise ValueError(f"OpenAI failed: {response.status_code} {error_text}")
+            if not b64:
+                url = getattr(data_item, "url", None) or (
+                    data_item.get("url") if isinstance(data_item, dict) else None
+                )
+                if url:
+                    resp = requests.get(url, timeout=20)
+                    resp.raise_for_status()
+                    b64 = base64.b64encode(resp.content).decode("utf-8")
+            
+            if b64:
+                logger.info(f"OpenAI gpt-image-2 generation succeeded (attempt {attempt})")
+                return b64, detected_metal
 
-            time.sleep(1.2 * attempt)
+            raise ValueError("No image payload in OpenAI response")
 
         except (requests.exceptions.RequestException, ValueError) as e:
             if attempt == max_attempts:
@@ -2988,7 +2957,7 @@ def generate_with_fallback(
     user_prompt: str,
     parsed_data: Optional[Dict[str, Any]] = None,
     image_urls: Optional[List[str]] = None,
-    metal_tone: str = "yellow_gold",
+    metal_tone: Optional[str] = None,
     mode: Optional[str] = None,
     version_number: int = 1,
     refinement_intent_override: Optional[Dict[str, Any]] = None
@@ -3026,128 +2995,183 @@ def generate_with_fallback(
             "metalTone": metal_tone,
             "versionNumber": version_number,
         })
-        if refinement_intent:
-            logger.info("[refinement_intent] %s", json.dumps(refinement_intent)[:1500])
 
-    # Expected text for spelling verification — extracted from the user's change request.
-    expected_texts: List[str] = []
-    if is_refine and user_prompt:
-        expected_texts = [new for (_old, new) in extract_text_replacements(user_prompt) if new and new.strip()]
-    vision_available = bool(os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY)
-    needs_spelling_check = bool(expected_texts) and vision_available
 
-    # Auto fidelity check — DISABLED for speed. In practice it flagged trivial re-render
-    # variance (slight font thickness, minor curvature) on almost every render and forced
-    # a full second generation, doubling/tripling render time (70s -> 160-320s). The prompt
-    # rules already enforce design fidelity, and the spelling check (below) still catches
-    # real text errors cheaply. Set to True again only if broad self-correction is needed.
-    needs_fidelity_check = False
-    intended_change = user_prompt if is_refine else ""
-
-    # Pre-download the reference ONCE (whitened) — reused for generation and the fidelity
-    # comparison so we don't download twice.
-    ref_blobs = download_reference_images(resolved_image_urls) if resolved_image_urls else None
-    input_b64 = base64.b64encode(ref_blobs[0]).decode("utf-8") if ref_blobs else None
-
-    # Detect the reference's letter casing (via OCR) so a name/number change keeps the
-    # SAME case as the input image — not however the user typed it. Only when the user
-    # didn't explicitly request a case.
-    forced_case: Optional[str] = None
-    if is_refine and expected_texts and input_b64 and not _user_requests_case(user_prompt):
-        try:
-            original_text = _ocr_pendant_text(input_b64, "the existing name or number on the pendant")
-            letters = [c for c in (original_text or "") if c.isalpha()]
-            if letters:
-                if all(c.isupper() for c in letters):
-                    forced_case = "upper"
-                elif all(c.islower() for c in letters):
-                    forced_case = "lower"
-            logger.info("[casing] original='%s' -> forced_case=%s", original_text, forced_case)
-        except Exception as _ce:
-            logger.warning("[casing] detection failed: %s", _ce)
-
-    # Build concise prompts — short and direct like ChatGPT.
-    # correction_notes (from the auto fidelity check) are appended on a retry so the
-    # model fixes the exact details that drifted from the reference.
-    def compose_prompt(attempt: int, correction_notes: str = "") -> str:
-        if is_refine:
-            base = _build_concise_refine_prompt(user_prompt, refinement_intent, attempt, forced_case=forced_case)
+    if not refinement_intent:
+        if selected_mode == "refine":
+            # Synthesize a robust refinement intent
+            refinement_intent = {
+                "normalized_prompt": user_prompt,
+                "raw_user_prompt": user_prompt,
+                "target_components": ["the requested component"],
+                "attribute_to_change": "specified jewelry component",
+                "from_state": "current state",
+                "to_state": "new state",
+                "render_strategy": "targeted_component_edit",
+                "target_regions": ["unspecified"],
+                "preserve_components": ["all other regions"],
+                "qa_checks": [
+                    "The requested change is visibly applied to the target component.",
+                    "All non-target regions remain identical to the previous render.",
+                    "No unrelated areas are redesigned or changed."
+                ],
+                "retry_prompt_if_failed": f"Refine the jewelry to apply this change: {user_prompt}. Preserve all other parts exactly as they are in the reference image."
+            }
         else:
-            base = _build_concise_initial_prompt(user_prompt, parsed_data, metal_tone, bool(resolved_image_urls))
-        if correction_notes:
-            base += (
-                "\n\nIMPORTANT — the previous attempt differed from the reference in these ways. FIX each one "
-                "while keeping everything else identical to the reference: " + correction_notes
+            # Synthesize a robust initial QA validation intent
+            refinement_intent = {
+                "normalized_prompt": user_prompt,
+                "raw_user_prompt": user_prompt,
+                "target_components": ["full design"],
+                "attribute_to_change": "jewelry render creation",
+                "from_state": "reference image concept",
+                "to_state": "premium CAD jewelry render",
+                "qa_checks": [
+                    "The output is a premium, photorealistic, CAD-style jewelry render.",
+                    "The output matches the core style, theme, and identity of the reference image.",
+                    "The background is clean, solid, and seamless (preferably pure white).",
+                    "The design features no distorted lines, overlapping letters, or physical defects."
+                ],
+                "retry_prompt_if_failed": f"Generate a premium jewelry CAD render of the design requested: {user_prompt}. Ensure white background, sharp details, symmetrical structure, and no physical defects."
+            }
+
+
+    # Ensure local path for reference image
+    local_ref_path, ref_temp_cleanup = ensure_local_file(image_source)
+
+    candidates = []
+
+    try:
+        # =====================================================
+        # PRIMARY OPENAI GENERATION LOOP WITH AUDITING & SIMILARITY CHECK
+        # =====================================================
+        max_attempts_count = max_attempts
+        previous_ref_url = resolved_image_urls[0] if resolved_image_urls else None
+
+        for attempt in range(1, max_attempts_count + 1):
+            if bypass_translation:
+                final_prompt = user_prompt
+            else:
+                final_prompt = build_prompt(
+                    user_prompt=user_prompt,
+                    reference_image=image_source,
+                    parsed_data=parsed_data,
+                    mode=selected_mode,
+                    metal_tone=metal_tone or "yellow_gold",
+                    image_urls=resolved_image_urls,
+                    version_number=version_number,
+                    refinement_intent=refinement_intent,
+                    attempt=attempt,
+                )
+
+            # Append front-facing and text attachment guidelines if we are refining/editing
+            if selected_mode == "refine" and final_prompt:
+                final_prompt += "\n\nThe render MUST remain in a front-facing hero angle. Any new or modified text or lettering must be physically attached, connected, and merged cleanly with the surrounding metal structure."
+
+            try:
+                logger.info(f"[PRIMARY OPENAI GENERATION] Attempt {attempt}/{max_attempts_count}")
+                b64_json, detected_metal = generate_with_openai_image(
+                    image_urls=resolved_image_urls,
+                    prompt_text=final_prompt,
+                    bypass_translation=bypass_translation,
+                    mode=selected_mode
+                )
+                result = OpenAIImageObject(b64_json=b64_json, detected_metal=detected_metal)
+
+                if not b64_json:
+                    continue
+
+                qa_result = qa_refinement_check({
+                    "intent": refinement_intent,
+                    "previousRefUrl": previous_ref_url,
+                    "newImageB64": b64_json,
+                })
+
+                logger.info(f"[REFINEMENT QA attempt {attempt}]: {qa_result}")
+                qa_passed = bool(qa_result.get("passed") or not qa_result.get("retry_recommended"))
+
+                ssim_score = 0.0
+                hash_score = 0
+                similarity_passed = True
+
+                if local_ref_path and os.path.exists(local_ref_path):
+                    local_gen_path, gen_temp_cleanup = save_b64_to_temp_file(b64_json)
+                    try:
+                        hash_score = calculate_hash_similarity(local_ref_path, local_gen_path)
+                        ssim_score = calculate_ssim_similarity(local_ref_path, local_gen_path)
+                        logger.info(f"[ATTEMPT {attempt}] HASH SIMILARITY: {hash_score}, SSIM SIMILARITY: {ssim_score}")
+                        
+                        if ssim_score < 30.0 or hash_score < 60.0:
+                            similarity_passed = False
+                        else:
+                            similarity_passed = True
+                    finally:
+                        if gen_temp_cleanup and os.path.exists(gen_temp_cleanup):
+                            try:
+                                os.remove(gen_temp_cleanup)
+                            except Exception:
+                                pass
+
+                overall_score = ssim_score + hash_score
+                candidates.append((result, ssim_score, hash_score, overall_score, qa_passed))
+
+                # Return immediately if:
+                # 1. We have a reference image and both SSIM >= 30 & Hash similarity >= 60
+                # 2. We don't have a reference image and QA check passes
+                if local_ref_path and os.path.exists(local_ref_path):
+                    if similarity_passed:
+                        logger.info(f"[ATTEMPT {attempt}] Similarity passed (SSIM: {ssim_score} >= 30, HASH: {hash_score} >= 60). Returning image.")
+                        return result
+                    else:
+                        logger.info(f"[ATTEMPT {attempt}] Similarity below threshold (SSIM: {ssim_score} < 30 or HASH: {hash_score} < 60). Retrying...")
+                else:
+                    if qa_passed:
+                        logger.info(f"[ATTEMPT {attempt}] Prompt-only mode: QA check passed. Returning image.")
+                        return result
+                    else:
+                        logger.info(f"[ATTEMPT {attempt}] Prompt-only mode: QA check failed. Retrying...")
+
+            except Exception as e:
+                logger.error(f"[PRIMARY OPENAI ERROR] Attempt {attempt} failed: {e}")
+
+        # If we completed all attempts and have some candidates but none passed both checks perfectly
+        if candidates:
+            # Sort by highest ssim, then highest hash
+            candidates.sort(key=lambda x: (-x[1], -x[2]))
+            best_candidate = candidates[0]
+            logger.info(f"All attempts completed. Returning best candidate based on highest similarity (HASH: {best_candidate[2]}, SSIM: {best_candidate[1]}, QA passed: {best_candidate[4]})")
+            return best_candidate[0]
+
+        # =====================================================
+        # OPENAI FALLBACK
+        # =====================================================
+        try:
+            logger.info("[OPENAI FALLBACK GENERATION]")
+            fallback_prompt = build_safe_fallback_prompt(user_prompt, metal_tone=metal_tone or "yellow_gold")
+            b64, detected_metal = generate_with_openai_image(
+                image_urls=resolved_image_urls,
+                prompt_text=fallback_prompt
             )
-        return base
+            return OpenAIImageObject(b64_json=b64, detected_metal=detected_metal)
+        except Exception as openai_error:
+            raise Exception(f"OPENAI FALLBACK FAILED: {openai_error}")
 
-    # Attempt budget — at most ONE retry (2 attempts) to keep render time low, whenever
-    # any self-check is active; otherwise a single attempt.
-    any_check = needs_spelling_check or needs_fidelity_check or (is_refine and refinement_intent)
-    max_qa_attempts = 2 if any_check else 1
-    previous_ref_url = resolved_image_urls[0] if (is_refine and resolved_image_urls) else None
-    final_b64 = None
-    qa_result = None
-    correction_notes = ""
-
-    for qa_attempt in range(1, max_qa_attempts + 1):
-        prompt_text = compose_prompt(qa_attempt, correction_notes)
-
-        logger.info("[OpenAI gpt-image-2] Attempt %d/%d, mode=%s, prompt_len=%d, spelling=%s, fidelity=%s",
-                    qa_attempt, max_qa_attempts, selected_mode, len(prompt_text), needs_spelling_check, needs_fidelity_check)
-        b64 = generate_with_openai_image(resolved_image_urls, prompt_text, pre_downloaded_blobs=ref_blobs)
-        final_b64 = b64
-
-        # Last attempt — accept whatever we have, no point checking further.
-        if qa_attempt == max_qa_attempts:
-            break
-
-        # 1) Spelling verification (highest priority — fixes missing/extra/wrong letters).
-        if needs_spelling_check:
-            spell = verify_text_spelling(b64, expected_texts)
-            logger.info("[spelling_qa attempt %d] %s", qa_attempt, spell)
-            if not spell.get("passed"):
-                logger.warning("[spelling_qa] misspelling — expected %s, got '%s'; retrying",
-                               expected_texts, spell.get("detected"))
-                continue
-
-        # 2) Auto fidelity check — compare output vs input, retry once with fixes.
-        if needs_fidelity_check and input_b64:
-            fid = verify_design_fidelity(input_b64, b64, intended_change)
-            logger.info("[fidelity_qa attempt %d] matches=%s diffs=%s",
-                        qa_attempt, fid.get("matches"), fid.get("differences"))
-            if not fid.get("matches") and fid.get("differences"):
-                correction_notes = "; ".join(fid["differences"][:6])
-                continue  # retry with the specific differences to fix
-
-        # 3) Visual QA via Gemini (only when we have an interpreted refinement intent).
-        if refinement_intent:
-            qa_result = qa_refinement_check({
-                "intent": refinement_intent,
-                "previousRefUrl": previous_ref_url,
-                "newImageB64": b64,
-            })
-            logger.info("[refinement_qa attempt %d] %s", qa_attempt, qa_result)
-            if qa_result.get("passed") or not qa_result.get("retry_recommended"):
-                break
-            continue
-
-        # All active checks passed → accept.
-        break
-
-    if not final_b64:
-        raise ValueError("No image generated from OpenAI gpt-image-2")
-
-    return OpenAIImageObject(b64_json=final_b64)
+    finally:
+        if ref_temp_cleanup and os.path.exists(ref_temp_cleanup):
+            try:
+                os.remove(ref_temp_cleanup)
+            except Exception:
+                pass
 
 
 # =========================================================
 # OPENAI IMAGE COMPATIBILITY OBJECT
 # =========================================================
 class OpenAIImageObject:
-    def __init__(self, b64_json: Optional[str] = None, url: Optional[str] = None):
+    def __init__(self, b64_json: Optional[str] = None, url: Optional[str] = None, detected_metal: Optional[str] = None):
         self.b64_json = b64_json
         self.url = url
+        self.detected_metal = detected_metal
 
 
 # =========================================================
@@ -3255,18 +3279,31 @@ class OpenAIService:
             else:
                 selected_mode = "initial"
 
+        # Let the vision translator detect the metal tone dynamically, or use explicitly passed metal tone
         result = generate_with_fallback(
             image_source=image_source,
             user_prompt=user_prompt,
             parsed_data={"item_type": jewellery_type} if jewellery_type else None,
-            metal_tone=metal_tone or "yellow_gold",
-            mode=selected_mode
+            metal_tone=metal_tone,
+            mode=selected_mode,
+            version_number=1
         )
 
         if isinstance(result, OpenAIImageObject):
             return result
         b64 = extract_b64_from_result(result)
-        return OpenAIImageObject(b64_json=b64)
+        
+        # Resolve the final metal tone to yellow_gold/white_gold/rose_gold for task logging & storage
+        detected_metal = getattr(result, "detected_metal", None)
+        if not detected_metal:
+            detected_metal = metal_tone or "yellow_gold"
+        
+        if detected_metal == "gold":
+            detected_metal = "yellow_gold"
+        elif detected_metal == "silver":
+            detected_metal = "white_gold"
+            
+        return OpenAIImageObject(b64_json=b64, detected_metal=detected_metal)
     
     def generate_side_view(
         self,
