@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import requests
@@ -31,7 +33,7 @@ from app.core.database import SessionLocal
 from app.models.design import Design
 from app.repositories.design_variant import DesignVariantRepository
 from app.repositories.activity_log import DesignActivityLogRepository
-from app.services.openai_service import openai_service
+from app.services.openai_service import openai_service, generate_with_openai_image, download_reference_images
 from app.services.storage_service import _validate_image_bytes, upload_image_to_supabase
 from app.core.sse_manager import sse_manager
 from app.tasks.base import create_task
@@ -39,26 +41,143 @@ from app.tasks.base import create_task
 logger = logging.getLogger(__name__)
 
 
-ANGLE_PROMPTS = {
-    "side_view": "rotate 90 degrees to the right, full side profile view, camera at same height",
-    "top_view": "top-down view, camera positioned directly above at 90 degrees looking down",
-    "three_quarter_view": "three-quarter perspective view (about 45 degrees), preserving full geometry and realistic depth",
+# Old verbose master prompt removed — ultra-minimal prompts work better with gpt-image-2
+
+
+METAL_DESCRIPTIONS = {
+    "gold": "warm yellow gold with rich golden tones",
+    "yellow_gold": "warm yellow gold with rich golden tones",
+    "white_gold": "bright white gold / platinum with cool silver tones",
+    "rose_gold": "warm rose gold with soft pink-copper tones",
+    "rose": "warm rose gold with soft pink-copper tones",
+    "silver": "bright white gold / platinum with cool silver tones",
+    "platinum": "bright white lustre with a slightly matte luxury finish",
 }
 
 
-def _metal_to_angle_prompt_suffix(metal: str) -> str:
-    """Return a rendering hint suffix for the given metal to be appended to the angle prompt."""
-    metal_hints = {
-        "gold": "Render the jewelry in 18K yellow gold with warm golden reflections and high-polish finish.",
-        "rose": "Render the jewelry in 18K rose gold with a pinkish-warm hue and high-polish finish.",
-        "silver": "Render the jewelry in sterling silver / white gold with cool, bright reflections and high-polish finish.",
-        "platinum": "Render the jewelry in platinum with a bright white lustre and slightly matte luxury finish.",
-        "white_gold": "Render the jewelry in 18K white gold with a bright white tone and rhodium-plated shine.",
-    }
-    return metal_hints.get(
-        metal,
-        f"Render the jewelry in {metal.replace('_', ' ').title()} metal with a high-polish finish.",
-    )
+VIEW_PROMPTS = {
+    "side_view": "slightly turned view — rotate the piece only about 10 degrees from straight front (a very subtle turn that just hints at the side depth/thickness). This is NOT a full side profile; the front face must still be clearly visible, almost front-on, just gently angled by ~10 degrees",
+    "back_view": "rear / back view (the back of the piece, showing the reverse side and its construction)",
+    "worn_view": "worn on a real person",
+}
+
+# The exact set of angles produced when the user requests more angles:
+# one side view, one back view, and one wearable (worn) view.
+ANGLE_VIEWS = ["side_view", "back_view", "worn_view"]
+
+
+def _detect_piece_type(type_text: str) -> str:
+    """Canonical piece type from jewellery_type + prompt text combined.
+
+    Order matters: check 'earring' before 'ring' (earring contains 'ring'). Uses word
+    boundaries so 'bring'/'spring'/'string' don't false-match 'ring'. The jewellery_type
+    field is often a generic value like 'Custom', so the user's prompt (e.g. 'create a ring
+    of tiger') is the reliable signal for which body part the worn view should use.
+    """
+    t = (type_text or "").lower()
+    if re.search(r"\bear[\s-]?rings?\b", t) or "earring" in t:
+        return "earring"
+    if re.search(r"\brings?\b", t):
+        return "ring"
+    if re.search(r"\b(bracelet|bangle|cuff)\b", t):
+        return "bracelet"
+    if re.search(r"\banklet\b", t):
+        return "anklet"
+    if re.search(r"\b(grill|grillz)\b", t):
+        return "grill"
+    if re.search(r"\bwatch\b", t):
+        return "watch"
+    return "pendant"
+
+
+_WORN_BODYPART = {
+    "ring": "worn on a person's finger",
+    "bracelet": "worn on a person's wrist",
+    "anklet": "worn on a person's ankle",
+    "earring": "worn on a person's ear",
+    "grill": "worn on a person's teeth",
+    "watch": "worn on a person's wrist",
+    "pendant": "worn around a person's neck on the chain, resting naturally on the chest",
+}
+
+
+def _worn_instruction(type_text: str) -> str:
+    """Type-aware instruction for the wearable view (ring on finger, pendant on neck, etc.).
+
+    *type_text* should be jewellery_type + the design prompt combined, so a generic
+    jewellery_type like 'Custom' still resolves correctly via the prompt.
+    """
+    return _WORN_BODYPART.get(_detect_piece_type(type_text), _WORN_BODYPART["pendant"])
+
+
+def _build_angle_variant_prompt(angle_name: str, metal: str, jewellery_type: str = "pendant", recolor: bool = True, type_text: str = "", piece_override: str = "") -> str:
+    """Build a concise angle variant prompt — minimal for best gpt-image-2 results.
+
+    recolor=False (preferred): the reference image is ALREADY the correct metal color,
+    so we keep the exact same color/design and ONLY change the viewing angle. This makes
+    the angle match the base image the user is viewing.
+    recolor=True (fallback): no correctly-colored reference exists, so we recolor to the
+    requested metal while changing the angle.
+    """
+    metal_desc = METAL_DESCRIPTIONS.get(metal, f"{metal.replace('_', ' ').title()} metal with a high-polish finish")
+    is_worn = "worn" in angle_name
+    jt = jewellery_type or "jewelry piece"
+
+    if recolor:
+        color_clause = f", rendered in {metal_desc}"
+        color_preserve = ""
+        change_clause = "Only the viewing angle and metal color change"
+    else:
+        color_clause = ""
+        color_preserve = " same EXACT metal color and finish as the reference,"
+        change_clause = "ONLY the viewing angle changes — keep the exact same metal color, finish and design as the reference"
+
+    if is_worn:
+        # Decide the body part for the worn view. Prefer the piece type detected by VISION on
+        # the actual rendered image (piece_override) — reliable even when jewellery_type is a
+        # generic 'Custom' and the prompt is empty. Fall back to jewellery_type + prompt text.
+        piece = (piece_override or "").strip().lower()
+        if piece not in _WORN_BODYPART:
+            piece = _detect_piece_type(f"{type_text} {jewellery_type}")
+        worn_desc = _WORN_BODYPART.get(piece, _WORN_BODYPART["pendant"])
+        is_neck_piece = (piece == "pendant")
+        # Use the resolved piece word so the prompt says "ring"/"bracelet" instead of "Custom".
+        worn_jt = piece if (jt == "jewelry piece" or (jewellery_type or "").strip().lower() in ("", "custom")) else jt
+        chain_clause = ""
+        if is_neck_piece:
+            chain_clause = (
+                " The necklace CHAIN must pass through the pendant's bail/hook at the top and the pendant must "
+                "hang straight down from that chain, exactly the way a real necklace is worn — the chain clearly "
+                "threaded through the bail and connected, resting evenly on both sides of the neck. The pendant "
+                "must NOT float on its own; it hangs from the chain via its bail."
+            )
+        return f"""Show this exact same {worn_jt}{color_clause}, {worn_desc} — a realistic lifestyle photo of the piece being worn.{chain_clause}
+
+Keep the EXACT same design, components, stones, engraving/text, shape, proportions, borders,{color_preserve} and all details identical to the reference. Only show it being worn; do not redesign or alter any part of the piece.
+
+Photorealistic lifestyle photograph, natural lighting, the jewelry in sharp focus. One image only."""
+
+    if "back" in angle_name:
+        # The BACK is the reverse side: a plain backplate. The front's text/design must NOT
+        # appear readable on the back (a flipped pendant shows its smooth reverse); any
+        # see-through lettering must be MIRRORED, never readable normally.
+        same_metal = metal_desc if recolor else "the same metal colour and finish as the reference"
+        return f"""Show the BACK / REVERSE side of this exact same {jt} — as if you physically flipped the piece over front-to-back — in {same_metal}, on a pure solid white background (#FFFFFF) with NO background scene.
+
+This is the REVERSE side, NOT the front. Show a plain, smooth metal BACKPLATE with the SAME outer outline / silhouette as the front and the BACK of the bail/hook. The front design must NOT appear readable on the back: the name, numbers, lettering, motifs and any enamel/colour from the front must NOT show normally on the back. If the piece is open-work / see-through so some lettering shows through from the front, that lettering MUST be MIRRORED (reversed left-to-right), never readable. Show realistic back-of-jewelry construction (a flat polished backplate with solder/joint points).
+
+Render it as a clean CAD-style 3D jewelry render (crisp, sharp, even studio lighting) — NOT a lifestyle photo, NOT a cartoon, no background scene. Pure solid white background (#FFFFFF).
+
+One image only."""
+
+    view_desc = VIEW_PROMPTS.get(angle_name, VIEW_PROMPTS.get("side_view"))
+    return f"""Show this exact same {jt} from a {view_desc}{color_clause}.
+
+Keep the exact same design, components, stones, engraving/text, shape, proportions, borders,{color_preserve} and all details. {change_clause} — do not redesign or alter any part of the piece.
+
+Render it as a clean CAD-style 3D jewelry render (crisp, sharp, accurate metal and stones, even studio lighting) — NOT a lifestyle photo, NOT a cartoon, no background scene. Pure solid white background (#FFFFFF).
+
+One image only."""
 
 
 def _extract_image_data(data_item: Any) -> tuple[bytes, str]:
@@ -104,9 +223,24 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
         if not variant.base_design_image_url:
             raise ValueError(f"Variant {variant_id} has no base image URL")
 
-        # Look up jewellery_type from the associated Design
+        # Look up jewellery_type from the associated Design. jewellery_type is often a
+        # generic 'Custom', so also carry the design prompt — the worn view uses it to tell a
+        # ring (finger) from a pendant (neck).
         design = db.query(Design).filter(Design.id == variant.design_id).first()
         jewellery_type = design.jewellery_type if design else ""
+        type_text = (design.user_prompt if design else "") or ""
+
+        # Detect the piece TYPE from the ACTUAL base image via vision (reliable even when
+        # jewellery_type is 'Custom' and the prompt is empty). Used for the worn view so a
+        # ring is worn on a finger, not the neck. Falls back to text detection on failure.
+        worn_piece_type = ""
+        try:
+            from app.services.openai_service import detect_jewelry_piece_type
+            _braw = requests.get(variant.base_design_image_url, timeout=20).content
+            worn_piece_type = detect_jewelry_piece_type(base64.b64encode(_braw).decode("utf-8"))
+            logger.info("Piece type detected as '%s' for variant_id=%s", worn_piece_type, variant_id)
+        except Exception as _pt_err:
+            logger.warning("Piece-type vision detect failed for variant_id=%s: %s", variant_id, _pt_err)
 
         # Build nested angles_json: keys are metal names, values are angle dicts
         existing_angles = variant.angles_json or {}
@@ -122,7 +256,7 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
         for metal_name in metals:
             metal_data = existing_angles.get(metal_name)
             if isinstance(metal_data, dict) and all(
-                angle in metal_data for angle in ANGLE_PROMPTS.keys()
+                angle in metal_data for angle in ANGLE_VIEWS
             ):
                 already_existing.append(metal_name)
                 generated_angles[metal_name] = metal_data
@@ -150,70 +284,82 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
             sse_manager.publish_close(channel)
             return
 
+        # Build flat list of all (metal, angle) jobs to run in parallel.
+        # Exactly three views per metal: side view, back view, and wearable (worn) view.
+        angle_jobs: list[tuple[str, str]] = []
         for metal_name in missing_metals:
+            for angle_name in ANGLE_VIEWS:
+                angle_jobs.append((metal_name, angle_name))
+
+        # For each metal, pick the correctly-colored reference so the angle MATCHES the
+        # base image the user is viewing. If a metal-specific variant image exists, use it
+        # and only rotate (no recolor). Otherwise fall back to the base image and recolor.
+        metal_variations = variant.metal_variations_json or {}
+
+        def _ref_for_metal(metal_name: str) -> tuple[str, bool]:
+            url = metal_variations.get(metal_name)
+            if url:
+                return url, False  # correctly-colored reference → rotate only
+            return variant.base_design_image_url, True  # fall back → recolor
+
+        # Pre-download each unique reference image ONCE (shared across threads)
+        ref_blob_cache: dict[str, list[bytes]] = {}
+        for metal_name in missing_metals:
+            ref_url, _ = _ref_for_metal(metal_name)
+            if ref_url not in ref_blob_cache:
+                ref_blob_cache[ref_url] = download_reference_images([ref_url])
+        logger.info("Pre-downloaded %d unique reference image(s) for parallel angle generation", len(ref_blob_cache))
+
+        def _generate_single_angle(metal_name: str, angle_name: str) -> tuple[str, str, str | None]:
+            """Generate a single angle for a single metal. Returns (metal, angle, url or None)."""
             logger.info(
-                "Generating angles for metal=%s, variant_id=%s",
-                metal_name,
-                variant_id,
+                "Generating %s for metal=%s, variant_id=%s",
+                angle_name, metal_name, variant_id,
             )
-            metal_angles: dict[str, str] = {}
-
-            for angle_name, base_prompt in ANGLE_PROMPTS.items():
-                # Combine the angle description with the metal rendering hint
-                metal_hint = _metal_to_angle_prompt_suffix(metal_name)
-                full_prompt = f"{base_prompt}\n\n{metal_hint}"
-                logger.info(
-                    "Generating %s for metal=%s, variant_id=%s",
-                    angle_name,
-                    metal_name,
-                    variant_id,
+            try:
+                ref_url, need_recolor = _ref_for_metal(metal_name)
+                cached_blobs = ref_blob_cache.get(ref_url)
+                prompt = _build_angle_variant_prompt(angle_name, metal_name, jewellery_type, recolor=need_recolor, type_text=type_text, piece_override=worn_piece_type)
+                # Worn view is a lifestyle photo with skin + natural background — do NOT
+                # apply the white-background flood-fill (it would bleed into the photo).
+                is_worn = "worn" in angle_name
+                b64_json = generate_with_openai_image(
+                    [ref_url], prompt, pre_downloaded_blobs=cached_blobs, whiten_output=not is_worn,
                 )
-
-                # Map metal_name to standard values expected by openai_service
-                norm_metal = "yellow_gold"
-                if metal_name in ("rose", "rose_gold"):
-                    norm_metal = "rose_gold"
-                elif metal_name in ("silver", "white_gold"):
-                    norm_metal = "white_gold"
-                elif metal_name in ("gold", "yellow_gold"):
-                    norm_metal = "yellow_gold"
-                elif metal_name == "platinum":
-                    norm_metal = "platinum"
-
-                if angle_name == "side_view":
-                    generated_item = openai_service.generate_side_view(
-                        base_image_source=variant.base_design_image_url,
-                        angle_description=full_prompt,
-                        jewellery_type=jewellery_type,
-                        metal_tone=norm_metal,
-                    )
-                elif angle_name == "top_view":
-                    generated_item = openai_service.generate_top_view(
-                        base_image_source=variant.base_design_image_url,
-                        angle_description=full_prompt,
-                        jewellery_type=jewellery_type,
-                        metal_tone=norm_metal,
-                    )
-                else:
-                    generated_item = openai_service.generate_custom_angle(
-                        base_image_source=variant.base_design_image_url,
-                        angle_description=full_prompt,
-                        jewellery_type=jewellery_type,
-                        metal_tone=norm_metal,
-                    )
-
-                image_bytes, content_type = _extract_image_data(generated_item)
+                image_bytes = base64.b64decode(b64_json)
+                content_type = "image/png"
                 _validate_image_bytes(image_bytes, content_type)
 
-                # Include metal in the storage path to prevent collisions
                 bucket_path = (
                     f"generated/angles/{variant.design_id}/{variant.id}/"
                     f"{metal_name}/{angle_name}"
                 )
                 image_url = upload_image_to_supabase(image_bytes, bucket_path)
-                metal_angles[angle_name] = image_url
+                logger.info(
+                    "%s/%s generated for variant_id=%s: %s",
+                    metal_name, angle_name, variant_id, image_url,
+                )
+                return metal_name, angle_name, image_url
+            except Exception as exc:
+                logger.exception(
+                    "Failed to generate %s/%s for variant_id=%s: %s",
+                    metal_name, angle_name, variant_id, exc,
+                )
+                return metal_name, angle_name, None
 
-            generated_angles[metal_name] = metal_angles
+        # Run ALL angle+metal combinations in parallel (I/O-bound — waiting on OpenAI API)
+        max_parallel = min(len(angle_jobs), 5)
+        with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+            futures = {
+                executor.submit(_generate_single_angle, metal, angle): (metal, angle)
+                for metal, angle in angle_jobs
+            }
+            for future in as_completed(futures):
+                metal_name, angle_name, image_url = future.result()
+                if metal_name not in generated_angles:
+                    generated_angles[metal_name] = {}
+                if image_url:
+                    generated_angles[metal_name][angle_name] = image_url
 
         # Merge back any metals that weren't requested but existed before
         for existing_metal, existing_metal_data in existing_angles.items():
