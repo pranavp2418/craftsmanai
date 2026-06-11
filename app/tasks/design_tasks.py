@@ -179,11 +179,8 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                 image_source=reference_image_source,
                 user_prompt=gen_prompt,
                 jewellery_type=design.jewellery_type or "pendant",
-                metal_tone=None
+                metal_tone=input_metal,
             )
-
-            # Retrieve the dynamically detected metal tone from the vision translator
-            detected_metal = getattr(generated_item, "detected_metal", None) or "yellow_gold"
 
             final_image_bytes, content_type = _extract_generated_image_data(generated_item)
             _validate_image_bytes(final_image_bytes, content_type)
