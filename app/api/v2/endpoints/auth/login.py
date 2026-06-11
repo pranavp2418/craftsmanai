@@ -62,6 +62,25 @@ async def login(
             detail="Account not verified. Please verify your email address.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    # Check if 2FA is enabled
+    if user.is_2fa_enabled:
+        logger.info(f"2FA verification required for user: {user.email}")
+        from app.services.otp_service import generate_and_send_otp
+
+        generate_and_send_otp(
+            db=db,
+            user=user,
+            otp_type="login_2fa"
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "TWO_FACTOR_REQUIRED",
+                "message": "OTP verification required"
+            },
+        )
+
     
     # Handle device management (max device limit)
     device_id = None
@@ -107,9 +126,13 @@ async def login(
     auth_service.user_repo.update_last_login(user.id)
     
     # Set refresh token in HTTP-only cookie
-    max_age = int(
-        (7 * 24 * 60 * 60) if login_data.remember_me else (24 * 60 * 60)
+    # Max age must match the token's actual expiration from create_refresh_token
+    cookie_days = (
+        settings.REFRESH_TOKEN_DAYS_REMEMBER
+        if login_data.remember_me
+        else settings.REFRESH_TOKEN_DAYS
     )
+    max_age = int(cookie_days * 24 * 60 * 60)
     
     response.set_cookie(
         key="refresh_token",

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
 from typing import Any
 import secrets
@@ -26,7 +26,8 @@ async def verify_otp(
     db: Session = Depends(get_db),
     otp_data: OTPVerifyRequest,
     otp_type: str = "email_verification",
-    request: Request
+    request: Request,
+    response: Response
 ) -> Any:
     """
     Verify OTP and login user
@@ -145,19 +146,34 @@ async def verify_otp(
     # Update last login
     auth_service.user_repo.update_last_login(user.id)
     
+    # Set refresh token in HTTP-only cookie (same as login endpoint)
+    cookie_days = settings.REFRESH_TOKEN_DAYS  # always use 7 days for OTP flows (no remember_me)
+    max_age = int(cookie_days * 24 * 60 * 60)
+    
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        max_age=max_age,
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+        path="/"
+    )
+    
     logger.info(f"OTP verification successful for {otp_data.email} with type {otp_type}")
     
     # Send welcome email in background (non-blocking) if newly verified
-    try:
-        from app.tasks.email_tasks import send_welcome_email
-        send_welcome_email.delay(
-            to=user.email,
-            user_name=user.username or user.email,
-            dashboard_url="https://craftmenai.txogavideo.in/"
-        )
-        logger.info(f"Welcome email queued for {user.email}")
-    except Exception as e:
-        logger.warning(f"Failed to queue welcome email for {user.email}: {str(e)}")
+    if otp_type == "email_verification":
+        try:
+            from app.tasks.email_tasks import send_welcome_email
+            send_welcome_email.delay(
+                to=user.email,
+                user_name=user.username or user.email,
+                dashboard_url="https://craftmenai.txogavideo.in/"
+            )
+            logger.info(f"Welcome email queued for {user.email}")
+        except Exception as e:
+            logger.warning(f"Failed to queue welcome email for {user.email}: {str(e)}")
     
     return LoginResponse(
         access_token=access_token,
@@ -169,5 +185,6 @@ async def verify_otp(
         is_superuser=user.is_superuser,
         is_verified=user.is_verified,
         notification_message="Welcome to craftsman.ai! Your account has been verified successfully.",
-        profile_image_url=None
+        profile_image_url=user.profile_image_url if hasattr(user, 'profile_image_url') else None,
+        full_name=user.full_name if hasattr(user, 'full_name') else None
     )

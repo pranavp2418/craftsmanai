@@ -18,6 +18,7 @@ class DeviceInfo(BaseModel):
 class SignupRequest(BaseModel):
     email: NormalizedEmailStr
     password: str = Field(..., min_length=8)
+    business_name: str
     whatsapp_number: str
     remember_me: bool = False
     device_info: Optional[DeviceInfo] = None

@@ -17,7 +17,7 @@ class UserRepository:
         self.db = db
 
     def create_user(self, email: str, username: str, full_name: str, password: str, 
-                    is_verified: bool = False, whatsapp_number: str = None) -> User:
+                    is_verified: bool = False, business_name: str = None, whatsapp_number: str = None) -> User:
         """Create a new user"""
         hashed_password = get_password_hash(password)
         db_user = User(
@@ -25,6 +25,7 @@ class UserRepository:
             username=username,
             full_name=full_name,
             hashed_password=hashed_password,
+            business_name=business_name,
             is_active=True,
             is_verified=is_verified,
             whatsapp_number=whatsapp_number
@@ -113,6 +114,27 @@ class UserRepository:
     def username_exists(self, username: str) -> bool:
         """Check if username already exists"""
         return self.db.query(User).filter(User.username == username).first() is not None
+
+    def whatsapp_number_exists(self, whatsapp_number: str) -> bool:
+        """Check if whatsapp number already exists"""
+        return self.db.query(User).filter(User.whatsapp_number == whatsapp_number).first() is not None
+
+    def check_existing_identities(self, email: str, whatsapp_number: str) -> dict:
+        """
+        Single-query check for all uniqueness constraints relevant at signup.
+        Returns a dict with booleans: { 'email': bool, 'whatsapp': bool }
+        Avoids multiple round-trips by querying once.
+        """
+        users = self.db.query(User).filter(
+            or_(User.email == email, User.whatsapp_number == whatsapp_number)
+        ).all()
+        result = {"email": False, "whatsapp": False}
+        for u in users:
+            if u.email == email:
+                result["email"] = True
+            if u.whatsapp_number == whatsapp_number:
+                result["whatsapp"] = True
+        return result
 
     def change_password(self, user_id: int, current_password: str, new_password: str) -> bool:
         """Change user password"""
