@@ -752,6 +752,103 @@ def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, p
         )
 
 
+@create_task(name="send_contact_notification_email", max_retries=3)
+def send_contact_notification_email(self, full_name: str, business_name: str, email: str, phone: str = None, store_type: str = None, interest: str = None):
+    """
+    Send contact form notification email using Celery.
+
+    Args:
+        full_name: Sender's full name
+        business_name: Business name
+        email: Sender's email address
+        phone: Sender's phone number (optional)
+        store_type: Type of store (optional)
+        interest: What they are interested in (optional)
+
+    Retry Logic:
+        - 3 max retries
+        - 60s initial delay, exponential backoff
+    """
+    task_name = "send_contact_notification_email"
+
+    try:
+        logger.info(f"📧 Starting {task_name} from {full_name} ({email})")
+
+        to_email = settings.CONTACT_NOTIFICATION_EMAIL
+        email_subject = f"New Contact Form Submission: {business_name} - Craftmen"
+
+        html_content = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+            <h2 style="color: #1a1a2e;">New Contact Form Submission</h2>
+            <hr style="border: 1px solid #eee;">
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                    <td style="padding: 10px; font-weight: bold; width: 140px; color: #555;">Full Name:</td>
+                    <td style="padding: 10px;">{full_name}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; font-weight: bold; color: #555;">Business Name:</td>
+                    <td style="padding: 10px;">{business_name}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; font-weight: bold; color: #555;">Email:</td>
+                    <td style="padding: 10px;"><a href="mailto:{email}">{email}</a></td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; font-weight: bold; color: #555;">Phone:</td>
+                    <td style="padding: 10px;">{phone or "Not provided"}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; font-weight: bold; color: #555;">Store Type:</td>
+                    <td style="padding: 10px;">{store_type or "Not provided"}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; font-weight: bold; color: #555;">Interest:</td>
+                    <td style="padding: 10px;">{interest or "Not provided"}</td>
+                </tr>
+            </table>
+            <hr style="border: 1px solid #eee;">
+            <p style="color: #999; font-size: 12px;">
+                This email was sent from the Craftmen contact form.
+            </p>
+        </body>
+        </html>
+        """
+
+        text_content = f"""
+New Contact Form Submission
+
+Full Name: {full_name}
+Business Name: {business_name}
+Email: {email}
+Phone: {phone or "Not provided"}
+Store Type: {store_type or "Not provided"}
+Interest: {interest or "Not provided"}
+        """.strip()
+
+        result = _send_via_zeptomail_sync(
+            to_email=to_email,
+            subject=email_subject,
+            html_content=html_content,
+            text_content=text_content,
+        )
+
+        if not result["success"]:
+            raise Exception(result["message"])
+
+        logger.info(f"✅ {task_name} completed successfully for {to_email}")
+        return True
+
+    except Exception as exc:
+        logger.error(f"❌ {task_name} failed: {str(exc)}")
+        raise self.retry(
+            exc=exc,
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3
+        )
+
+
 @create_task(name="send_team_invitation_email", max_retries=3)
 def send_team_invitation_email(self, to_email: str, team_name: str, variables: dict):
     """

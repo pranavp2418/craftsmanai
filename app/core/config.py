@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     ZEPTOMAIL_CUSTOMER_EMAIL: str = "designs@craftsmanai.app"
     ZEPTOMAIL_QUOTES_EMAIL: str = "quotes@craftsmanai.app"
     
+    # Contact Form Settings
+    CONTACT_NOTIFICATION_EMAIL: str = "abhishek@fonixtech.io"
+    
     # Frontend URL
     FRONTEND_URL: str = "https://craftmenai.txogavideo.in/"
 

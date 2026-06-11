@@ -2992,7 +2992,7 @@ def generate_with_fallback(
     user_prompt: str,
     parsed_data: Optional[Dict[str, Any]] = None,
     image_urls: Optional[List[str]] = None,
-    metal_tone: str = "yellow_gold",
+    metal_tone: Optional[str] = None,
     mode: Optional[str] = None,
     version_number: int = 1,
     refinement_intent_override: Optional[Dict[str, Any]] = None
@@ -3149,9 +3149,10 @@ def generate_with_fallback(
 # OPENAI IMAGE COMPATIBILITY OBJECT
 # =========================================================
 class OpenAIImageObject:
-    def __init__(self, b64_json: Optional[str] = None, url: Optional[str] = None):
+    def __init__(self, b64_json: Optional[str] = None, url: Optional[str] = None, detected_metal: Optional[str] = None):
         self.b64_json = b64_json
         self.url = url
+        self.detected_metal = detected_metal
 
 
 # =========================================================
@@ -3270,7 +3271,18 @@ class OpenAIService:
         if isinstance(result, OpenAIImageObject):
             return result
         b64 = extract_b64_from_result(result)
-        return OpenAIImageObject(b64_json=b64)
+        
+        # Resolve the final metal tone to yellow_gold/white_gold/rose_gold for task logging & storage
+        detected_metal = getattr(result, "detected_metal", None)
+        if not detected_metal:
+            detected_metal = metal_tone or "yellow_gold"
+        
+        if detected_metal == "gold":
+            detected_metal = "yellow_gold"
+        elif detected_metal == "silver":
+            detected_metal = "white_gold"
+            
+        return OpenAIImageObject(b64_json=b64, detected_metal=detected_metal)
     
     def generate_side_view(
         self,
