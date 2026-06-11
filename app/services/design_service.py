@@ -32,8 +32,21 @@ class DesignService:
         prefix = "".join(ch for ch in prefix if ch.isalnum())
         prefix = prefix[:3].ljust(3, "X")
 
+        # sequence_number is per-user (satisfies the uq_design_user_sequence
+        # constraint and represents the user's Nth design).
         sequence_number = self.design_repo.get_next_sequence_number(owner_id)
-        design_code = f"{prefix}-{sequence_number:03d}"
+
+        # design_code is GLOBALLY unique, but the prefix is derived from the user's
+        # name and is NOT unique across users. So compute the code's running number
+        # across ALL designs sharing this prefix (not per-user) to avoid cross-user
+        # collisions like two 'SAN' users both producing 'SAN-001'. For a user with a
+        # unique prefix this equals sequence_number, so existing behaviour is preserved.
+        code_n = self.design_repo.get_next_sequence_for_prefix(prefix)
+        design_code = f"{prefix}-{code_n:03d}"
+        # Safety against races / any residual collision: bump until the code is free.
+        while self.design_repo.exists_design_code(design_code):
+            code_n += 1
+            design_code = f"{prefix}-{code_n:03d}"
         return design_code, sequence_number
 
     def _resolve_owner_id(self, user: User) -> tuple[int, Optional[int]]:

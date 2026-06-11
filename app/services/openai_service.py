@@ -398,15 +398,19 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
             return False
         return True
 
+    # NOTE: capture groups use [\w \t'] (space/tab, NOT \s) so a name/text capture can
+    # NEVER cross a newline. Otherwise a multi-line prompt like
+    #   "change name mohit to king mohit\nApply a Luxury style aesthetic ..."
+    # would capture the whole style sentence as the new text and engrave it on the piece.
     # Pattern 1: [new] instead of [old]
-    matches1 = re.findall(r"\b([\w\s']{1,40})\s+instead\s+of\s+([\w\s']{1,40})\b", prompt, re.IGNORECASE)
+    matches1 = re.findall(r"\b([\w \t']{1,40})\s+instead\s+of\s+([\w \t']{1,40})\b", prompt, re.IGNORECASE)
     for m in matches1:
         new_txt, old_txt = _trim_secondary_instruction(clean_phrase(m[0])), clean_phrase(m[1])
         if new_txt and _is_text_change(old_txt, new_txt):
             replacements.append((old_txt, new_txt))
 
     # Pattern 2: change [old] to [new]  (new is trimmed at the first secondary instruction)
-    matches2 = re.findall(r"\bchange\s+([\w\s']{1,40})\s+to\s+([\w\s']{1,60})", prompt, re.IGNORECASE)
+    matches2 = re.findall(r"\bchange\s+([\w \t']{1,40})\s+to\s+([\w \t']{1,60})", prompt, re.IGNORECASE)
     for m in matches2:
         old_txt, new_txt = clean_phrase(m[0]), _trim_secondary_instruction(clean_phrase(m[1]))
         if any(x in old_txt.lower() or x in new_txt.lower() for x in ["metal", "color", "tone", "gold", "silver"]):
@@ -415,7 +419,7 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
             replacements.append((old_txt, new_txt))
 
     # Pattern 3: replace [old] with [new]
-    matches3 = re.findall(r"\breplace\s+([\w\s']{1,40})\s+with\s+([\w\s']{1,60})", prompt, re.IGNORECASE)
+    matches3 = re.findall(r"\breplace\s+([\w \t']{1,40})\s+with\s+([\w \t']{1,60})", prompt, re.IGNORECASE)
     for m in matches3:
         old_txt, new_txt = clean_phrase(m[0]), _trim_secondary_instruction(clean_phrase(m[1]))
         if new_txt and _is_text_change(old_txt, new_txt):

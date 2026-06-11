@@ -132,17 +132,20 @@ def _build_angle_variant_prompt(angle_name: str, metal: str, jewellery_type: str
         color_preserve = " same EXACT metal color and finish as the reference,"
         change_clause = "ONLY the viewing angle changes — keep the exact same metal color, finish and design as the reference"
 
+    # Resolve the piece type ONCE (used by both the worn and back views). Prefer the
+    # vision-detected piece (piece_override) — reliable even when jewellery_type is a
+    # generic 'Custom' and the prompt is empty. Fall back to jewellery_type + prompt text.
+    piece = (piece_override or "").strip().lower()
+    if piece not in _WORN_BODYPART:
+        piece = _detect_piece_type(f"{type_text} {jewellery_type}")
+    is_neck_piece = (piece == "pendant")
+    # 'Band' pieces are worn around a body part and have NO bail/hook (ring, bracelet, etc.).
+    is_band_piece = piece in ("ring", "bracelet", "anklet", "bangle", "watch")
+    # Use the resolved piece word so the prompt says "ring"/"bracelet" instead of "Custom".
+    worn_jt = piece if (jt == "jewelry piece" or (jewellery_type or "").strip().lower() in ("", "custom")) else jt
+
     if is_worn:
-        # Decide the body part for the worn view. Prefer the piece type detected by VISION on
-        # the actual rendered image (piece_override) — reliable even when jewellery_type is a
-        # generic 'Custom' and the prompt is empty. Fall back to jewellery_type + prompt text.
-        piece = (piece_override or "").strip().lower()
-        if piece not in _WORN_BODYPART:
-            piece = _detect_piece_type(f"{type_text} {jewellery_type}")
         worn_desc = _WORN_BODYPART.get(piece, _WORN_BODYPART["pendant"])
-        is_neck_piece = (piece == "pendant")
-        # Use the resolved piece word so the prompt says "ring"/"bracelet" instead of "Custom".
-        worn_jt = piece if (jt == "jewelry piece" or (jewellery_type or "").strip().lower() in ("", "custom")) else jt
         chain_clause = ""
         if is_neck_piece:
             chain_clause = (
@@ -151,6 +154,19 @@ def _build_angle_variant_prompt(angle_name: str, metal: str, jewellery_type: str
                 "threaded through the bail and connected, resting evenly on both sides of the neck. The pendant "
                 "must NOT float on its own; it hangs from the chain via its bail."
             )
+        elif piece == "ring":
+            chain_clause = (
+                " The finger must pass THROUGH the ring's band/opening — the ring is worn ON the finger with the "
+                "finger clearly INSIDE the band, sitting snugly at the base of the finger exactly like a real ring. "
+                "Use correct, realistic ring proportions (a normal-sized ring; the band hugs the finger); the "
+                "decorative top of the ring faces up on top of the finger. Do NOT make the ring oversized and do "
+                "NOT just rest it on top of the finger — the finger goes through the band hole."
+            )
+        elif is_band_piece:
+            chain_clause = (
+                f" The {worn_jt} encircles the limb — the body part passes THROUGH the band/opening so the piece is "
+                "worn around it like in real life, with correct realistic proportions. Do not just rest it on top."
+            )
         return f"""Show this exact same {worn_jt}{color_clause}, {worn_desc} — a realistic lifestyle photo of the piece being worn.{chain_clause}
 
 Keep the EXACT same design, components, stones, engraving/text, shape, proportions, borders,{color_preserve} and all details identical to the reference. Only show it being worn; do not redesign or alter any part of the piece.
@@ -158,13 +174,21 @@ Keep the EXACT same design, components, stones, engraving/text, shape, proportio
 Photorealistic lifestyle photograph, natural lighting, the jewelry in sharp focus. One image only."""
 
     if "back" in angle_name:
-        # The BACK is the reverse side: a plain backplate. The front's text/design must NOT
-        # appear readable on the back (a flipped pendant shows its smooth reverse); any
-        # see-through lettering must be MIRRORED, never readable normally.
         same_metal = metal_desc if recolor else "the same metal colour and finish as the reference"
+        if is_band_piece:
+            # A ring/bracelet is a solid band — its back is simply the reverse of the band and the
+            # back of any motif. It has NO bail/hook/backplate; never add a hanging loop.
+            ring_word = worn_jt or "ring"
+            return f"""Show the BACK / REVERSE side of this exact same {ring_word} — rotate the piece to show the back of the band/shank and the BACK of the decorative motif (for example the back of the animal's head and body), in {same_metal}, on a pure solid white background (#FFFFFF) with NO background scene.
+
+It is a solid {ring_word} — a continuous band/shank. There is NO bail, NO hook, NO loop and NO backplate: do NOT add any hanging loop, hook, ring-clip or attachment of any kind. Simply show the same piece from behind — the smooth reverse of the band and the rear of the design. Keep the EXACT same shape, size, proportions and band thickness as the reference; only the viewing side changes.
+
+Render it as a clean CAD-style 3D jewelry render (crisp, sharp, even studio lighting) — NOT a lifestyle photo, NOT a cartoon, no background scene. Pure solid white background (#FFFFFF).
+
+One image only."""
         return f"""Show the BACK / REVERSE side of this exact same {jt} — as if you physically flipped the piece over front-to-back — in {same_metal}, on a pure solid white background (#FFFFFF) with NO background scene.
 
-This is the REVERSE side, NOT the front. Show a plain, smooth metal BACKPLATE with the SAME outer outline / silhouette as the front and the BACK of the bail/hook. The front design must NOT appear readable on the back: the name, numbers, lettering, motifs and any enamel/colour from the front must NOT show normally on the back. If the piece is open-work / see-through so some lettering shows through from the front, that lettering MUST be MIRRORED (reversed left-to-right), never readable. Show realistic back-of-jewelry construction (a flat polished backplate with solder/joint points).
+This is the REVERSE side, NOT the front. Show the REALISTIC back of this exact piece exactly as real finished jewellery looks from behind — the reverse of the actual metalwork and construction: the backs of the stone settings, bezels and prongs, the reverse of the frame and any open-work / gallery, and the back of the bail/hook ONLY if the piece actually has one. Keep the SAME outer silhouette, proportions and structure as the front. Do NOT render a flat featureless metal plate / backplate, and do NOT invent any plate, hook or attachment that is not really part of the piece — show the genuine reverse construction of this specific jewellery type. The front design must NOT appear readable on the back: the name, numbers, lettering, motifs and any enamel/colour from the front must NOT show normally on the back. If the piece is open-work / see-through so some lettering shows through from the front, that lettering MUST be MIRRORED (reversed left-to-right), never readable.
 
 Render it as a clean CAD-style 3D jewelry render (crisp, sharp, even studio lighting) — NOT a lifestyle photo, NOT a cartoon, no background scene. Pure solid white background (#FFFFFF).
 
