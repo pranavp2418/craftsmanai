@@ -126,9 +126,13 @@ async def login(
     auth_service.user_repo.update_last_login(user.id)
     
     # Set refresh token in HTTP-only cookie
-    max_age = int(
-        (7 * 24 * 60 * 60) if login_data.remember_me else (24 * 60 * 60)
+    # Max age must match the token's actual expiration from create_refresh_token
+    cookie_days = (
+        settings.REFRESH_TOKEN_DAYS_REMEMBER
+        if login_data.remember_me
+        else settings.REFRESH_TOKEN_DAYS
     )
+    max_age = int(cookie_days * 24 * 60 * 60)
     
     response.set_cookie(
         key="refresh_token",

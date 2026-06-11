@@ -10,8 +10,7 @@ import socketio
 from .api.v2.router import api_router
 from .core.config import settings
 from .core.middleware import (
-    GlobalRateLimitMiddleware,
-    IPBasedRateLimitMiddleware,
+    HybridRateLimitMiddleware,
     SecurityHeadersMiddleware,
     RequestLoggingMiddleware,
     HealthCheckMiddleware,
@@ -75,8 +74,7 @@ fastapi_app = FastAPI(
 fastapi_app.add_middleware(HealthCheckMiddleware)
 fastapi_app.add_middleware(RequestLoggingMiddleware)
 fastapi_app.add_middleware(SecurityHeadersMiddleware)
-fastapi_app.add_middleware(IPBasedRateLimitMiddleware)
-fastapi_app.add_middleware(GlobalRateLimitMiddleware)
+fastapi_app.add_middleware(HybridRateLimitMiddleware)
 
 # CORS middleware
 fastapi_app.add_middleware(
