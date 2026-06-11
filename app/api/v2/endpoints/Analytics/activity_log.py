@@ -76,6 +76,10 @@ async def get_activity_log(
     normalized_filter = _normalize_filter(actor_type)
     items: List[Dict[str, Any]] = []
 
+    # Filter based on whether user is team member or team owner/regular user
+    owner_id = admin.team_owner_id if admin.is_team_member and admin.team_owner_id else admin.id
+    design_filter = Design.user_id == owner_id
+
     if normalized_filter == "customer":
         customer_result = await db.execute(
             select(DesignShare, Design, Manufacturer.name)
@@ -83,6 +87,7 @@ async def get_activity_log(
             .join(DesignVariant.design)
             .outerjoin(DesignShare.order)
             .outerjoin(Order.manufacturer)
+            .where(design_filter)
             .order_by(DesignShare.created_at.desc())
         )
 
@@ -107,6 +112,7 @@ async def get_activity_log(
             .join(DesignVariantManufacturerShare.design_variant)
             .join(DesignVariant.design)
             .join(DesignVariantManufacturerShare.manufacturer)
+            .where(design_filter)
             .order_by(DesignVariantManufacturerShare.created_at.desc())
         )
 

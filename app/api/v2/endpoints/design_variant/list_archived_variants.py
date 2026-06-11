@@ -20,9 +20,10 @@ def list_archived_variants(
 ):
 	variant_service = DesignVariantService(db)
 
+	owner_id = current_user.team_owner_id if current_user.is_team_member and current_user.team_owner_id else current_user.id
 	skip = (page - 1) * limit
-	variants = variant_service.list_archived_variants(current_user.id, skip=skip, limit=limit)
-	total_items = variant_service.count_archived_variants(current_user.id)
+	variants = variant_service.list_archived_variants(owner_id, skip=skip, limit=limit)
+	total_items = variant_service.count_archived_variants(owner_id)
 	total_pages = (total_items + limit - 1) // limit if total_items > 0 else 0
 
 	pagination = PaginationMetadata(

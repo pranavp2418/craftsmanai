@@ -32,6 +32,7 @@ class DesignStatus(str, Enum):
     REJECTED = "REJECTED"
     IN_PRODUCTION = "IN_PRODUCTION"
     COMPLETED = "COMPLETED"
+    SENT_TO_MANUFACTURER = "SENT_TO_MANUFACTURER"
 
 
 class Design(Base):

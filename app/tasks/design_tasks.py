@@ -356,13 +356,27 @@ def refine_design_variant_image(
         design = db.query(DesignModel).filter(DesignModel.id == design_id).first()
         jewellery_type = design.jewellery_type if design else ""
 
-        # Build a combined prompt incorporating style_tags and design_focus.
-        # Phrased as clear directives so the optional tags actually shape the output.
-        combined_prompt = prompt or ""
+        # Build the refine prompt. The USER PROMPT is the only edit instruction — do exactly
+        # what it says and nothing else. style_tags / design_focus are OPTIONAL *visual style*
+        # direction (how the jewellery should look/feel); they are NOT text and must never be
+        # written or engraved onto the piece. Keep them on a clearly separated block with an
+        # explicit no-engraving rule so they shape the aesthetic instead of leaking into the
+        # text/engraving (which previously caused tag words to be carved into the piece).
+        combined_prompt = (prompt or "").strip()
+        style_bits = []
         if style_tags:
-            combined_prompt = f"{combined_prompt}\nApply a {style_tags} style aesthetic to the piece while keeping the same overall design."
+            style_bits.append(str(style_tags).strip())
         if design_focus:
-            combined_prompt = f"{combined_prompt}\nApply the change with particular focus on the {design_focus} of the piece."
+            style_bits.append(f"emphasis on {str(design_focus).strip()}")
+        if style_bits:
+            combined_prompt = (
+                f"{combined_prompt}\n\n"
+                "STYLE DIRECTION (visual aesthetic only — describes HOW the piece should look and "
+                "feel; do NOT write, letter, engrave, or add ANY of these words as text/characters "
+                f"anywhere on the jewellery): {', '.join(style_bits)}. "
+                "Apply this as overall styling while keeping the same overall design and only the "
+                "user-requested change."
+            ).strip()
 
         # Generate refined image via OpenAI using the resolved reference images
         generated_item = openai_service.generate_base_image(reference_image_source, combined_prompt, jewellery_type=jewellery_type)

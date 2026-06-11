@@ -105,10 +105,23 @@ def generate_variant_angles(
             "sse_channel": channel,
         }
 
-    generate_remaining_variant_angles.delay(
-        variant_id=variant.id,
-        metals=missing_metals,
-        channel=channel,
+    # Deduct subscription tokens (3 per missing metal to generate)
+    from app.services.subscription_service import SubscriptionService
+    SubscriptionService.check_and_deduct_tokens(db, current_user, len(missing_metals) * 3)
+
+    # generate_remaining_variant_angles.delay(
+    #     variant_id=variant.id,
+    #     metals=missing_metals,
+    #     channel=channel,
+    # Route to the dedicated angle-variants queue so angle generation runs on
+    # worker-angles instead of blocking the primary render worker.
+    generate_remaining_variant_angles.apply_async(
+        kwargs={
+            "variant_id": variant.id,
+            "metals": missing_metals,
+            "channel": channel,
+        },
+        queue="angle_variants",
     )
     return {
         "success": True,

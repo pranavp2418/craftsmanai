@@ -17,6 +17,31 @@ class DesignRepository:
         max_sequence = self.db.query(func.max(Design.sequence_number)).filter(Design.user_id == user_id).scalar()
         return (max_sequence or 0) + 1
 
+    def exists_design_code(self, design_code: str) -> bool:
+        """True if any design (incl. soft-deleted) already uses this code.
+
+        The ix_designs_design_code unique constraint spans ALL rows, so this must
+        NOT filter on is_deleted — otherwise we'd regenerate a code that still
+        physically occupies the unique index and hit a UniqueViolation on insert.
+        """
+        return self.db.query(Design.id).filter(Design.design_code == design_code).first() is not None
+
+    def get_next_sequence_for_prefix(self, prefix: str) -> int:
+        """Next free running number for a design-code *prefix* (e.g. 'SAN').
+
+        design_code is GLOBALLY unique but the prefix is derived from the user's
+        name and is NOT unique across users, so two users sharing a prefix would
+        otherwise both generate 'SAN-001'. Compute the next number across ALL
+        designs (incl. soft-deleted) that share this prefix so codes never collide.
+        """
+        rows = self.db.query(Design.design_code).filter(Design.design_code.like(f"{prefix}-%")).all()
+        max_n = 0
+        for (code,) in rows:
+            tail = (code or "").rsplit("-", 1)[-1]
+            if tail.isdigit():
+                max_n = max(max_n, int(tail))
+        return max_n + 1
+
     def create_design(
         self,
         *,
@@ -78,23 +103,32 @@ class DesignRepository:
 
     def list_archived(
         self,
+        owner_id: int,
         *,
         limit: int = 50,
         offset: int = 0,
     ) -> List[Design]:
         return (
             self.db.query(Design)
-            .filter(Design.is_archived.is_(True), Design.is_deleted.is_(False))
+            .filter(
+                Design.user_id == owner_id,
+                Design.is_archived.is_(True),
+                Design.is_deleted.is_(False),
+            )
             .order_by(Design.created_at.desc())
             .offset(offset)
             .limit(limit)
             .all()
         )
 
-    def count_archived(self) -> int:
+    def count_archived(self, owner_id: int) -> int:
         return (
             self.db.query(func.count(Design.id))
-            .filter(Design.is_archived.is_(True), Design.is_deleted.is_(False))
+            .filter(
+                Design.user_id == owner_id,
+                Design.is_archived.is_(True),
+                Design.is_deleted.is_(False),
+            )
             .scalar()
             or 0
         )
@@ -106,12 +140,15 @@ class DesignRepository:
         user_id: int,
         *,
         status: Optional[DesignStatus] = None,
+        search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> List[Design]:
         query = self.db.query(Design).filter(Design.user_id == user_id, Design.is_archived.is_(False), Design.is_deleted.is_(False))
         if status:
             query = query.filter(Design.status == status)
+        if search:
+            query = query.filter(Design.design_code.ilike(f"%{search.strip()}%"))
         return query.order_by(Design.created_at.desc()).offset(offset).limit(limit).all()
 
     def list_by_team_owner(
@@ -119,6 +156,7 @@ class DesignRepository:
         team_owner_id: int,
         *,
         status: Optional[DesignStatus] = None,
+        search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> List[Design]:
@@ -126,6 +164,8 @@ class DesignRepository:
         query = self.db.query(Design).filter(Design.user_id == team_owner_id, Design.is_archived.is_(False), Design.is_deleted.is_(False))
         if status:
             query = query.filter(Design.status == status)
+        if search:
+            query = query.filter(Design.design_code.ilike(f"%{search.strip()}%"))
         return query.order_by(Design.created_at.desc()).offset(offset).limit(limit).all()
 
     def list_by_created_by(
@@ -134,6 +174,7 @@ class DesignRepository:
         team_owner_id: int,
         *,
         status: Optional[DesignStatus] = None,
+        search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> List[Design]:
@@ -146,6 +187,8 @@ class DesignRepository:
         )
         if status:
             query = query.filter(Design.status == status)
+        if search:
+            query = query.filter(Design.design_code.ilike(f"%{search.strip()}%"))
         return query.order_by(Design.created_at.desc()).offset(offset).limit(limit).all()
 
     def count_by_user(
@@ -153,10 +196,13 @@ class DesignRepository:
         user_id: int,
         *,
         status: Optional[DesignStatus] = None,
+        search: Optional[str] = None,
     ) -> int:
         query = self.db.query(func.count(Design.id)).filter(Design.user_id == user_id, Design.is_archived.is_(False), Design.is_deleted.is_(False))
         if status:
             query = query.filter(Design.status == status)
+        if search:
+            query = query.filter(Design.design_code.ilike(f"%{search.strip()}%"))
         return query.scalar() or 0
 
     def count_by_team_owner(
@@ -164,11 +210,14 @@ class DesignRepository:
         team_owner_id: int,
         *,
         status: Optional[DesignStatus] = None,
+        search: Optional[str] = None,
     ) -> int:
         """Count all designs owned by a team owner."""
         query = self.db.query(func.count(Design.id)).filter(Design.user_id == team_owner_id, Design.is_archived.is_(False), Design.is_deleted.is_(False))
         if status:
             query = query.filter(Design.status == status)
+        if search:
+            query = query.filter(Design.design_code.ilike(f"%{search.strip()}%"))
         return query.scalar() or 0
 
     def count_by_created_by(
@@ -177,6 +226,7 @@ class DesignRepository:
         team_owner_id: int,
         *,
         status: Optional[DesignStatus] = None,
+        search: Optional[str] = None,
     ) -> int:
         """Count designs created by a specific team member."""
         query = self.db.query(func.count(Design.id)).filter(
@@ -187,6 +237,8 @@ class DesignRepository:
         )
         if status:
             query = query.filter(Design.status == status)
+        if search:
+            query = query.filter(Design.design_code.ilike(f"%{search.strip()}%"))
         return query.scalar() or 0
 
     def update_design(self, design: Design, **kwargs) -> Design:

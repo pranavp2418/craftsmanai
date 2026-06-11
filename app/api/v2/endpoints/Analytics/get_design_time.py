@@ -50,10 +50,15 @@ async def get_design_time(
 	window_start = month_starts[0]
 	window_end = now + timedelta(days=1)
 
+	# Filter based on whether user is team member or team owner/regular user
+	owner_id = admin.team_owner_id if admin.is_team_member and admin.team_owner_id else admin.id
+	design_filter = Design.user_id == owner_id
+
 	result = await db.execute(
 		select(Design.created_at).where(
 			Design.created_at >= window_start,
 			Design.created_at < window_end,
+			design_filter,
 		)
 	)
 	rows = result.all()

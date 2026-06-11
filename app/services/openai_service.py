@@ -398,15 +398,19 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
             return False
         return True
 
+    # NOTE: capture groups use [\w \t'] (space/tab, NOT \s) so a name/text capture can
+    # NEVER cross a newline. Otherwise a multi-line prompt like
+    #   "change name mohit to king mohit\nApply a Luxury style aesthetic ..."
+    # would capture the whole style sentence as the new text and engrave it on the piece.
     # Pattern 1: [new] instead of [old]
-    matches1 = re.findall(r"\b([\w\s']{1,40})\s+instead\s+of\s+([\w\s']{1,40})\b", prompt, re.IGNORECASE)
+    matches1 = re.findall(r"\b([\w \t']{1,40})\s+instead\s+of\s+([\w \t']{1,40})\b", prompt, re.IGNORECASE)
     for m in matches1:
         new_txt, old_txt = _trim_secondary_instruction(clean_phrase(m[0])), clean_phrase(m[1])
         if new_txt and _is_text_change(old_txt, new_txt):
             replacements.append((old_txt, new_txt))
 
     # Pattern 2: change [old] to [new]  (new is trimmed at the first secondary instruction)
-    matches2 = re.findall(r"\bchange\s+([\w\s']{1,40})\s+to\s+([\w\s']{1,60})", prompt, re.IGNORECASE)
+    matches2 = re.findall(r"\bchange\s+([\w \t']{1,40})\s+to\s+([\w \t']{1,60})", prompt, re.IGNORECASE)
     for m in matches2:
         old_txt, new_txt = clean_phrase(m[0]), _trim_secondary_instruction(clean_phrase(m[1]))
         if any(x in old_txt.lower() or x in new_txt.lower() for x in ["metal", "color", "tone", "gold", "silver"]):
@@ -415,7 +419,7 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
             replacements.append((old_txt, new_txt))
 
     # Pattern 3: replace [old] with [new]
-    matches3 = re.findall(r"\breplace\s+([\w\s']{1,40})\s+with\s+([\w\s']{1,60})", prompt, re.IGNORECASE)
+    matches3 = re.findall(r"\breplace\s+([\w \t']{1,40})\s+with\s+([\w \t']{1,60})", prompt, re.IGNORECASE)
     for m in matches3:
         old_txt, new_txt = clean_phrase(m[0]), _trim_secondary_instruction(clean_phrase(m[1]))
         if new_txt and _is_text_change(old_txt, new_txt):
@@ -2250,32 +2254,56 @@ def generate_with_openai_image(
                     headers={"Authorization": f"Bearer {api_key}"},
                     data=data,
                     files=files,
-                    timeout=180,
+                    timeout=(15, 300),
                 )
             else:
-                result = client.images.generate(
-                    prompt=truncated_prompt,
-                    **img_kwargs
+                # Use images/generations endpoint (text-only)
+                response = requests.post(
+                    "https://api.openai.com/v1/images/generations",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "gpt-image-2",
+                        "prompt": truncated_prompt,
+                        "n": 1,
+                        "size": "1024x1024",
+                        "quality": "auto",
+                        "background": "opaque",
+                    },
+                    timeout=(15, 300),
                 )
 
-            data_item = result.data[0]
-            b64 = getattr(data_item, "b64_json", None) or (
-                data_item.get("b64_json") if isinstance(data_item, dict) else None
+            if response.ok:
+                resp_data = response.json()
+                b64 = resp_data.get("data", [{}])[0].get("b64_json")
+                if b64:
+                    logger.info("OpenAI gpt-image-2 generation succeeded (attempt %d)", attempt)
+                    # Force a pure white background on the generated output. gpt-image-2
+                    # sometimes returns a dark backdrop even when asked for white — the
+                    # border flood-fill guarantees #FFFFFF without touching the jewelry.
+                    # Skipped for lifestyle/worn shots (whiten_output=False) where the
+                    # flood-fill would eat into the skin and natural background.
+                    if whiten_output:
+                        try:
+                            whitened = _whiten_background(base64.b64decode(b64), tag="white_bg_output")
+                            b64 = base64.b64encode(whitened).decode("utf-8")
+                        except Exception as _wb_err:
+                            logger.warning("Output white-bg post-process skipped: %s", _wb_err)
+                    return b64
+                raise ValueError("No b64_json in OpenAI response")
+
+            transient = response.status_code in [408, 429, 500, 502, 503, 504]
+            error_text = response.text[:300]
+            logger.error(
+                "OpenAI image error (attempt %d/%d): %d %s",
+                attempt, max_attempts, response.status_code, error_text,
             )
-            if not b64:
-                url = getattr(data_item, "url", None) or (
-                    data_item.get("url") if isinstance(data_item, dict) else None
-                )
-                if url:
-                    resp = requests.get(url, timeout=20)
-                    resp.raise_for_status()
-                    b64 = base64.b64encode(resp.content).decode("utf-8")
-            
-            if b64:
-                logger.info(f"OpenAI gpt-image-2 generation succeeded (attempt {attempt})")
-                return b64, detected_metal
+            if not transient or attempt == max_attempts:
+                raise ValueError(f"OpenAI failed: {response.status_code} {error_text}")
 
-            raise ValueError("No image payload in OpenAI response")
+            time.sleep(1.2 * attempt)
 
         except (requests.exceptions.RequestException, ValueError) as e:
             if attempt == max_attempts:

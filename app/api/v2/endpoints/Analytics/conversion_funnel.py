@@ -50,49 +50,70 @@ async def get_conversion_funnel(
 	"""Return six-month conversion funnel metrics matching the dashboard UI."""
 	cutoff = datetime.now(timezone.utc) - timedelta(days=183)
 
+	# Filter based on whether user is team member or team owner/regular user
+	owner_id = admin.team_owner_id if admin.is_team_member and admin.team_owner_id else admin.id
+	design_filter = Design.user_id == owner_id
+
 	requests_res = await db.execute(
 		select(func.count(Design.id)).where(
 			and_(
 				Design.created_at >= cutoff,
 				Design.is_deleted.is_(False),
+				design_filter,
 			)
 		)
 	)
 	requests = requests_res.scalar() or 0
 
 	rendered_res = await db.execute(
-		select(func.count(distinct(DesignVariant.design_id))).where(
+		select(func.count(distinct(DesignVariant.design_id)))
+		.join(Design, DesignVariant.design_id == Design.id)
+		.where(
 			and_(
 				DesignVariant.created_at >= cutoff,
 				DesignVariant.version_number == 0,
 				DesignVariant.is_deleted.is_(False),
+				design_filter,
 			)
 		)
 	)
 	rendered = rendered_res.scalar() or 0
 
 	sent_res = await db.execute(
-		select(func.count(DesignShare.id)).where(
-			DesignShare.created_at >= cutoff,
+		select(func.count(DesignShare.id))
+		.join(DesignShare.design_variant)
+		.join(DesignVariant.design)
+		.where(
+			and_(
+				DesignShare.created_at >= cutoff,
+				design_filter,
+			)
 		)
 	)
 	sent = sent_res.scalar() or 0
 
 	approved_res = await db.execute(
-		select(func.count(DesignShare.id)).where(
+		select(func.count(DesignShare.id))
+		.join(DesignShare.design_variant)
+		.join(DesignVariant.design)
+		.where(
 			and_(
 				DesignShare.created_at >= cutoff,
 				DesignShare.status == DesignShareStatus.ACCEPTED,
+				design_filter,
 			)
 		)
 	)
 	approved = approved_res.scalar() or 0
 
 	manufactured_res = await db.execute(
-		select(func.count(Order.id)).where(
+		select(func.count(Order.id))
+		.join(Design, Order.design_id == Design.id)
+		.where(
 			and_(
 				Order.status == OrderStatus.COMPLETED,
 				Order.updated_at >= cutoff,
+				design_filter,
 			)
 		)
 	)
@@ -100,11 +121,15 @@ async def get_conversion_funnel(
 
 	# Average time to approval = average days from share sent to customer approval.
 	approval_rows = await db.execute(
-		select(DesignShare.created_at, DesignShare.reviewed_at).where(
+		select(DesignShare.created_at, DesignShare.reviewed_at)
+		.join(DesignShare.design_variant)
+		.join(DesignVariant.design)
+		.where(
 			and_(
 				DesignShare.created_at >= cutoff,
 				DesignShare.status == DesignShareStatus.ACCEPTED,
 				DesignShare.reviewed_at.is_not(None),
+				design_filter,
 			)
 		)
 	)
@@ -119,11 +144,14 @@ async def get_conversion_funnel(
 
 	# Average refinements per design = total refinements / total requests.
 	refinements_res = await db.execute(
-		select(func.count(DesignVariant.id)).where(
+		select(func.count(DesignVariant.id))
+		.join(Design, DesignVariant.design_id == Design.id)
+		.where(
 			and_(
 				DesignVariant.created_at >= cutoff,
 				DesignVariant.version_number > 0,
 				DesignVariant.is_deleted.is_(False),
+				design_filter,
 			)
 		)
 	)

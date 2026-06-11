@@ -74,6 +74,7 @@ def _build_design_response(design) -> dict:
 @router.get("/", response_model=DesignListResponse)
 def list_designs(
     status: DesignStatus | None = Query(default=None),
+    search: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -83,6 +84,7 @@ def list_designs(
     items, total = service.list_designs(
         user=current_user,
         status=status,
+        search=search,
         limit=limit,
         offset=offset,
     )
