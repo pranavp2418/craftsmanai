@@ -17,7 +17,7 @@ class UserRepository:
         self.db = db
 
     def create_user(self, email: str, username: str, full_name: str, password: str, 
-                    is_verified: bool = False, whatsapp_number: str = None) -> User:
+                    is_verified: bool = False, business_name: str = None, whatsapp_number: str = None) -> User:
         """Create a new user"""
         hashed_password = get_password_hash(password)
         db_user = User(
@@ -25,6 +25,7 @@ class UserRepository:
             username=username,
             full_name=full_name,
             hashed_password=hashed_password,
+            business_name=business_name,
             is_active=True,
             is_verified=is_verified,
             whatsapp_number=whatsapp_number

@@ -72,6 +72,7 @@ async def signup(
             user = user_repo.create_user(
                 email=user_in.email,
                 username=username,
+                business_name=user_in.business_name,
                 full_name=None,
                 password=user_in.password
             )
@@ -98,20 +99,28 @@ async def signup(
         user_repo.update_user(user.id, whatsapp_number=user_in.whatsapp_number)
     
     # Generate OTP
-    from app.services.auth import AuthService
-    auth_service = AuthService(db)
-    otp_code = auth_service.generate_and_save_otp(
-        user.email, "email_verification", user.id
-    )
+    # from app.services.auth import AuthService
+    # auth_service = AuthService(db)
+    # otp_code = auth_service.generate_and_save_otp(
+    #     user.email, "email_verification", user.id
+    # )
     
-    logger.info(f"OTP generated and sent to {user.email}")
+    # logger.info(f"OTP generated and sent to {user.email}")
     
-    # Send OTP email (background task)
-    from app.tasks.email_tasks import send_signup_otp_email
-    send_signup_otp_email.delay(
-        to=user.email,
-        otp=otp_code,
-        user_name=user.full_name or user.email
+    # # Send OTP email (background task)
+    # from app.tasks.email_tasks import send_signup_otp_email
+    # send_signup_otp_email.delay(
+    #     to=user.email,
+    #     otp=otp_code,
+    #     user_name=user.full_name or user.email
+    # )
+
+    from app.services.otp_service import generate_and_send_otp
+
+    generate_and_send_otp(
+        db=db,
+        user=user,
+        otp_type="email_verification"
     )
     
     logger.info(f"User signup/retry: {user.email} (ID: {user.id})")

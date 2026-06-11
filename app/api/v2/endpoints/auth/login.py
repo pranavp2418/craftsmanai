@@ -62,6 +62,25 @@ async def login(
             detail="Account not verified. Please verify your email address.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    # Check if 2FA is enabled
+    if user.is_2fa_enabled:
+        logger.info(f"2FA verification required for user: {user.email}")
+        from app.services.otp_service import generate_and_send_otp
+
+        generate_and_send_otp(
+            db=db,
+            user=user,
+            otp_type="login_2fa"
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "TWO_FACTOR_REQUIRED",
+                "message": "OTP verification required"
+            },
+        )
+
     
     # Handle device management (max device limit)
     device_id = None
