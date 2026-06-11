@@ -232,47 +232,33 @@ def verify_payment(
             ).order_by(UserSubscription.end_date.desc()).first()
 
             if active_subscription:
-                # Queue the subscription
-                start_date = active_subscription.end_date
-                end_date = start_date + timedelta(days=duration)
+                # Deactivate the old active subscription immediately
+                active_subscription.status = SubscriptionStatus.EXPIRED
+                active_subscription.end_date = datetime.now(timezone.utc)
+                logger.info(f"Previous active subscription {active_subscription.id} marked as EXPIRED")
 
-                user_sub = UserSubscription(
-                    user_id=payment.user_id,
-                    plan_id=payment.plan_id,
-                    stripe_customer_id=payment.stripe_customer_id,
-                    stripe_subscription_id=stripe_sub_id,
-                    start_date=start_date,
-                    end_date=end_date,
-                    status=SubscriptionStatus.ACTIVE,
-                    is_queued=True,
-                    activates_after_subscription_id=active_subscription.id,
-                    initial_monthly_renders=plan.monthly_renders if plan.monthly_renders != -1 else 999999,
-                    used_monthly_renders=0
-                )
-                logger.info(f"Subscription queued to activate after {active_subscription.id} ends")
-            else:
-                # Activate immediately
-                start_date = datetime.now(timezone.utc)
-                end_date = start_date + timedelta(days=duration)
+            # Activate immediately
+            start_date = datetime.now(timezone.utc)
+            end_date = start_date + timedelta(days=duration)
 
-                user_sub = UserSubscription(
-                    user_id=payment.user_id,
-                    plan_id=payment.plan_id,
-                    stripe_customer_id=payment.stripe_customer_id,
-                    stripe_subscription_id=stripe_sub_id,
-                    start_date=start_date,
-                    end_date=end_date,
-                    status=SubscriptionStatus.ACTIVE,
-                    is_queued=False,
-                    initial_monthly_renders=plan.monthly_renders if plan.monthly_renders != -1 else 999999,
-                    used_monthly_renders=0
-                )
+            user_sub = UserSubscription(
+                user_id=payment.user_id,
+                plan_id=payment.plan_id,
+                stripe_customer_id=payment.stripe_customer_id,
+                stripe_subscription_id=stripe_sub_id,
+                start_date=start_date,
+                end_date=end_date,
+                status=SubscriptionStatus.ACTIVE,
+                is_queued=False,
+                initial_monthly_renders=plan.monthly_renders if plan.monthly_renders != -1 else 999999,
+                used_monthly_renders=0
+            )
 
-                # Update user's active plan (branding) immediately
-                db.query(User).filter(User.id == payment.user_id).update({
-                    "subscription_plan": plan.name
-                })
-                logger.info(f"Subscription activated immediately. Plan: {plan.name}")
+            # Update user's active plan (branding) immediately
+            db.query(User).filter(User.id == payment.user_id).update({
+                "subscription_plan": plan.name
+            })
+            logger.info(f"Subscription activated immediately. Plan: {plan.name}")
 
             db.add(user_sub)
 
