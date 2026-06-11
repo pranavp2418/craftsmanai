@@ -27,12 +27,12 @@ class SubscriptionService:
 
         owner_id = SubscriptionService.get_subscription_owner_id(user)
         
-        # Query the active subscription for the owner
+        # Query the active subscription for the owner with a row lock to prevent race conditions
         subscription = db.query(UserSubscription).filter(
             UserSubscription.user_id == owner_id,
             UserSubscription.status == SubscriptionStatus.ACTIVE,
             UserSubscription.is_queued == False
-        ).order_by(UserSubscription.created_at.desc()).first()
+        ).order_by(UserSubscription.created_at.desc()).with_for_update().first()
 
         if not subscription:
             logger.warning(f"User {user.id} (owner {owner_id}) attempted generation but has no active subscription.")
