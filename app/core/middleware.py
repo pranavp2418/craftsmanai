@@ -1,14 +1,48 @@
 from fastapi import Request, Response, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from slowapi.util import get_remote_address
-from typing import Callable
+from typing import Callable, Optional
 import time
 import logging
 
+from jose import jwt, JWTError
 from .rate_limiter import rate_limiter
 from .config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_user_id_from_request(request: Request) -> Optional[str]:
+    """
+    Extract the user ID from the Authorization header's JWT access token.
+
+    Returns the ``sub`` (or ``user_id``) claim on success, or ``None`` when
+    the header is missing, the token is malformed / expired, or the token
+    type is not ``access``.  This function is intentionally lenient – any
+    failure simply falls back to IP-only rate limiting.
+    """
+    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    if not auth or not auth.lower().startswith("bearer "):
+        return None
+
+    token = auth.split(" ", 1)[1].strip()
+
+    try:
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+        )
+    except (JWTError, Exception):
+        # Invalid / expired / unverifiable token → fall back to IP-only
+        return None
+
+    # Only accept access tokens (skip refresh / reset / etc.)
+    token_type = payload.get("type")
+    if token_type is not None and token_type != "access":
+        return None
+
+    return payload.get("sub") or payload.get("user_id")
 
 
 class HybridRateLimitMiddleware(BaseHTTPMiddleware):
@@ -21,7 +55,8 @@ class HybridRateLimitMiddleware(BaseHTTPMiddleware):
         - Default limit: 1000/minute (configurable via settings.RATE_LIMIT_IP)
 
     Layer 2 (User-based strict limit):
-        - Applied only when request.state.user exists (authenticated user)
+        - Applied only when a valid JWT access token is present in the
+          Authorization header.
         - Key format:  rl:user:{user_id}
         - Default limit: 60/minute (configurable via settings.RATE_LIMIT_USER)
 
@@ -65,9 +100,8 @@ class HybridRateLimitMiddleware(BaseHTTPMiddleware):
         # ------------------------------------------------------------------
         # Layer 2 – User-based strict limit (authenticated users only)
         # ------------------------------------------------------------------
-        user = getattr(request.state, "user", None)
-        if user is not None:
-            user_id = getattr(user, "id", None) or str(user)
+        user_id = _extract_user_id_from_request(request)
+        if user_id is not None:
             user_key = f"rl:user:{user_id}"
 
             try:
