@@ -34,8 +34,10 @@ def get_user_profile(
         last_name=last_name,
         full_name=current_user.full_name,
         whatsapp_number=current_user.whatsapp_number,
+        profile_picture_url=current_user.profile_picture_url,
         is_active=current_user.is_active,
         is_verified=current_user.is_verified,
         is_superuser=current_user.is_superuser,
+        business_name=current_user.business_name,
         role=role
     )

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from app.core.dependencies import get_db, get_current_user
 from app.schemas.user_profile import UserProfileResponse, UserProfileUpdate
@@ -54,6 +54,9 @@ def update_user_profile(
     # 3. Update WhatsApp / Phone Number if provided
     if profile_data.whatsapp_number is not None:
         current_user.whatsapp_number = profile_data.whatsapp_number.strip()
+    
+    if profile_data.business_name is not None:
+        current_user.business_name = profile_data.business_name.strip()
 
     db.commit()
     db.refresh(current_user)
@@ -70,8 +73,62 @@ def update_user_profile(
         last_name=final_last,
         full_name=current_user.full_name,
         whatsapp_number=current_user.whatsapp_number,
+        profile_picture_url=current_user.profile_picture_url,
         is_active=current_user.is_active,
         is_verified=current_user.is_verified,
         is_superuser=current_user.is_superuser,
+        business_name=current_user.business_name,
+        role=role
+    )
+
+
+@router.post("/profile-picture", response_model=UserProfileResponse)
+async def update_profile_picture(
+    *,
+    db: Session = Depends(get_db),
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Upload and update/add the profile picture for the currently logged-in user.
+    """
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File is empty"
+        )
+
+    from app.services.storage_service import upload_image_to_supabase
+    
+    bucket_path = f"profile-pictures/user_{current_user.id}"
+    try:
+        url = upload_image_to_supabase(content, bucket_path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload profile picture: {str(e)}"
+        )
+
+    current_user.profile_picture_url = url
+    db.commit()
+    db.refresh(current_user)
+
+    final_first, final_last = split_full_name(current_user.full_name)
+    role = "Admin" if current_user.is_superuser else "User"
+
+    return UserProfileResponse(
+        id=current_user.id,
+        email=current_user.email,
+        username=current_user.username,
+        first_name=final_first,
+        last_name=final_last,
+        full_name=current_user.full_name,
+        whatsapp_number=current_user.whatsapp_number,
+        profile_picture_url=current_user.profile_picture_url,
+        is_active=current_user.is_active,
+        is_verified=current_user.is_verified,
+        is_superuser=current_user.is_superuser,
+        business_name=current_user.business_name,
         role=role
     )

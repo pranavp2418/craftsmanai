@@ -15,7 +15,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     business_name = Column(String(255), nullable=True, doc="Business name for design code generation (e.g., 'Jack John' -> 'jj')")
     design_prefix = Column(String(10), nullable=True, doc="Prefix used for generating design codes")
-    
+    profile_picture_url = Column(String(255), nullable=True)
     # Team member fields
     is_team_member = Column(Boolean, default=False, doc="Indicates if this user is a team member (not the account owner)")
     team_owner_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True, doc="The user who invited/owns this team member")
