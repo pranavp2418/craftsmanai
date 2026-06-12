@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
 from typing import Any
@@ -108,18 +109,32 @@ async def login(
     
     # Create tokens
     from app.core.security import create_access_token, create_refresh_token
+    from jose import jwt
     access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
+    
+    # Extract access token JTI and expiry for storage
+    access_payload = jwt.decode(
+        access_token,
+        settings.SECRET_KEY,
+        algorithms=[settings.ALGORITHM],
+        options={"verify_exp": False}
+    )
+    access_token_jti = access_payload.get("jti")
+    access_token_exp = datetime.fromtimestamp(access_payload.get("exp"), tz=timezone.utc) if access_payload.get("exp") else None
+    
     refresh_token, token_id, expires_at = create_refresh_token(
         str(user.id), login_data.remember_me
     )
     
-    # Store refresh token with device_id
+    # Store refresh token with device_id and access token info
     auth_service.token_repo.create_refresh_token(
         user_id=user.id,
         token=refresh_token,
         token_id=token_id,
         expires_at=expires_at,
-        device_id=device_id
+        device_id=device_id,
+        access_token_jti=access_token_jti,
+        access_token_expires_at=access_token_exp
     )
     
     # Update last login

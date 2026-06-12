@@ -246,7 +246,8 @@ class RefreshTokenRepository:
         self.db = db
 
     def create_refresh_token(self, user_id: int, token: str, token_id: str, 
-                           expires_at: datetime, device_id: str = None) -> RefreshToken:
+                           expires_at: datetime, device_id: str = None,
+                           access_token_jti: str = None, access_token_expires_at: datetime = None) -> RefreshToken:
         """Create a new refresh token"""
         hashed_token = hash_token(token)
         refresh_token = RefreshToken(
@@ -255,12 +256,24 @@ class RefreshTokenRepository:
             hashed_token=hashed_token,
             device_id=device_id,
             expires_at=expires_at,
-            is_active=True
+            is_active=True,
+            access_token_jti=access_token_jti,
+            access_token_expires_at=access_token_expires_at
         )
         self.db.add(refresh_token)
         self.db.commit()
         self.db.refresh(refresh_token)
         return refresh_token
+
+    def update_refresh_token_access_info(self, token_id: str, access_token_jti: str, access_token_expires_at: datetime) -> Optional[RefreshToken]:
+        """Update the access token JTI and expiry for an existing refresh token"""
+        token = self.get_refresh_token_by_id(token_id)
+        if token:
+            token.access_token_jti = access_token_jti
+            token.access_token_expires_at = access_token_expires_at
+            self.db.commit()
+            self.db.refresh(token)
+        return token
 
     def get_refresh_token_by_id(self, token_id: str) -> Optional[RefreshToken]:
         """Get refresh token by token_id"""

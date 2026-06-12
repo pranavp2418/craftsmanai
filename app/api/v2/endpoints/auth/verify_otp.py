@@ -92,7 +92,19 @@ async def verify_otp(
         db.commit()
         
     # Create tokens and session
+    from jose import jwt
     access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
+    
+    # Extract access token JTI and expiry for storage
+    access_payload = jwt.decode(
+        access_token,
+        settings.SECRET_KEY,
+        algorithms=[settings.ALGORITHM],
+        options={"verify_exp": False}
+    )
+    access_token_jti = access_payload.get("jti")
+    access_token_exp = datetime.fromtimestamp(access_payload.get("exp"), tz=timezone.utc) if access_payload.get("exp") else None
+    
     refresh_token, token_id, expires_at = create_refresh_token(str(user.id), False)
     
     # Handle device management - auto-detect from headers or use provided device_info
@@ -134,13 +146,15 @@ async def verify_otp(
             auth_service.device_repo.create_device(user.id, device_data)
             device_id = device_data["device_id"]
             
-    # Store refresh token
+    # Store refresh token with access token info
     auth_service.token_repo.create_refresh_token(
         user_id=user.id,
         token=refresh_token,
         token_id=token_id,
         expires_at=expires_at,
-        device_id=device_id
+        device_id=device_id,
+        access_token_jti=access_token_jti,
+        access_token_expires_at=access_token_exp
     )
     
     # Update last login

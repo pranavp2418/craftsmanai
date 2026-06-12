@@ -64,6 +64,24 @@ def _blacklist_token_in_db(db: Session, jti: str, token_type: str, expires_at: d
         return False
 
 
+def _blacklist_access_token_jti(db: Session, jti: str, expires_at: datetime, reason: str = "logout", user_id: str = None):
+    """Blacklist an access token by its JTI"""
+    if not jti or not expires_at:
+        return
+    
+    now = datetime.now(timezone.utc)
+    remaining_seconds = max(int((expires_at - now).total_seconds()), 0)
+    remaining_minutes = max(remaining_seconds // 60, 1)
+    
+    # Blacklist in Redis
+    token_blacklist.blacklist_access_token(jti, remaining_minutes)
+    
+    # Blacklist in DB for audit trail
+    _blacklist_token_in_db(db, jti, "access", expires_at, reason, user_id)
+    
+    logger.info(f"Blacklisted access token JTI: {jti} during {reason}")
+
+
 def _deactivate_device(db: Session, auth_service: AuthService, user_id: int, device_id: str):
     """Deactivate the device associated with the revoked refresh token"""
     if device_id:
@@ -84,7 +102,10 @@ async def logout(
     response: Response
 ) -> Any:
     """
-    Logout user by revoking refresh token and deactivating device
+    Logout user by revoking refresh token and blacklisting the associated access token
+    
+    The access token JTI stored in the refresh_tokens table is automatically blacklisted.
+    No separate X-Access-Token header is needed since access token is linked to the refresh token in DB.
     """
     
     # Check rate limit
@@ -112,6 +133,18 @@ async def logout(
         
         if refresh_jti and refresh_exp:
             expires_at = datetime.fromtimestamp(refresh_exp, tz=timezone.utc)
+            
+            # 0. Blacklist the associated access token from DB
+            if refresh_jti:
+                token_record = auth_service.token_repo.get_refresh_token_by_id(refresh_jti)
+                if token_record and token_record.access_token_jti and token_record.access_token_expires_at:
+                    _blacklist_access_token_jti(
+                        db,
+                        token_record.access_token_jti,
+                        token_record.access_token_expires_at,
+                        "logout",
+                        user_id_from_token
+                    )
             
             # 1. Blacklist in Redis
             token_blacklist.blacklist_refresh_token(refresh_jti, expires_at)
