@@ -59,11 +59,12 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     # CORS
-    BACKEND_CORS_ORIGINS: List[str] = ["https://craftmenai.txogavideo.in", "http://localhost:3000"]
+    BACKEND_CORS_ORIGINS: List[str]
+    # BACKEND_CORS_ORIGINS: List[str] = ["https://craftmenai.txogavideo.in", "http://localhost:3000"]
 
     # Socket.IO
     SOCKETIO_PATH: str = "/socket.io"
-    SOCKETIO_CORS_ALLOWED_ORIGINS: List[str] = ["*"]
+    SOCKETIO_CORS_ALLOWED_ORIGINS: List[str] 
     SOCKETIO_REDIS_ADAPTER: bool = False
 
     # Server-Sent Events

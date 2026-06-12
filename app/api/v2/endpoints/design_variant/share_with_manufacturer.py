@@ -249,4 +249,8 @@ def share_variant_with_manufacturer(
             "created_at": share.created_at,
         })
 
+    # Update Design status to SENT_TO_MANUFACTURER
+    from app.models.design import DesignStatus
+    design_service.update_design(design, status=DesignStatus.SENT_TO_MANUFACTURER)
+
     return shares_response

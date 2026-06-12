@@ -20,9 +20,10 @@ def list_archived_designs(
 ):
 	service = DesignService(db)
 
+	owner_id = current_admin.team_owner_id if current_admin.is_team_member and current_admin.team_owner_id else current_admin.id
 	offset = (page - 1) * limit
-	items = service.list_archived_designs(limit=limit, offset=offset)
-	total = service.count_archived_designs()
+	items = service.list_archived_designs(owner_id=owner_id, limit=limit, offset=offset)
+	total = service.count_archived_designs(owner_id=owner_id)
 	total_pages = (total + limit - 1) // limit if total > 0 else 0
 	pagination = PaginationMetadata(
 		page=page,

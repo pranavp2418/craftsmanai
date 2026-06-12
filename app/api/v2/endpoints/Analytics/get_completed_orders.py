@@ -47,11 +47,20 @@ async def get_completed_orders(
 	window_start = month_starts[0]
 	window_end = now + timedelta(days=1)
 
+	from app.models.design import Design
+
+	# Filter based on whether user is team member or team owner/regular user
+	owner_id = admin.team_owner_id if admin.is_team_member and admin.team_owner_id else admin.id
+	design_filter = Design.user_id == owner_id
+
 	result = await db.execute(
-		select(Order.created_at).where(
+		select(Order.created_at)
+		.join(Design, Order.design_id == Design.id)
+		.where(
 			Order.created_at >= window_start,
 			Order.created_at < window_end,
 			Order.status == OrderStatus.COMPLETED,
+			design_filter,
 		)
 	)
 	rows = result.all()

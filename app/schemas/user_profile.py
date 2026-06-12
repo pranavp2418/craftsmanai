@@ -10,8 +10,10 @@ class UserProfileResponse(BaseModel):
     last_name: str
     full_name: Optional[str] = None
     whatsapp_number: Optional[str] = None
-    # is_active: bool
-    # is_verified: bool
+    business_name: Optional[str] = None
+    profile_picture_url: Optional[str] = None
+    is_active: bool
+    is_verified: bool
     is_superuser: bool
     role: str
 
@@ -24,6 +26,8 @@ class UserProfileUpdate(BaseModel):
     last_name: Optional[str] = Field(None, max_length=100)
     whatsapp_number: Optional[str] = Field(None, max_length=20)
     username: Optional[str] = Field(None, max_length=100)
+    business_name: Optional[str] = Field(None, max_length=255)
+    
 
 class AppearanceSettingsUpdate(BaseModel):
     theme: Optional[str] = Field(None, description="UI Theme: System Preference, Light Mode, Dark Mode")

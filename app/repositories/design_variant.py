@@ -6,11 +6,19 @@ from app.models.design import Design, DesignVariant
 
 
 def detect_metal_tone(prompt: Optional[str], image_url: Optional[str]) -> Optional[dict]:
+    # DISABLED: this pixel-based detector averages the image colours and mis-classifies
+    # diamond-heavy YELLOW-GOLD pieces as 'silver' (the white diamonds wash out the gold),
+    # then auto-seeds that wrong metal into metal_variations_json pointing at the base image.
+    # That makes the UI think the colour already exists, so clicking that swatch never
+    # regenerates. The base/refine tasks already set the correct base metal explicitly via
+    # the reliable vision detector (detect_metal_color), so this auto-seed is not needed.
+    return None
+
     if not image_url:
         return None
-        
+
     metal = None
-    
+
     # 1. Primary: Parse from prompt (since metadata/intent is the absolute source of truth)
     if prompt:
         lower = prompt.lower()

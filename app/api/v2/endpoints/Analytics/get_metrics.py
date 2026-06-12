@@ -49,21 +49,44 @@ async def get_metrics(
     """Return aggregated metrics for the last six months."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=183)
 
+    # Filter based on whether user is team member or team owner/regular user
+    owner_id = admin.team_owner_id if admin.is_team_member and admin.team_owner_id else admin.id
+    design_filter = Design.user_id == owner_id
+
     total_renders_res = await db.execute(
-        select(func.count(DesignVariant.id)).where(DesignVariant.created_at >= cutoff)
+        select(func.count(DesignVariant.id))
+        .join(Design, DesignVariant.design_id == Design.id)
+        .where(
+            and_(
+                DesignVariant.created_at >= cutoff,
+                design_filter,
+            )
+        )
     )
     total_renders = total_renders_res.scalar() or 0
 
     designs_sent_res = await db.execute(
-        select(func.count(DesignShare.id)).where(DesignShare.created_at >= cutoff)
+        select(func.count(DesignShare.id))
+        .join(DesignShare.design_variant)
+        .join(DesignVariant.design)
+        .where(
+            and_(
+                DesignShare.created_at >= cutoff,
+                design_filter,
+            )
+        )
     )
     designs_sent = designs_sent_res.scalar() or 0
 
     approvals_res = await db.execute(
-        select(func.count(DesignShare.id)).where(
+        select(func.count(DesignShare.id))
+        .join(DesignShare.design_variant)
+        .join(DesignVariant.design)
+        .where(
             and_(
                 DesignShare.created_at >= cutoff,
                 DesignShare.status == DesignShareStatus.ACCEPTED,
+                design_filter,
             )
         )
     )
@@ -76,24 +99,31 @@ async def get_metrics(
             and_(
                 Design.created_at >= cutoff,
                 Design.status != DesignStatus.COMPLETED,
+                design_filter,
             )
         )
     )
     active_requests = active_requests_res.scalar() or 0
 
     total_refinements_res = await db.execute(
-        select(func.count(DesignVariant.id)).where(
+        select(func.count(DesignVariant.id))
+        .join(Design, DesignVariant.design_id == Design.id)
+        .where(
             and_(
                 DesignVariant.created_at >= cutoff,
                 DesignVariant.version_number > 0,
                 DesignVariant.is_deleted.is_(False),
+                design_filter,
             )
         )
     )
     total_refinements = total_refinements_res.scalar() or 0
 
     customer_engagement_res = await db.execute(
-        select(func.count(DesignShare.id)).where(
+        select(func.count(DesignShare.id))
+        .join(DesignShare.design_variant)
+        .join(DesignVariant.design)
+        .where(
             and_(
                 DesignShare.created_at >= cutoff,
                 DesignShare.status.in_(
@@ -103,14 +133,21 @@ async def get_metrics(
                         DesignShareStatus.NEEDS_REFINEMENT,
                     ]
                 ),
+                design_filter,
             )
         )
     )
     customer_engagement = customer_engagement_res.scalar() or 0
 
     manufacturers_engaged_res = await db.execute(
-        select(func.count(func.distinct(DesignVariantManufacturerShare.manufacturer_id))).where(
-            DesignVariantManufacturerShare.created_at >= cutoff
+        select(func.count(func.distinct(DesignVariantManufacturerShare.manufacturer_id)))
+        .join(DesignVariantManufacturerShare.design_variant)
+        .join(DesignVariant.design)
+        .where(
+            and_(
+                DesignVariantManufacturerShare.created_at >= cutoff,
+                design_filter,
+            )
         )
     )
     manufacturers_engaged = manufacturers_engaged_res.scalar() or 0
@@ -123,6 +160,7 @@ async def get_metrics(
                     Design.is_archived.is_(True),
                     Design.status == DesignStatus.COMPLETED,
                 ),
+                design_filter,
             )
         )
     )

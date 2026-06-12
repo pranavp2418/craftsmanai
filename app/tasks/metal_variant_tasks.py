@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import requests
@@ -20,7 +21,7 @@ from app.models.design import Design
 from app.models.design import DesignVariant
 from app.repositories.design_variant import DesignVariantRepository
 from app.repositories.activity_log import DesignActivityLogRepository
-from app.services.openai_service import openai_service
+from app.services.openai_service import openai_service, generate_with_openai_image, download_reference_images
 from app.services.storage_service import _validate_image_bytes, upload_image_to_supabase
 from app.core.sse_manager import sse_manager
 from app.tasks.base import create_task
@@ -28,19 +29,41 @@ from app.tasks.base import create_task
 logger = logging.getLogger(__name__)
 
 
-def _metal_to_prompt(metal: str) -> str:
-    """Convert a metal key into a natural-language rendering instruction."""
-    metal_prompts = {
-        "gold": "Render the jewelry in 18K yellow gold. The metal should have warm golden reflections with a high-polish finish.",
-        "rose_gold": "Render the jewelry in 18K rose gold. The metal should have a pinkish-warm hue with a high-polish finish.",
-        "silver": "Render the jewelry in sterling silver / white gold. The metal should have cool, bright reflections with a high-polish finish.",
-        "platinum": "Render the jewelry in platinum. The metal should have a bright white lustre with a slightly matte luxury finish.",
-        "white_gold": "Render the jewelry in 18K white gold. The metal should have a bright white tone with rhodium-plated shine.",
-    }
-    return metal_prompts.get(
-        metal,
-        f"Render the jewelry in {metal.replace('_', ' ').title()} metal with a high-polish finish.",
-    )
+METAL_DESCRIPTIONS = {
+    "gold": "rich warm yellow gold (bright golden color)",
+    "yellow_gold": "rich warm yellow gold (bright golden color)",
+    "white_gold": "bright white gold (cool silvery-white color)",
+    "rose_gold": "warm rose gold (soft pink-copper color)",
+    "rose": "warm rose gold (soft pink-copper color)",
+    "silver": "bright polished silver (cool silvery-white color)",
+    "platinum": "bright platinum (cool silvery-white, slightly matte luxury finish)",
+}
+
+
+def _build_metal_variant_prompt(metal: str, jewellery_type: str = "pendant") -> str:
+    """Build a concise metal variant prompt — minimal like ChatGPT for best results."""
+    metal_desc = METAL_DESCRIPTIONS.get(metal, f"{metal.replace('_', ' ').title()} metal with a high-polish finish")
+
+    # gpt-image-2 struggles to convert a YELLOW-GOLD piece to a WHITE metal (it leaves gold
+    # tones). For white metals, force a complete white conversion with NO warm tones left.
+    white_clause = ""
+    if metal in ("silver", "white_gold", "platinum"):
+        white_clause = (
+            "\n\nCRITICAL — FULL WHITE-METAL CONVERSION: the reference piece is YELLOW GOLD. Convert EVERY metal "
+            "surface — the whole frame, every letter/number body, prong, bezel, border, edge, channel wall, the "
+            "bail and the back — to a BRIGHT, COOL, SILVERY-WHITE metal (white gold / rhodium / platinum / silver). "
+            "There must be absolutely NO yellow, NO gold, NO brass, NO warm or champagne tint left ANYWHERE on the "
+            "metal — not even a faint one. 100% of the metal must read as clean white/silver. The diamonds stay "
+            "clear and white as before. Do NOT leave any part gold-coloured."
+        )
+
+    return f"""Recolor the metal of this {jewellery_type} to {metal_desc}. Change the metal color completely to this new color, including all metal surfaces, prongs, and settings.{white_clause}
+
+Keep EVERYTHING else exactly the same — same overall design, same components, same shape and silhouette, same proportions, same stones (count, cut, arrangement and setting), same engraving/text, same borders and edges, same structure, same viewpoint. Only the metal COLOR changes; do not redesign or alter any other part.
+
+Render it as a clean CAD-style 3D jewelry render (crisp, sharp, accurate metal and stones, even studio lighting) — NOT a lifestyle photo, NOT a cartoon, no background scene. Pure solid white background (#FFFFFF).
+
+One image only."""
 
 
 def _extract_image_data(data_item: Any) -> tuple[bytes, str]:
@@ -133,33 +156,44 @@ def generate_metal_variant_images(
             sse_manager.publish_close(channel)
             return
 
-        for metal in missing_metals:
-            prompt = _metal_to_prompt(metal)
-            logger.info("Generating %s variant for variant_id=%s", metal, variant_id)
+        # Pre-download reference image ONCE — shared across all parallel threads
+        cached_blobs = download_reference_images([base_image_url])
+        logger.info("Reference image pre-downloaded (%d bytes) for parallel metal generation", sum(len(b) for b in cached_blobs))
 
+        def _generate_single_metal(metal: str) -> tuple[str, str | None]:
+            """Generate a single metal variant. Returns (metal, image_url or None)."""
+            logger.info("Generating %s variant for variant_id=%s", metal, variant_id)
             try:
-                generated_item = openai_service.generate_metal_variation(
-                    base_image_source=base_image_url,
-                    metal=metal,
-                    jewellery_type=jewellery_type,
-                )
-                image_bytes, content_type = _extract_image_data(generated_item)
+                prompt = _build_metal_variant_prompt(metal, jewellery_type)
+                b64_json = generate_with_openai_image([base_image_url], prompt, pre_downloaded_blobs=cached_blobs)
+                image_bytes = base64.b64decode(b64_json)
+                content_type = "image/png"
                 _validate_image_bytes(image_bytes, content_type)
 
                 bucket_path = f"generated/metal_variants/{variant.design_id}/{variant_id}/{metal}"
                 image_url = upload_image_to_supabase(image_bytes, bucket_path)
-                metal_variations[metal] = image_url
-
                 logger.info(
                     "%s variant generated for variant_id=%s: %s",
                     metal, variant_id, image_url,
                 )
+                return metal, image_url
             except Exception as exc:
                 logger.exception(
                     "Failed to generate %s variant for variant_id=%s: %s",
                     metal, variant_id, exc,
                 )
-                metal_variations[metal] = None
+                return metal, None
+
+        # Run all metal generations in parallel (I/O-bound — waiting on OpenAI API)
+        max_parallel = min(len(missing_metals), 4)
+        with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+            futures = {
+                executor.submit(_generate_single_metal, metal): metal
+                for metal in missing_metals
+            }
+            for future in as_completed(futures):
+                metal_name, image_url = future.result()
+                metal_variations[metal_name] = image_url
 
         # Update the variant's metal_variations_json with merged data
         # (preserves old metals + adds newly generated ones)

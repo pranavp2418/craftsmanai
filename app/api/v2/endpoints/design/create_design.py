@@ -25,6 +25,9 @@ async def create_design(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    from app.services.subscription_service import SubscriptionService
+    SubscriptionService.check_and_deduct_tokens(db, current_user, 1)
+
     design_service = DesignService(db)
 
     reference_urls = []

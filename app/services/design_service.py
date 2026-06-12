@@ -32,8 +32,21 @@ class DesignService:
         prefix = "".join(ch for ch in prefix if ch.isalnum())
         prefix = prefix[:3].ljust(3, "X")
 
+        # sequence_number is per-user (satisfies the uq_design_user_sequence
+        # constraint and represents the user's Nth design).
         sequence_number = self.design_repo.get_next_sequence_number(owner_id)
-        design_code = f"{prefix}-{sequence_number:03d}"
+
+        # design_code is GLOBALLY unique, but the prefix is derived from the user's
+        # name and is NOT unique across users. So compute the code's running number
+        # across ALL designs sharing this prefix (not per-user) to avoid cross-user
+        # collisions like two 'SAN' users both producing 'SAN-001'. For a user with a
+        # unique prefix this equals sequence_number, so existing behaviour is preserved.
+        code_n = self.design_repo.get_next_sequence_for_prefix(prefix)
+        design_code = f"{prefix}-{code_n:03d}"
+        # Safety against races / any residual collision: bump until the code is free.
+        while self.design_repo.exists_design_code(design_code):
+            code_n += 1
+            design_code = f"{prefix}-{code_n:03d}"
         return design_code, sequence_number
 
     def _resolve_owner_id(self, user: User) -> tuple[int, Optional[int]]:
@@ -167,6 +180,7 @@ class DesignService:
         *,
         user: User,
         status: Optional[DesignStatus] = None,
+        search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[Design], int]:
@@ -180,13 +194,13 @@ class DesignService:
             # Team member: only see designs they personally created
             items = self.design_repo.list_by_created_by(
                 user.id, user.team_owner_id,
-                status=status, limit=limit, offset=offset
+                status=status, search=search, limit=limit, offset=offset
             )
-            total = self.design_repo.count_by_created_by(user.id, user.team_owner_id, status=status)
+            total = self.design_repo.count_by_created_by(user.id, user.team_owner_id, status=status, search=search)
         else:
             # Regular user or team owner: see all designs where user_id matches
-            items = self.design_repo.list_by_user(user.id, status=status, limit=limit, offset=offset)
-            total = self.design_repo.count_by_user(user.id, status=status)
+            items = self.design_repo.list_by_user(user.id, status=status, search=search, limit=limit, offset=offset)
+            total = self.design_repo.count_by_user(user.id, status=status, search=search)
 
         # Attach variants and shared customer info to each design
         for design in items:
@@ -196,11 +210,11 @@ class DesignService:
 
         return items, total
 
-    def list_archived_designs(self, *, limit: int = 50, offset: int = 0):
-        return self.design_repo.list_archived(limit=limit, offset=offset)
+    def list_archived_designs(self, owner_id: int, *, limit: int = 50, offset: int = 0):
+        return self.design_repo.list_archived(owner_id=owner_id, limit=limit, offset=offset)
 
-    def count_archived_designs(self) -> int:
-        return self.design_repo.count_archived()
+    def count_archived_designs(self, owner_id: int) -> int:
+        return self.design_repo.count_archived(owner_id=owner_id)
 
     def get_design_with_relations(self, design_id: int) -> Optional[Design]:
         """Get a single design with variants and shared customers loaded."""
