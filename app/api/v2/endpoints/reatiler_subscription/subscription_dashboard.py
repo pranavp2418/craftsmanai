@@ -28,11 +28,19 @@ def get_subscription_dashboard(
 
     try:
         # Get user's active subscription
+        from sqlalchemy import or_
+        from app.services.subscription_service import SubscriptionService
+        
         subscription = db.query(UserSubscription).filter(
             UserSubscription.user_id == current_user_id,
-            UserSubscription.status == SubscriptionStatus.ACTIVE,
-            UserSubscription.is_queued == False
+            UserSubscription.is_queued == False,
+            or_(
+                UserSubscription.status == SubscriptionStatus.ACTIVE,
+                (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= timezone.utc) if 'timezone' in globals() else (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= datetime.now(timezone.utc))
+            )
         ).order_by(UserSubscription.created_at.desc()).first()
+
+        subscription = SubscriptionService.check_and_update_subscription_expiry(db, subscription)
 
         current_user_stripe_customer_id = subscription.stripe_customer_id if subscription else None
         if not current_user_stripe_customer_id:

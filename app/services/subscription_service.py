@@ -5,6 +5,9 @@ from sqlalchemy.orm import Session
 from app.models.user import User
 from app.models.subscription import UserSubscription, SubscriptionStatus
 
+from sqlalchemy import or_
+from datetime import datetime, timezone
+
 logger = logging.getLogger(__name__)
 
 class SubscriptionService:
@@ -14,6 +17,19 @@ class SubscriptionService:
         if user.is_team_member and user.team_owner_id:
             return user.team_owner_id
         return user.id
+
+    @staticmethod
+    def check_and_update_subscription_expiry(db: Session, subscription: Optional[UserSubscription]) -> Optional[UserSubscription]:
+        if not subscription:
+            return None
+        now = datetime.now(timezone.utc)
+        if subscription.end_date < now:
+            if subscription.status == SubscriptionStatus.ACTIVE:
+                subscription.status = SubscriptionStatus.EXPIRED if not subscription.cancellation_date else SubscriptionStatus.CANCELLED
+                db.commit()
+                db.refresh(subscription)
+            return None
+        return subscription
 
     @staticmethod
     def check_and_deduct_tokens(db: Session, user: User, tokens_to_deduct: int) -> UserSubscription:
@@ -26,13 +42,19 @@ class SubscriptionService:
             return None
 
         owner_id = SubscriptionService.get_subscription_owner_id(user)
+        now = datetime.now(timezone.utc)
         
         # Query the active subscription for the owner with a row lock to prevent race conditions
         subscription = db.query(UserSubscription).filter(
             UserSubscription.user_id == owner_id,
-            UserSubscription.status == SubscriptionStatus.ACTIVE,
-            UserSubscription.is_queued == False
+            UserSubscription.is_queued == False,
+            or_(
+                UserSubscription.status == SubscriptionStatus.ACTIVE,
+                (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= now)
+            )
         ).order_by(UserSubscription.created_at.desc()).with_for_update().first()
+
+        subscription = SubscriptionService.check_and_update_subscription_expiry(db, subscription)
 
         if not subscription:
             logger.warning(f"User {user.id} (owner {owner_id}) attempted generation but has no active subscription.")

@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 import uuid
 from decimal import Decimal
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
 
 from tests.conftest import TestingSessionLocal
@@ -16,7 +16,8 @@ from app.models.subscription import (
     UserSubscription, 
     Payment, 
     SubscriptionStatus,
-    PaymentStatus
+    PaymentStatus,
+    CancellationReason
 )
 from app.models.design import Design, DesignVariant, DesignShare
 from app.repositories.user import UserRepository
@@ -25,11 +26,14 @@ from app.core.security import create_access_token
 
 def create_committed_user(email: str, username: str) -> User:
     """Helper to create a committed retailer in the test DB"""
+    from sqlalchemy import text
     session = TestingSessionLocal()
     try:
         user_repo = UserRepository(session)
         existing = user_repo.get_user_by_email(email)
         if existing:
+            session.execute(text("DELETE FROM brand_settings WHERE user_id = :uid"), {"uid": existing.id})
+            session.execute(text("DELETE FROM notification_settings WHERE user_id = :uid"), {"uid": existing.id})
             session.query(OTP).filter(OTP.email == email).delete()
             session.query(RefreshToken).filter(RefreshToken.user_id == existing.id).delete()
             session.query(UserDevice).filter(UserDevice.user_id == existing.id).delete()
@@ -58,10 +62,13 @@ def create_committed_user(email: str, username: str) -> User:
 
 def cleanup_user_by_email(email: str):
     """Helper to clean up the committed user and associated subscription structures"""
+    from sqlalchemy import text
     session = TestingSessionLocal()
     try:
         user = session.query(User).filter(User.email == email).first()
         if user:
+            session.execute(text("DELETE FROM brand_settings WHERE user_id = :uid"), {"uid": user.id})
+            session.execute(text("DELETE FROM notification_settings WHERE user_id = :uid"), {"uid": user.id})
             session.query(OTP).filter(OTP.email == email).delete()
             session.query(RefreshToken).filter(RefreshToken.user_id == user.id).delete()
             session.query(UserDevice).filter(UserDevice.user_id == user.id).delete()
@@ -275,3 +282,133 @@ class TestRetailerSubscription:
                 session.commit()
             finally:
                 session.close()
+
+
+def test_cancel_plan_otp(client: TestClient):
+    email = "cancel_test@example.com"
+    try:
+        user = create_committed_user(email, "canceluser")
+        token = create_access_token(data={"sub": str(user.id), "email": user.email})
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        # 1. Test sending to matching email
+        with patch("app.api.v2.endpoints.reatiler_subscription.cancel_plan.generate_and_send_otp") as mock_send:
+            res = client.post("/api/v2/retailer/subscriptions/cancel/send-otp", json={"email": email}, headers=headers)
+            assert res.status_code == 200
+            assert res.json() == {"message": "if mail exists and connected otp is sent"}
+            mock_send.assert_called_once()
+
+        # 2. Test sending to non-matching email
+        with patch("app.api.v2.endpoints.reatiler_subscription.cancel_plan.generate_and_send_otp") as mock_send2:
+            res = client.post("/api/v2/retailer/subscriptions/cancel/send-otp", json={"email": "wrong@example.com"}, headers=headers)
+            assert res.status_code == 200
+            assert res.json() == {"message": "if mail exists and connected otp is sent"}
+            mock_send2.assert_not_called()
+    finally:
+        cleanup_user_by_email(email)
+
+
+def test_get_smaller_plans(client: TestClient):
+    email = "smaller_plans@example.com"
+    session = TestingSessionLocal()
+    try:
+        user = create_committed_user(email, "smalleruser")
+        token = create_access_token(data={"sub": str(user.id), "email": user.email})
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # 1. Create two plans
+        plan_pro = SubscriptionPlan(
+            name="Pro Plan",
+            monthly_price=Decimal("100.00"),
+            is_active=True
+        )
+        plan_basic = SubscriptionPlan(
+            name="Basic Plan",
+            monthly_price=Decimal("49.00"),
+            is_active=True
+        )
+        session.add(plan_pro)
+        session.add(plan_basic)
+        session.commit()
+
+        # 2. Add an active subscription to the Pro Plan
+        user_sub = UserSubscription(
+            user_id=user.id,
+            plan_id=plan_pro.id,
+            start_date=datetime.now(timezone.utc),
+            end_date=datetime.now(timezone.utc) + timedelta(days=30),
+            status=SubscriptionStatus.ACTIVE
+        )
+        session.add(user_sub)
+        session.commit()
+
+        # 3. Call smaller-plan API
+        res = client.get("/api/v2/retailer/subscriptions/cancel/plans", headers=headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert len(data) == 1
+        assert data[0]["name"] == "Basic Plan"
+
+    finally:
+        session.query(UserSubscription).filter(UserSubscription.user_id == user.id).delete()
+        session.query(SubscriptionPlan).delete()
+        session.commit()
+        session.close()
+        cleanup_user_by_email(email)
+
+
+def test_cancel_user_plan(client: TestClient):
+    email = "cancel_plan@example.com"
+    session = TestingSessionLocal()
+    try:
+        user = create_committed_user(email, "canceluser")
+        token = create_access_token(data={"sub": str(user.id), "email": user.email})
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # 1. Create a plan
+        plan = SubscriptionPlan(
+            name="Cancel Test Plan",
+            monthly_price=Decimal("199.00"),
+            is_active=True
+        )
+        session.add(plan)
+        session.commit()
+
+        # 2. Add an active subscription to the Plan
+        user_sub = UserSubscription(
+            user_id=user.id,
+            plan_id=plan.id,
+            stripe_subscription_id="sub_test_123",
+            start_date=datetime.now(timezone.utc),
+            end_date=datetime.now(timezone.utc) + timedelta(days=30),
+            status=SubscriptionStatus.ACTIVE
+        )
+        session.add(user_sub)
+        session.commit()
+
+        # 3. Call cancel-plan API with mocked Stripe
+        with patch("stripe.Subscription.modify") as mock_stripe_modify:
+            cancel_payload = {"cancellation_reason": "Too Expensive"}
+            res = client.post(
+                "/api/v2/retailer/subscriptions/cancel",
+                json=cancel_payload,
+                headers=headers
+            )
+            assert res.status_code == 200
+            res_data = res.json()
+            assert res_data["success"] is True
+            assert res_data["status"] == "CANCELLED"
+            mock_stripe_modify.assert_called_once_with("sub_test_123", cancel_at_period_end=True)
+
+            # Check DB
+            session.refresh(user_sub)
+            assert user_sub.status == SubscriptionStatus.CANCELLED
+            assert user_sub.cancellation_reason == CancellationReason.TOO_EXPENSIVE
+
+    finally:
+        session.query(UserSubscription).filter(UserSubscription.user_id == user.id).delete()
+        session.query(SubscriptionPlan).delete()
+        session.commit()
+        session.close()
+        cleanup_user_by_email(email)
+

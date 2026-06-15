@@ -11,7 +11,7 @@ from app.core.dependencies import get_db, get_current_user, get_current_active_u
 from app.core.config import settings
 from app.core.rate_limiter import limiter
 from app.models.user import User
-from app.models.subscription import SubscriptionPlan, UserSubscription, SubscriptionStatus, Payment, PaymentStatus
+from app.models.subscription import SubscriptionPlan, UserSubscription, SubscriptionStatus, Payment, PaymentStatus, CancellationReason
 from app.schemas.subscription import UserSubscription as UserSubscriptionSchema
 from app.services.invoice_service import generate_and_store_invoice
 
@@ -366,6 +366,47 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db.rollback()
             return {"status": "error", "message": str(e)}
 
+    elif event['type'] == 'customer.subscription.deleted':
+        stripe_sub = event['data']['object']
+        stripe_sub_id = stripe_sub['id']
+        try:
+            sub = db.query(UserSubscription).filter(
+                UserSubscription.stripe_subscription_id == stripe_sub_id
+            ).first()
+            if sub:
+                sub.status = SubscriptionStatus.CANCELLED
+                db.commit()
+                logger.info(f"Subscription {sub.id} marked as CANCELLED via customer.subscription.deleted webhook")
+        except Exception as e:
+            logger.error(f"Error processing customer.subscription.deleted webhook: {str(e)}")
+            db.rollback()
+            return {"status": "error", "message": str(e)}
+
+    elif event['type'] == 'customer.subscription.updated':
+        stripe_sub = event['data']['object']
+        stripe_sub_id = stripe_sub['id']
+        try:
+            sub = db.query(UserSubscription).filter(
+                UserSubscription.stripe_subscription_id == stripe_sub_id
+            ).first()
+            if sub:
+                if stripe_sub.get('cancel_at_period_end'):
+                    if not sub.cancellation_date:
+                        sub.cancellation_date = datetime.now(timezone.utc)
+                        sub.cancellation_reason = CancellationReason.OTHER
+                
+                stripe_status = stripe_sub.get('status')
+                if stripe_status == 'canceled':
+                    sub.status = SubscriptionStatus.CANCELLED
+                elif stripe_status in ['unpaid', 'incomplete_expired']:
+                    sub.status = SubscriptionStatus.EXPIRED
+                db.commit()
+                logger.info(f"Subscription {sub.id} updated via customer.subscription.updated webhook")
+        except Exception as e:
+            logger.error(f"Error processing customer.subscription.updated webhook: {str(e)}")
+            db.rollback()
+            return {"status": "error", "message": str(e)}
+
     return {"status": "success"}
 
 
@@ -469,11 +510,19 @@ def get_token_status(
     current_user_id = current_user.id
 
     try:
+        from sqlalchemy import or_
+        from app.services.subscription_service import SubscriptionService
+        
         active_sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == current_user_id,
-            UserSubscription.status == SubscriptionStatus.ACTIVE,
-            UserSubscription.is_queued == False
+            UserSubscription.is_queued == False,
+            or_(
+                UserSubscription.status == SubscriptionStatus.ACTIVE,
+                (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= now)
+            )
         ).order_by(UserSubscription.end_date.desc()).first()
+
+        active_sub = SubscriptionService.check_and_update_subscription_expiry(db, active_sub)
 
         used = active_sub.used_monthly_renders if active_sub else 0
         limit = active_sub.initial_monthly_renders if active_sub else 0
