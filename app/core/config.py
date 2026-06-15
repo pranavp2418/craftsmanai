@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     # Rate Limiting
     RATE_LIMIT_GLOBAL: str = "60/minute"
     RATE_LIMIT_GLOBAL_IP: str = "120/minute"
+    RATE_LIMIT_IP: str = "4/minute"      # IP safety net (Layer 1)
+    RATE_LIMIT_USER: str = "7/minute"      # User-based strict limit (Layer 2)
     RATE_LIMIT_AUTH: str = "5/minute"
     RATE_LIMIT_REGISTER: str = "3/hour"
     RATE_LIMIT_PASSWORD_RESET: str = "3/hour"

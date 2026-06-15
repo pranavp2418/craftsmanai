@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 from tests.conftest import TestingSessionLocal
@@ -10,6 +11,8 @@ from app.repositories.user import UserRepository
 from app.core.security import create_access_token
 
 
+from sqlalchemy import text
+
 def create_committed_user(email: str, username: str, full_name: str, whatsapp_number: str = "") -> User:
     """Helper to create a committed user in the real test DB (independent of transactional fixtures)"""
     session = TestingSessionLocal()
@@ -18,6 +21,8 @@ def create_committed_user(email: str, username: str, full_name: str, whatsapp_nu
         # Clean up any existing user first to avoid unique constraint violations
         existing = user_repo.get_user_by_email(email)
         if existing:
+            session.execute(text("DELETE FROM brand_settings WHERE user_id = :uid"), {"uid": existing.id})
+            session.execute(text("DELETE FROM notification_settings WHERE user_id = :uid"), {"uid": existing.id})
             session.query(OTP).filter(OTP.email == email).delete()
             session.query(RefreshToken).filter(RefreshToken.user_id == existing.id).delete()
             session.query(UserDevice).filter(UserDevice.user_id == existing.id).delete()
@@ -45,6 +50,8 @@ def cleanup_user_by_email(email: str):
     try:
         user = session.query(User).filter(User.email == email).first()
         if user:
+            session.execute(text("DELETE FROM brand_settings WHERE user_id = :uid"), {"uid": user.id})
+            session.execute(text("DELETE FROM notification_settings WHERE user_id = :uid"), {"uid": user.id})
             session.query(OTP).filter(OTP.email == email).delete()
             session.query(RefreshToken).filter(RefreshToken.user_id == user.id).delete()
             session.query(UserDevice).filter(UserDevice.user_id == user.id).delete()
@@ -165,3 +172,39 @@ class TestUserProfile:
         finally:
             cleanup_user_by_email(email1)
             cleanup_user_by_email(email2)
+
+    @patch("app.services.storage_service.upload_image_to_supabase")
+    def test_upload_profile_picture_success(self, mock_upload, client: TestClient):
+        """Test successfully uploading/updating user profile picture"""
+        email = "profile_pic@example.com"
+        mock_upload.return_value = "https://supabase.co/profile-pictures/user_123/image_abc.png"
+        try:
+            user = create_committed_user(
+                email=email,
+                username="picuser",
+                full_name="Pic User"
+            )
+            
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+            
+            # Simulate a file upload
+            file_data = {"file": ("test_pic.png", b"dummy_png_bytes", "image/png")}
+            
+            response = client.post(
+                "/api/v2/user-profile/profile-picture", 
+                files=file_data, 
+                headers=headers
+            )
+            assert response.status_code == 200
+            
+            data = response.json()
+            assert data["profile_picture_url"] == "https://supabase.co/profile-pictures/user_123/image_abc.png"
+            
+            # Check the DB value directly
+            session = TestingSessionLocal()
+            db_user = session.query(User).filter(User.id == user.id).first()
+            assert db_user.profile_picture_url == "https://supabase.co/profile-pictures/user_123/image_abc.png"
+            session.close()
+        finally:
+            cleanup_user_by_email(email)

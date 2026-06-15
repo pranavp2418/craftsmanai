@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
 from typing import Any
@@ -62,6 +63,25 @@ async def login(
             detail="Account not verified. Please verify your email address.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    # Check if 2FA is enabled
+    if user.is_2fa_enabled:
+        logger.info(f"2FA verification required for user: {user.email}")
+        from app.services.otp_service import generate_and_send_otp
+
+        generate_and_send_otp(
+            db=db,
+            user=user,
+            otp_type="login_2fa"
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "TWO_FACTOR_REQUIRED",
+                "message": "OTP verification required"
+            },
+        )
+
     
     # Handle device management (max device limit)
     device_id = None
@@ -89,27 +109,45 @@ async def login(
     
     # Create tokens
     from app.core.security import create_access_token, create_refresh_token
+    from jose import jwt
     access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
+    
+    # Extract access token JTI and expiry for storage
+    access_payload = jwt.decode(
+        access_token,
+        settings.SECRET_KEY,
+        algorithms=[settings.ALGORITHM],
+        options={"verify_exp": False}
+    )
+    access_token_jti = access_payload.get("jti")
+    access_token_exp = datetime.fromtimestamp(access_payload.get("exp"), tz=timezone.utc) if access_payload.get("exp") else None
+    
     refresh_token, token_id, expires_at = create_refresh_token(
         str(user.id), login_data.remember_me
     )
     
-    # Store refresh token with device_id
+    # Store refresh token with device_id and access token info
     auth_service.token_repo.create_refresh_token(
         user_id=user.id,
         token=refresh_token,
         token_id=token_id,
         expires_at=expires_at,
-        device_id=device_id
+        device_id=device_id,
+        access_token_jti=access_token_jti,
+        access_token_expires_at=access_token_exp
     )
     
     # Update last login
     auth_service.user_repo.update_last_login(user.id)
     
     # Set refresh token in HTTP-only cookie
-    max_age = int(
-        (7 * 24 * 60 * 60) if login_data.remember_me else (24 * 60 * 60)
+    # Max age must match the token's actual expiration from create_refresh_token
+    cookie_days = (
+        settings.REFRESH_TOKEN_DAYS_REMEMBER
+        if login_data.remember_me
+        else settings.REFRESH_TOKEN_DAYS
     )
+    max_age = int(cookie_days * 24 * 60 * 60)
     
     response.set_cookie(
         key="refresh_token",

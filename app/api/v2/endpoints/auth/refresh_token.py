@@ -41,6 +41,24 @@ def _blacklist_token_in_db(db: Session, jti: str, token_type: str, expires_at: d
         return False
 
 
+def _blacklist_access_token_jti(db: Session, jti: str, expires_at: datetime, user_id: str = None):
+    """Blacklist an access token by its JTI (stored in refresh_tokens table)"""
+    if not jti or not expires_at:
+        return
+    
+    now = datetime.now(timezone.utc)
+    remaining_seconds = max(int((expires_at - now).total_seconds()), 0)
+    remaining_minutes = max(remaining_seconds // 60, 1)
+    
+    # Blacklist in Redis
+    token_blacklist.blacklist_access_token(jti, remaining_minutes)
+    
+    # Blacklist in DB for audit trail
+    _blacklist_token_in_db(db, jti, "access", expires_at, "refresh_replaced", user_id)
+    
+    logger.info(f"Blacklisted old access token JTI: {jti} during refresh")
+
+
 @router.post("/refresh-token", response_model=LoginResponse)
 async def refresh_token(
     *,
@@ -51,6 +69,9 @@ async def refresh_token(
 ) -> Any:
     """
     Refresh access token using refresh token from cookie
+    
+    The old access token associated with this refresh token (stored in DB)
+    is automatically blacklisted before issuing a new one.
     """
     
     # Check rate limit
@@ -71,7 +92,9 @@ async def refresh_token(
     auth_service = AuthService(db)
     
     # Verify refresh token (includes blacklist check in decode_refresh_token)
-    from app.core.security import decode_refresh_token
+    from app.core.security import decode_refresh_token, create_access_token, create_refresh_token
+    from jose import jwt
+    from app.core.config import settings
     try:
         payload = decode_refresh_token(refresh_token)
         logger.info(f"Decoded refresh payload: {payload}")
@@ -115,15 +138,43 @@ async def refresh_token(
             detail="User not found"
         )
     
-    # Create new access token
-    from app.core.security import create_access_token
-    access_token = create_access_token(data={"sub": str(user_id), "email": user.email})
+    # --- Get old access token JTI from DB and blacklist it ---
+    refresh_jti = payload.get("jti")
+    if refresh_jti:
+        token_record = auth_service.token_repo.get_refresh_token_by_id(refresh_jti)
+        if token_record and token_record.access_token_jti and token_record.access_token_expires_at:
+            _blacklist_access_token_jti(
+                db, 
+                token_record.access_token_jti, 
+                token_record.access_token_expires_at, 
+                str(user_id)
+            )
+    
+    # Create new access token and new refresh token (token rotation)
+    new_access_token = create_access_token(data={"sub": str(user_id), "email": user.email})
+    
+    # Extract new access token JTI for storage
+    new_access_payload = jwt.decode(
+        new_access_token,
+        settings.SECRET_KEY,
+        algorithms=[settings.ALGORITHM],
+        options={"verify_exp": False}
+    )
+    new_access_token_jti = new_access_payload.get("jti")
+    new_access_token_exp = datetime.fromtimestamp(new_access_payload.get("exp"), tz=timezone.utc) if new_access_payload.get("exp") else None
+    
+    # Update the refresh token record with new access token info
+    if refresh_jti and new_access_token_jti:
+        auth_service.token_repo.update_refresh_token_access_info(
+            refresh_jti,
+            new_access_token_jti,
+            new_access_token_exp
+        )
     
     logger.info(f"Access token refreshed for user: {user.email}")
     
-    from app.core.config import settings
     return LoginResponse(
-        access_token=access_token,
+        access_token=new_access_token,
         token_type="bearer",
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         user_id=str(user_id),

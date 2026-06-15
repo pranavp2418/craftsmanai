@@ -116,9 +116,6 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             bucket_path = f"generated/base/{design.design_code}"
             generated_image_url = upload_image_to_supabase(final_image_bytes, bucket_path)
 
-            db_key = "gold" if detected_metal == "yellow_gold" else ("silver" if detected_metal == "white_gold" else detected_metal)
-            metal_variations_json = {db_key: generated_image_url}
-
         else:
             # ── Fallback: prompt-only generation (no reference image) ─
             generated_item = openai_service.generate_image_from_prompt(prompt)

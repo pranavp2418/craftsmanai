@@ -14,6 +14,11 @@ class RefreshToken(Base):
     device_id = Column(String(255))
     is_active = Column(Boolean, default=True)
     
+    # Store the access token JTI associated with this refresh token
+    # This allows us to blacklist the old access token during refresh/logout
+    access_token_jti = Column(String(255), nullable=True, index=True)
+    access_token_expires_at = Column(DateTime(timezone=True), nullable=True)
+    
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     expires_at = Column(DateTime(timezone=True), nullable=False)

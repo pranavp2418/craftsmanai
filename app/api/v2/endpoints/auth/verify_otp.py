@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
 from typing import Any
 import secrets
@@ -26,7 +26,8 @@ async def verify_otp(
     db: Session = Depends(get_db),
     otp_data: OTPVerifyRequest,
     otp_type: str = "email_verification",
-    request: Request
+    request: Request,
+    response: Response
 ) -> Any:
     """
     Verify OTP and login user
@@ -91,7 +92,19 @@ async def verify_otp(
         db.commit()
         
     # Create tokens and session
+    from jose import jwt
     access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
+    
+    # Extract access token JTI and expiry for storage
+    access_payload = jwt.decode(
+        access_token,
+        settings.SECRET_KEY,
+        algorithms=[settings.ALGORITHM],
+        options={"verify_exp": False}
+    )
+    access_token_jti = access_payload.get("jti")
+    access_token_exp = datetime.fromtimestamp(access_payload.get("exp"), tz=timezone.utc) if access_payload.get("exp") else None
+    
     refresh_token, token_id, expires_at = create_refresh_token(str(user.id), False)
     
     # Handle device management - auto-detect from headers or use provided device_info
@@ -133,31 +146,48 @@ async def verify_otp(
             auth_service.device_repo.create_device(user.id, device_data)
             device_id = device_data["device_id"]
             
-    # Store refresh token
+    # Store refresh token with access token info
     auth_service.token_repo.create_refresh_token(
         user_id=user.id,
         token=refresh_token,
         token_id=token_id,
         expires_at=expires_at,
-        device_id=device_id
+        device_id=device_id,
+        access_token_jti=access_token_jti,
+        access_token_expires_at=access_token_exp
     )
     
     # Update last login
     auth_service.user_repo.update_last_login(user.id)
     
+    # Set refresh token in HTTP-only cookie (same as login endpoint)
+    cookie_days = settings.REFRESH_TOKEN_DAYS  # always use 7 days for OTP flows (no remember_me)
+    max_age = int(cookie_days * 24 * 60 * 60)
+    
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        max_age=max_age,
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+        path="/"
+    )
+    
     logger.info(f"OTP verification successful for {otp_data.email} with type {otp_type}")
     
     # Send welcome email in background (non-blocking) if newly verified
-    try:
-        from app.tasks.email_tasks import send_welcome_email
-        send_welcome_email.delay(
-            to=user.email,
-            user_name=user.username or user.email,
-            dashboard_url="https://craftmenai.txogavideo.in/"
-        )
-        logger.info(f"Welcome email queued for {user.email}")
-    except Exception as e:
-        logger.warning(f"Failed to queue welcome email for {user.email}: {str(e)}")
+    if otp_type == "email_verification":
+        try:
+            from app.tasks.email_tasks import send_welcome_email
+            send_welcome_email.delay(
+                to=user.email,
+                user_name=user.username or user.email,
+                dashboard_url="https://craftmenai.txogavideo.in/"
+            )
+            logger.info(f"Welcome email queued for {user.email}")
+        except Exception as e:
+            logger.warning(f"Failed to queue welcome email for {user.email}: {str(e)}")
     
     return LoginResponse(
         access_token=access_token,
@@ -169,5 +199,6 @@ async def verify_otp(
         is_superuser=user.is_superuser,
         is_verified=user.is_verified,
         notification_message="Welcome to craftsman.ai! Your account has been verified successfully.",
-        profile_image_url=None
+        profile_image_url=user.profile_image_url if hasattr(user, 'profile_image_url') else None,
+        full_name=user.full_name if hasattr(user, 'full_name') else None
     )

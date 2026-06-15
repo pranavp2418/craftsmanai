@@ -725,7 +725,6 @@ Output a JSON verdict:
         )
 
         result_text = response.choices[0].message.content.strip()
-
         try:
             start_idx = result_text.find('{')
             end_idx = result_text.rfind('}') + 1

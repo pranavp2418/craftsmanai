@@ -52,66 +52,62 @@ async def signup(
     
     user_repo = UserRepository(db)
     
-    # Check if user already exists
-    existing_user = user_repo.get_user_by_email(user_in.email)
-    
-    if existing_user:
-        if existing_user.is_verified:
+    # Single-query check: email + whatsapp uniqueness in one round-trip
+    existing = user_repo.check_existing_identities(
+        user_in.email, user_in.whatsapp_number
+    )
+
+    if existing.get("email"):
+        existing_user = user_repo.get_user_by_email(user_in.email)
+        if existing_user and existing_user.is_verified:
             logger.warning(f"Duplicate signup attempt for existing verified email: {user_in.email}")
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Email already registered"
             )
-        # User exists but is not verified - resend OTP for verification
+        # User exists but is not verified — resend OTP
         user = existing_user
         logger.info(f"Resending OTP for unverified user: {user.email}")
+    elif existing.get("whatsapp"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="WhatsApp number already registered"
+        )
     else:
-        # Create new user
+        # Create new user with all fields in one call
         username = _generate_unique_username(user_repo, user_in.email)
-        try:
-            user = user_repo.create_user(
-                email=user_in.email,
-                username=username,
-                full_name=None,
-                password=user_in.password
-            )
-        except IntegrityError:
-            db.rollback()
-            logger.warning(
-                "Signup insert failed for email=%s username=%s due to unique constraint",
-                user_in.email,
-                username,
-            )
-
-            if user_repo.email_exists(user_in.email):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Email already registered"
-                )
-
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Username already taken"
-            )
-
-        # Update WhatsApp number
-        user_repo.update_user(user.id, whatsapp_number=user_in.whatsapp_number)
+        user = user_repo.create_user(
+            email=user_in.email,
+            username=username,
+            business_name=user_in.business_name,
+            full_name=None,
+            password=user_in.password,
+            whatsapp_number=user_in.whatsapp_number,
+        )
     
     # Generate OTP
-    from app.services.auth import AuthService
-    auth_service = AuthService(db)
-    otp_code = auth_service.generate_and_save_otp(
-        user.email, "email_verification", user.id
-    )
+    # from app.services.auth import AuthService
+    # auth_service = AuthService(db)
+    # otp_code = auth_service.generate_and_save_otp(
+    #     user.email, "email_verification", user.id
+    # )
     
-    logger.info(f"OTP generated and sent to {user.email}")
+    # logger.info(f"OTP generated and sent to {user.email}")
     
-    # Send OTP email (background task)
-    from app.tasks.email_tasks import send_signup_otp_email
-    send_signup_otp_email.delay(
-        to=user.email,
-        otp=otp_code,
-        user_name=user.full_name or user.email
+    # # Send OTP email (background task)
+    # from app.tasks.email_tasks import send_signup_otp_email
+    # send_signup_otp_email.delay(
+    #     to=user.email,
+    #     otp=otp_code,
+    #     user_name=user.full_name or user.email
+    # )
+
+    from app.services.otp_service import generate_and_send_otp
+
+    generate_and_send_otp(
+        db=db,
+        user=user,
+        otp_type="email_verification"
     )
     
     logger.info(f"User signup/retry: {user.email} (ID: {user.id})")

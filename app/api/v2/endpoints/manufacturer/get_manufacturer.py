@@ -34,6 +34,13 @@ def get_manufacturer(
     if not manufacturer:
         raise HTTPException(status_code=404, detail="Manufacturer not found")
 
+    # Ownership check: only the creator or a superuser can view this manufacturer
+    if not current_user.is_superuser and manufacturer.created_by_user_id != current_user.id:
+        raise HTTPException(
+            status_code=404,
+            detail="Manufacturer not found"
+        )
+
     # 1. Fetch manufacturer shares linked to this manufacturer
     shares = db.query(DesignVariantManufacturerShare).filter(
         DesignVariantManufacturerShare.manufacturer_id == manufacturer.id
