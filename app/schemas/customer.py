@@ -5,9 +5,10 @@ import ast
 from enum import Enum
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, field_validator
+from email_validator import EmailNotValidError, validate_email
 
-from app.schemas.validations import NormalizedEmailStr, normalize_phone_number
+from app.schemas.validations import normalize_phone_number
 
 
 def _coerce_customer_emails(data: any) -> any:
@@ -62,7 +63,19 @@ class CustomerTag(str, Enum):
 
 class EmailAddressSchema(BaseModel):
     label: str = Field(default="Work")
-    email: NormalizedEmailStr
+    email: str
+
+    @field_validator('email')
+    @classmethod
+    def validate_email_format(cls, v):
+        if not v:
+            return v
+        email_normalized = str(v).strip().lower()
+        try:
+            validate_email(email_normalized, check_deliverability=False)
+        except EmailNotValidError:
+            raise ValueError("Invalid email address")
+        return email_normalized
 
 
 class CustomerCreateRequest(BaseModel):
