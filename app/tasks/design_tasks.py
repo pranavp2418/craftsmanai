@@ -18,6 +18,7 @@ from app.services.openai_service import openai_service
 from app.services.storage_service import _validate_image_bytes, upload_image_to_supabase
 from app.tasks.base import create_task
 from app.core.sse_manager import sse_manager
+from app.services.webpush_service import WebPushService
 
 logger = logging.getLogger(__name__)
 
@@ -280,6 +281,20 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
         except Exception:
             logger.warning("Failed to publish SSE failure event for design_id=%s", design_id)
 
+        # Send WebPush notification if user has push_notifications enabled
+        try:
+            _design = db.query(Design).filter(Design.id == design_id).first()
+            if _design:
+                WebPushService.send_design_failed_push(
+                    db=db,
+                    user_id=_design.user_id,
+                    design_id=design_id,
+                    design_code=getattr(_design, 'design_code', None),
+                    error_message=str(exc),
+                )
+        except Exception as _push_err:
+            logger.warning("Failed to send push notification for design_id=%s: %s", design_id, _push_err)
+
         raise self.retry(
             exc=exc,
             countdown=60 * (2 ** self.request.retries),
@@ -450,7 +465,21 @@ def refine_design_variant_image(
             )
             sse_manager.publish_close(channel)
         except Exception:
-            logger.warning("Failed to publish SSE failure event for channel=%s", channel)
+            logger.warning("Failed to publish SSE failure event for design_id=%s", design_id)
+
+        # Send WebPush notification if user has push_notifications enabled
+        try:
+            _design = db.query(Design).filter(Design.id == design_id).first()
+            if _design:
+                WebPushService.send_design_failed_push(
+                    db=db,
+                    user_id=_design.user_id,
+                    design_id=design_id,
+                    design_code=getattr(_design, 'design_code', None),
+                    error_message=str(exc),
+                )
+        except Exception as _push_err:
+            logger.warning("Failed to send push notification for design_id=%s: %s", design_id, _push_err)
 
         raise self.retry(
             exc=exc,
