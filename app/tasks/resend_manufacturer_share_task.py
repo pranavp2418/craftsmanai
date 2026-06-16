@@ -240,6 +240,7 @@ def resend_manufacturer_share_email(
                         "retailer_phone": retailer_phone or "",
                         "retailer_email": retailer_email or "",
                         "retailer_address": "",
+                        "render_url": render_image_url or ""
                     }
                     rendered_html = render_template_sync(
                         "manufacturer_sms_design_share", context

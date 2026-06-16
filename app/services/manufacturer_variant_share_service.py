@@ -4,7 +4,8 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.design import DesignVariantManufacturerShare, ManufacturerShareStatus
+from app.models.design import Design, DesignStatus, DesignVariantManufacturerShare, ManufacturerShareStatus
+from app.repositories.design import DesignRepository
 from app.repositories.manufacturer_variant_share import DesignVariantManufacturerShareRepository
 from app.repositories.design_variant import DesignVariantRepository
 from app.repositories.activity_log import DesignActivityLogRepository
@@ -155,6 +156,11 @@ class DesignVariantManufacturerShareService:
             if shares:
                 from app.models.design import DesignShareStatus
                 self.design_share_repo.update_status(shares[0], status=DesignShareStatus.Quoted)
+
+            # Update the parent Design status to QUOTE_RECEIVED
+            if variant and variant.design:
+                design_repo = DesignRepository(self.db)
+                design_repo.update_design(variant.design, status=DesignStatus.QUOTE_RECEIVED)
 
         self.activity_repo.log(
             design_id=variant.design_id if variant else None,

@@ -232,7 +232,8 @@ def share_variant_with_manufacturer(
                     design_code=design.design_code,
                     retailer_phone=retailer_phone or "",
                     retailer_email=retailer_email or "",
-                    retailer_address=retailer_address
+                    retailer_address=retailer_address,
+                    render_image_url=variant.base_design_image_url or ""
                 )
 
         shares_response.append({

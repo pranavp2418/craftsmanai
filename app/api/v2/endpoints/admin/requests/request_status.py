@@ -20,10 +20,15 @@ async def get_request_status_distribution(
     # Map detailed statuses to UI categories
     mapping = {
         "pending": [DesignStatus.DRAFT, DesignStatus.GENERATING, DesignStatus.GENERATED],
-        "in_progress": [DesignStatus.UNDER_REVIEW, DesignStatus.SHARED, DesignStatus.IN_PRODUCTION],
-        "quote_received": [],
+        "in_progress": [DesignStatus.UNDER_REVIEW, DesignStatus.SHARED, DesignStatus.REFINEMENT_REQUESTED, DesignStatus.IN_PRODUCTION],
+        "quotes_requested": [DesignStatus.QUOTES_REQUESTED],
+        "quote_received": [DesignStatus.QUOTE_RECEIVED],
+        "design_rejected": [DesignStatus.DESIGN_REJECTED],
+        "manufacturer_approved": [DesignStatus.MANUFACTURER_APPROVED],
         "approved": [DesignStatus.APPROVED],
-        "completed": [DesignStatus.COMPLETED]
+        "completed": [DesignStatus.COMPLETED],
+        "sent_to_manufacturer": [DesignStatus.SENT_TO_MANUFACTURER],
+        "failed": [DesignStatus.REJECTED]
     }
     
     distribution = {k: 0 for k in mapping.keys()}
@@ -33,4 +38,4 @@ async def get_request_status_distribution(
                 distribution[cat] += count
                 break
                 
-    return distribution
+    return distribution
