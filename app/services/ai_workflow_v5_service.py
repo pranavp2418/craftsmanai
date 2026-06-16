@@ -361,10 +361,20 @@ def build_prompt(
     target_regions: Optional[List[str]] = None,
     from_refine: bool = False,
 ) -> str:
-    """Build the generation prompt using the same logic as codeflow_pipeline.py"""
-    # For backward compatibility: if from_refine is True, treat mode as "refine"
-    if from_refine:
-        mode = "refine"
+    # Override metal tone if user specifies it in the note/prompt
+    from app.services.openai_service import extract_metal_from_prompt
+    extracted_metal = extract_metal_from_prompt(note)
+    if extracted_metal:
+        if extracted_metal == "gold":
+            metal_tone = "yellow gold"
+        elif extracted_metal == "silver":
+            metal_tone = "white gold"
+        elif extracted_metal == "rose_gold":
+            metal_tone = "rose gold"
+        elif extracted_metal == "two_tone":
+            metal_tone = "two-tone (mixed white gold and yellow/rose gold accents from the reference image)"
+        else:
+            metal_tone = extracted_metal.replace("_", " ")
 
     normalized_directives = normalize_retailer_language(note) if note else []
     normalized_block = "\n".join([f"- {d}" for d in normalized_directives]) if normalized_directives else ""

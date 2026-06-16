@@ -18,7 +18,7 @@ class BrandSettingRepository:
             business_name = user.business_name if user else "Craftsman AI"
             setting = BrandSetting(
                 user_id=user_id,
-                brand_name=business_name or "Craftsman AI",
+                brand_name="Craftsman AI",
                 logo_url=None,
                 business_email=email,
                 phone_number=None,

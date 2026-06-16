@@ -144,6 +144,12 @@ def _build_angle_variant_prompt(angle_name: str, metal: str, jewellery_type: str
     # Use the resolved piece word so the prompt says "ring"/"bracelet" instead of "Custom".
     worn_jt = piece if (jt == "jewelry piece" or (jewellery_type or "").strip().lower() in ("", "custom")) else jt
 
+    stone_protection = (
+        "\n\nCRITICAL STONE PROTECTION: Do NOT change the color, shape, position, or type of any gemstones. "
+        "All gemstones (including clear diamonds and colored stones like green, red, pink, blue, etc.) must preserve their original color, vibrancy, saturation, and transparency exactly as seen in the reference image. "
+        "Do NOT recolor, desaturate, or turn colored gems into white/silver or metal."
+    )
+
     if is_worn:
         worn_desc = _WORN_BODYPART.get(piece, _WORN_BODYPART["pendant"])
         chain_clause = ""
@@ -167,7 +173,7 @@ def _build_angle_variant_prompt(angle_name: str, metal: str, jewellery_type: str
                 f" The {worn_jt} encircles the limb — the body part passes THROUGH the band/opening so the piece is "
                 "worn around it like in real life, with correct realistic proportions. Do not just rest it on top."
             )
-        return f"""Show this exact same {worn_jt}{color_clause}, {worn_desc} — a realistic lifestyle photo of the piece being worn.{chain_clause}
+        return f"""Show this exact same {worn_jt}{color_clause}, {worn_desc} — a realistic lifestyle photo of the piece being worn.{chain_clause}{stone_protection}
 
 Keep the EXACT same design, components, stones, engraving/text, shape, proportions, borders,{color_preserve} and all details identical to the reference. Only show it being worn; do not redesign or alter any part of the piece.
 
@@ -179,14 +185,14 @@ Photorealistic lifestyle photograph, natural lighting, the jewelry in sharp focu
             # A ring/bracelet is a solid band — its back is simply the reverse of the band and the
             # back of any motif. It has NO bail/hook/backplate; never add a hanging loop.
             ring_word = worn_jt or "ring"
-            return f"""Show the BACK / REVERSE side of this exact same {ring_word} — rotate the piece to show the back of the band/shank and the BACK of the decorative motif (for example the back of the animal's head and body), in {same_metal}, on a pure solid white background (#FFFFFF) with NO background scene.
+            return f"""Show the BACK / REVERSE side of this exact same {ring_word} — rotate the piece to show the back of the band/shank and the BACK of the decorative motif (for example the back of the animal's head and body), in {same_metal}, on a pure solid white background (#FFFFFF) with NO background scene.{stone_protection}
 
 It is a solid {ring_word} — a continuous band/shank. There is NO bail, NO hook, NO loop and NO backplate: do NOT add any hanging loop, hook, ring-clip or attachment of any kind. Simply show the same piece from behind — the smooth reverse of the band and the rear of the design. Keep the EXACT same shape, size, proportions and band thickness as the reference; only the viewing side changes.
 
 Render it as a clean CAD-style 3D jewelry render (crisp, sharp, even studio lighting) — NOT a lifestyle photo, NOT a cartoon, no background scene. Pure solid white background (#FFFFFF).
 
 One image only."""
-        return f"""Show the BACK / REVERSE side of this exact same {jt} — as if you physically flipped the piece over front-to-back — in {same_metal}, on a pure solid white background (#FFFFFF) with NO background scene.
+        return f"""Show the BACK / REVERSE side of this exact same {jt} — as if you physically flipped the piece over front-to-back — in {same_metal}, on a pure solid white background (#FFFFFF) with NO background scene.{stone_protection}
 
 This is the REVERSE side, NOT the front. Show the REALISTIC back of this exact piece exactly as real finished jewellery looks from behind — the reverse of the actual metalwork and construction: the backs of the stone settings, bezels and prongs, the reverse of the frame and any open-work / gallery, and the back of the bail/hook ONLY if the piece actually has one. Keep the SAME outer silhouette, proportions and structure as the front. Do NOT render a flat featureless metal plate / backplate, and do NOT invent any plate, hook or attachment that is not really part of the piece — show the genuine reverse construction of this specific jewellery type. The front design must NOT appear readable on the back: the name, numbers, lettering, motifs and any enamel/colour from the front must NOT show normally on the back. If the piece is open-work / see-through so some lettering shows through from the front, that lettering MUST be MIRRORED (reversed left-to-right), never readable.
 
@@ -195,7 +201,7 @@ Render it as a clean CAD-style 3D jewelry render (crisp, sharp, even studio ligh
 One image only."""
 
     view_desc = VIEW_PROMPTS.get(angle_name, VIEW_PROMPTS.get("side_view"))
-    return f"""Show this exact same {jt} from a {view_desc}{color_clause}.
+    return f"""Show this exact same {jt} from a {view_desc}{color_clause}.{stone_protection}
 
 Keep the exact same design, components, stones, engraving/text, shape, proportions, borders,{color_preserve} and all details. {change_clause} — do not redesign or alter any part of the piece.
 

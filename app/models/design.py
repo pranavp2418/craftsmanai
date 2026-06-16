@@ -46,7 +46,7 @@ class Design(Base):
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True, doc="The actual creator (team member) if different from user_id (team owner)")
     design_code = Column(String(32), unique=True, nullable=False, index=True)
     sequence_number = Column(Integer, nullable=False)
-    name = Column(String(255), nullable=False)
+    name = Column(String(255), nullable=True)
     jewellery_type = Column(String(100), nullable=True)
     user_prompt = Column(Text, nullable=True)
     input_image_url = Column(String(500), nullable=True)

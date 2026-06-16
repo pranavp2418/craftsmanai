@@ -109,6 +109,7 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                 from app.services.openai_service import (
                     extract_image_instructions, classify_reference_image,
                     NON_JEWELRY_GOLD_INSTRUCTION, MEMORIAL_PHOTO_PENDANT_INSTRUCTION,
+                    extract_metal_from_prompt, build_non_jewelry_metal_instruction,
                 )
                 _refs = reference_image_source if isinstance(reference_image_source, list) else [reference_image_source]
                 _refs = [u for u in _refs if u][:4]
@@ -148,25 +149,39 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                         logger.info("Applied requested font style for design_id=%s: %s", design_id, _font_style[:160])
 
                 # (b) Metal + jewelry/non-jewelry handling across ALL references.
-                _jewelry = [c for c in _classified if c.get("is_jewelry", True)]
-                _nonjewelry = [c for c in _classified if not c.get("is_jewelry", True)]
-                if _jewelry:
-                    # At least one real JEWELRY reference → match its metal, keep its stones.
-                    _m = _jewelry[0].get("metal")
-                    if _m in ("gold", "silver", "rose_gold"):
-                        input_metal = _m
-                    if _nonjewelry and len(_refs) > 1:
-                        # PERSON photo + JEWELRY reference → memorial photo pendant: copy the
-                        # reference pendant's design and embed the person's portrait inside it.
-                        _internal += MEMORIAL_PHOTO_PENDANT_INSTRUCTION
-                        logger.info("Memorial photo pendant (embed photo into jewelry design) for design_id=%s", design_id)
-                    logger.info("Reference has jewelry (metal='%s') for design_id=%s", input_metal, design_id)
-                elif len(_refs) == 1:
-                    # Single NON-jewelry image (logo/graphic) → pure SOLID GOLD pendant, no diamonds.
-                    input_metal = "gold"
-                    _internal += NON_JEWELRY_GOLD_INSTRUCTION
-                    logger.info("Single non-jewelry input → pure gold pendant for design_id=%s", design_id)
-                # else: multiple non-jewelry images → leave defaults (rare, ambiguous).
+                # First, check if the user prompt explicitly specifies a metal:
+                prompt_metal = extract_metal_from_prompt(prompt)
+                if prompt_metal:
+                    input_metal = prompt_metal
+                    logger.info("User prompt explicitly specified metal='%s' for design_id=%s", input_metal, design_id)
+                    # If it's a single non-jewelry graphic but user requested a metal, append the non-jewelry metal instruction
+                    # using the user's requested metal instead of default gold.
+                    _nonjewelry = [c for c in _classified if not c.get("is_jewelry", True)]
+                    if not _nonjewelry:
+                        if len(_refs) == 1:
+                            _internal += build_non_jewelry_metal_instruction(input_metal)
+                    elif len(_refs) == 1:
+                        _internal += build_non_jewelry_metal_instruction(input_metal)
+                else:
+                    _jewelry = [c for c in _classified if c.get("is_jewelry", True)]
+                    _nonjewelry = [c for c in _classified if not c.get("is_jewelry", True)]
+                    if _jewelry:
+                        # At least one real JEWELRY reference → match its metal, keep its stones.
+                        _m = _jewelry[0].get("metal")
+                        if _m in ("gold", "silver", "rose_gold", "two_tone"):
+                            input_metal = _m
+                        if _nonjewelry and len(_refs) > 1:
+                            # PERSON photo + JEWELRY reference → memorial photo pendant: copy the
+                            # reference pendant's design and embed the person's portrait inside it.
+                            _internal += MEMORIAL_PHOTO_PENDANT_INSTRUCTION
+                            logger.info("Memorial photo pendant (embed photo into jewelry design) for design_id=%s", design_id)
+                        logger.info("Reference has jewelry (metal='%s') for design_id=%s", input_metal, design_id)
+                    elif len(_refs) == 1:
+                        # Single NON-jewelry image (logo/graphic) → default to gold (10KT Yellow Gold) and append instruction
+                        input_metal = "gold"
+                        _internal += NON_JEWELRY_GOLD_INSTRUCTION
+                        logger.info("Single non-jewelry input with no metal specified → pure gold pendant for design_id=%s", design_id)
+                    # else: multiple non-jewelry images → leave defaults (rare, ambiguous).
             except Exception as _pre_err:
                 logger.warning("Pre-generation image read failed for design_id=%s: %s", design_id, _pre_err)
 
