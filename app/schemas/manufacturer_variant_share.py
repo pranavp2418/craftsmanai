@@ -61,7 +61,7 @@ class VariantManufacturerSharesResponse(BaseModel):
     version_number: int
     design_id: int
     design_code: str
-    design_name: str
+    design_name:Optional[str] = None
     design_variant_status: DesignStatus
     design_status: DesignStatus
     total_shares: int
