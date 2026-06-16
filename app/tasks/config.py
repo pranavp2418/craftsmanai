@@ -8,20 +8,10 @@ from app.core.config import settings
 
 # Task queues for different types of work
 CELERY_ROUTES = {
-    # Email/SMS tasks go to the dedicated 'email' queue (consumed by worker-email)
-    # so time-sensitive mail (e.g. signup OTP) never queues behind heavy renders.
-    # NOTE: keys MUST be the task's REGISTERED short name (see @create_task(name=...)),
-    # otherwise the route never matches and the task falls back to the default queue.
-    'send_signup_otp_email': {'queue': 'email'},
-    'send_password_reset_email': {'queue': 'email'},
-    'send_welcome_email': {'queue': 'email'},
-    'send_design_review_email': {'queue': 'email'},
-    'send_customer_share_email': {'queue': 'email'},
-    'send_customer_share_sms': {'queue': 'email'},
-    'send_manufacturer_share_email': {'queue': 'email'},
-    'send_manufacturer_share_sms': {'queue': 'email'},
-    'send_team_invitation_email': {'queue': 'email'},
-    'resend_manufacturer_share_email': {'queue': 'email'},
+    # Email tasks are not routed to a dedicated queue by default.
+    # In production with docker-compose.workers.yml, an explicit -Q email worker
+    # is started which will still pick up tasks from the 'email' queue if routed.
+    # For local development (no -Q flag), tasks fall back to the default queue.
 
     # Cleanup tasks go to cleanup queue
     'app.tasks.cleanup_tasks.cleanup_expired_otps': {'queue': 'cleanup'},

@@ -21,20 +21,34 @@ UI_STATUS_MAP = {
     ],
     "QUOTE_REQUESTED": [
         DesignStatus.UNDER_REVIEW,
+        DesignStatus.QUOTES_REQUESTED,
+    ],
+    "QUOTE_RECEIVED": [
+        DesignStatus.QUOTE_RECEIVED,
     ],
     "IN_PROGRESS": [
         DesignStatus.DRAFT,
         DesignStatus.GENERATED,
         DesignStatus.SHARED,
+        DesignStatus.REFINEMENT_REQUESTED,
     ],
     "APPROVED": [
         DesignStatus.APPROVED,
+    ],
+    "DESIGN_REJECTED": [
+        DesignStatus.DESIGN_REJECTED,
+    ],
+    "MANUFACTURER_APPROVED": [
+        DesignStatus.MANUFACTURER_APPROVED,
     ],
     "IN_PRODUCTION": [
         DesignStatus.IN_PRODUCTION,
     ],
     "COMPLETED": [
         DesignStatus.COMPLETED,
+    ],
+    "SENT_TO_MANUFACTURER": [
+        DesignStatus.SENT_TO_MANUFACTURER,
     ],
     "FAILED": [
         DesignStatus.REJECTED,

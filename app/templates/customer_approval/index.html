@@ -17,7 +17,11 @@
               <img src="https://agfgngkpvckrobfecdkr.storage.supabase.co/storage/v1/object/public/craftman/email-assets/logo_6ed9d2a8.jpg" alt="CraftsmanAI" height="44" style="display:block;height:44px;width:auto;max-width:100%;mix-blend-mode:lighten;" />
             </td> -->
             <td align="center" class="card-padding" style="padding:36px 40px 8px 40px;">
+              {% if brand_logo_url %}
+              <img src="{{brand_logo_url}}" alt="Brand Logo" height="44" style="display:block;height:44px;width:auto;max-width:100%;" />
+              {% else %}
               <img src="https://craftsmanai.app/landingPageLogo.svg" alt="CraftsmanAI" height="44" style="display:block;height:44px;width:auto;max-width:100%;mix-blend-mode:lighten;" />
+              {% endif %}
             </td>
           </tr>
           <tr><td align="center" class="card-padding" style="padding:16px 40px 6px 40px;"><h1 class="heading-text" style="margin:0;font-size:24px;font-weight:700;color:#ffffff;line-height:1.3;">Design ready for approval</h1></td></tr>

@@ -103,6 +103,11 @@ class Settings(BaseSettings):
     # Frontend URL
     FRONTEND_URL: str = "https://craftmenai.txogavideo.in/"
 
+    # Web Push VAPID Keys
+    VAPID_PRIVATE_KEY: Optional[str] = None
+    VAPID_PUBLIC_KEY: Optional[str] = None
+    VAPID_CLAIM_EMAIL: str = "mailto:noreply@craftsmanai.app"
+
     @property
     def EMAILS_FROM_EMAIL(self) -> Optional[str]:
         """Backward compatibility - returns ZeptoMail from email"""

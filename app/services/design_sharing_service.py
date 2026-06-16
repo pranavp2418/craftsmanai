@@ -3,7 +3,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.design import DesignShare, DesignShareStatus
+from app.models.design import Design, DesignShare, DesignShareStatus, DesignStatus
+from app.repositories.design import DesignRepository
 from app.repositories.design_share import DesignShareRepository
 from app.repositories.activity_log import DesignActivityLogRepository
 from app.repositories.design_variant import DesignVariantRepository
@@ -124,6 +125,17 @@ class DesignSharingService:
             metadata={"share_id": share.id, "variant_id": share.design_variant_id, "status": status.value},
         )
 
+        # Sync the parent Design status with the customer's decision
+        if variant and variant.design:
+            design = variant.design
+            design_repo = DesignRepository(self.db)
+            if status == DesignShareStatus.ACCEPTED:
+                design_repo.update_design(design, status=DesignStatus.APPROVED)
+            elif status == DesignShareStatus.REJECTED:
+                design_repo.update_design(design, status=DesignStatus.DESIGN_REJECTED)
+            elif status == DesignShareStatus.NEEDS_REFINEMENT:
+                design_repo.update_design(design, status=DesignStatus.REFINEMENT_REQUESTED)
+
         # Trigger notification to the retailer (the user who created this customer or design)
         recipient_user_id = None
         if share.customer:
@@ -179,5 +191,39 @@ class DesignSharingService:
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).error(f"Failed to send customer access notification: {str(e)}")
+
+        # --- Web Push notification (if design_approval_alerts is enabled) ---
+        if recipient_user_id:
+            try:
+                from app.models.notification_setting import NotificationSetting
+                from app.services.webpush_service import WebPushService
+
+                notif_setting = self.db.query(NotificationSetting).filter(
+                    NotificationSetting.user_id == recipient_user_id
+                ).first()
+
+                if notif_setting and notif_setting.design_approval_alerts:
+                    push_title = notification_title
+                    push_body = notification_message
+
+                    if push_title and push_body:
+                        WebPushService.send_push(
+                            db=self.db,
+                            user_id=recipient_user_id,
+                            title=push_title,
+                            body=push_body,
+                            url=f"/designs/{design_id}" if design_id else None,
+                            data={
+                                "share_id": share.id,
+                                "design_id": design_id,
+                                "variant_id": share.design_variant_id,
+                                "status": status.value,
+                                "type": "design_approval_alert",
+                            },
+                            tag=f"design-share-{share.id}-{status.value}",
+                        )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to send push notification: {str(e)}")
 
         return updated

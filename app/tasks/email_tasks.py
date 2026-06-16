@@ -581,9 +581,20 @@ def send_design_review_email(
 
 
 @create_task(name="send_customer_share_sms", max_retries=3)
-def send_customer_share_sms(self, to_number: str, customer_name: str, preview_url: str, designer_name: str, design_code: str = None, retailer_phone: str = None, retailer_email: str = None, retailer_address: str = ""):
+def send_customer_share_sms(self, to_number: str, customer_name: str, preview_url: str, designer_name: str, design_code: str = None, retailer_phone: str = None, retailer_email: str = None, retailer_address: str = "", render_image_url: str = None):
     """
     Send an SMS to a customer with a link to review a shared design using the customer_sms_design_share template.
+    
+    Args:
+        to_number: Recipient phone number
+        customer_name: Customer's display name
+        preview_url: URL for the customer to review the design
+        designer_name: Name of the designer who shared the design
+        design_code: Design code/number
+        retailer_phone: Retailer's phone number for contact info
+        retailer_email: Retailer's email for contact info
+        retailer_address: Retailer's address for contact info
+        render_image_url: URL of the design render image to display in the rich preview
     """
     task_name = "send_customer_share_sms"
     try:
@@ -604,7 +615,8 @@ def send_customer_share_sms(self, to_number: str, customer_name: str, preview_ur
             "design_number": design_code or "",
             "retailer_phone": retailer_phone or "",
             "retailer_email": retailer_email or "",
-            "retailer_address": retailer_address or ""
+            "retailer_address": retailer_address or "",
+            "render_url": render_image_url or ""
         }
         
         rendered_html = render_template_sync("customer_sms_design_share", context)
@@ -641,7 +653,7 @@ def send_customer_share_sms(self, to_number: str, customer_name: str, preview_ur
 
 
 @create_task(name="send_customer_share_email", max_retries=3)
-def send_customer_share_email(self, to_email: str, customer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, version: str = None, version_label: str = None):
+def send_customer_share_email(self, to_email: str, customer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, version: str = None, version_label: str = None, brand_logo_url: str = None):
     """
     Send an email to a customer with a link to review a shared design using customer_approval template.
     """
@@ -652,7 +664,7 @@ def send_customer_share_email(self, to_email: str, customer_name: str, preview_u
         import asyncio
         loop = asyncio.new_event_loop()
         loop.run_until_complete(
-            EmailService.send_customer_share(to_email, customer_name, preview_url, designer_name, retailer_name, render_image_url, design_code, jewelry_type, version, version_label)
+            EmailService.send_customer_share(to_email, customer_name, preview_url, designer_name, retailer_name, render_image_url, design_code, jewelry_type, version, version_label, brand_logo_url)
         )
         
         logger.info(f"✅ {task_name} completed successfully for {to_email}")
@@ -667,9 +679,21 @@ def send_customer_share_email(self, to_email: str, customer_name: str, preview_u
 
 
 @create_task(name="send_manufacturer_share_sms", max_retries=3)
-def send_manufacturer_share_sms(self, to_number: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, design_code: str = None, retailer_phone: str = None, retailer_email: str = None, retailer_address: str = ""):
+def send_manufacturer_share_sms(self, to_number: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, design_code: str = None, retailer_phone: str = None, retailer_email: str = None, retailer_address: str = "", render_image_url: str = None):
     """
     Send an SMS to a manufacturer with a link to review a shared design using manufacturer_sms_design_share template.
+    
+    Args:
+        to_number: Recipient phone number
+        manufacturer_name: Manufacturer's display name
+        preview_url: URL for the manufacturer to review the design
+        designer_name: Name of the designer who shared the design
+        retailer_name: Retailer/brand name
+        design_code: Design code/number
+        retailer_phone: Retailer's phone number for contact info
+        retailer_email: Retailer's email for contact info
+        retailer_address: Retailer's address for contact info
+        render_image_url: URL of the design render image to display in the rich preview
     """
     task_name = "send_manufacturer_share_sms"
     try:
@@ -690,7 +714,8 @@ def send_manufacturer_share_sms(self, to_number: str, manufacturer_name: str, pr
             "details_sheet_url": preview_url,
             "retailer_phone": retailer_phone or "",
             "retailer_email": retailer_email or "",
-            "retailer_address": retailer_address or ""
+            "retailer_address": retailer_address or "",
+            "render_url": render_image_url or ""
         }
         
         rendered_html = render_template_sync("manufacturer_sms_design_share", context)
@@ -727,7 +752,7 @@ def send_manufacturer_share_sms(self, to_number: str, manufacturer_name: str, pr
 
 
 @create_task(name="send_manufacturer_share_email", max_retries=3)
-def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, metal: str = None):
+def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, metal: str = None, brand_logo_url: str = None):
     """
     Send an email to a manufacturer with a link to review a shared design using manufacturer_design_share template.
     """
@@ -738,7 +763,7 @@ def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, p
         import asyncio
         loop = asyncio.new_event_loop()
         loop.run_until_complete(
-            EmailService.send_manufacturer_share(to_email, manufacturer_name, preview_url, designer_name, retailer_name, render_image_url, design_code, jewelry_type, metal)
+            EmailService.send_manufacturer_share(to_email, manufacturer_name, preview_url, designer_name, retailer_name, render_image_url, design_code, jewelry_type, metal, brand_logo_url)
         )
         
         logger.info(f"✅ {task_name} completed successfully for {to_email}")
@@ -998,24 +1023,24 @@ def _build_team_invitation_html(team_name: str, variables: dict) -> str:
                             <!-- Role Info -->
                             <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom: 32px; background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 12px; padding: 16px;">
                                 <tr>
-                                    <td style="padding: 8px 0;">
-                                        <div style="color: #9ca3af; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Your Role</div>
-                                        <div style="color: #818cf8; font-size: 18px; font-weight: 600; margin-bottom: 8px; text-transform: capitalize;">{role}</div>
-                                        <div style="color: #9ca3af; font-size: 14px; line-height: 1.5;">{role_description}</div>
-                                    </td>
+                                    <td style="padding-bottom: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #818cf8; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">Your Role</td>
+                                </tr>
+                                <tr>
+                                    <td style="font-size: 16px; font-weight: 600; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">{role.title()}</td>
+                                </tr>
+                                <tr>
+                                    <td style="font-size: 13px; color: #9ca3af; padding-top: 4px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">{role_description}</td>
                                 </tr>
                             </table>
                             
                             <!-- CTA Button -->
-                            <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom: 32px;">
+                            <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom: 24px;">
                                 <tr>
                                     <td align="center">
                                         <table border="0" cellspacing="0" cellpadding="0">
                                             <tr>
-                                                <td style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); border-radius: 12px; padding: 0;">
-                                                    <a href="{invitation_link}" style="display: inline-block; padding: 14px 40px; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 16px; border-radius: 12px; background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); box-shadow: 0 8px 20px rgba(99, 102, 241, 0.3);">
-                                                        Accept Invitation
-                                                    </a>
+                                                <td align="center" style="border-radius: 9999px; background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); padding: 14px 32px;">
+                                                    <a href="{invitation_link}" style="color: #ffffff; text-decoration: none; font-weight: 700; font-size: 16px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: inline-block;">Accept invitation</a>
                                                 </td>
                                             </tr>
                                         </table>
@@ -1023,32 +1048,11 @@ def _build_team_invitation_html(team_name: str, variables: dict) -> str:
                                 </tr>
                             </table>
                             
-                            <!-- Alternative Link -->
-                            <p style="color: #6b7280; font-size: 13px; text-align: center; margin-bottom: 24px;">
-                                Or copy this link into your browser:
-                                <br>
-                                <span style="color: #818cf8; word-break: break-all;">
-                                    <a href="{invitation_link}" style="color: #818cf8; text-decoration: none;">
-                                        {invitation_link}
-                                    </a>
-                                </span>
+                            <p style="color: #9ca3af; font-size: 14px; line-height: 1.6; text-align: center; margin-bottom: 0;">
+                                If the button does not open, use the link below:
                             </p>
-                            
-                            <div style="height: 1px; background: linear-gradient(90deg, transparent 0%, rgba(99, 102, 241, 0.3) 100%); margin-bottom: 24px;"></div>
-                            
-                            <!-- Info Box -->
-                            <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background: rgba(168, 85, 247, 0.05); border-left: 3px solid #a855f7; border-radius: 4px; padding: 16px; margin-bottom: 24px;">
-                                <tr>
-                                    <td style="padding: 0 12px;">
-                                        <p style="color: #9ca3af; font-size: 13px; line-height: 1.6; margin: 0;">
-                                            <strong style="color: #d8b4fe;">This invitation will expire in 7 days.</strong> If you don't accept it before then, you'll need to request a new one from the team admin.
-                                        </p>
-                                    </td>
-                                </tr>
-                            </table>
-                            
-                            <p style="color: #6b7280; font-size: 13px; line-height: 1.6; text-align: center; margin-bottom: 0;">
-                                Questions? Reach out to us at <a href="mailto:support@craftmen.com" style="color: #818cf8; text-decoration: none;">support@craftmen.com</a>
+                            <p style="word-break: break-all; color: #818cf8; font-size: 13px; line-height: 1.6; text-align: center; margin-bottom: 0;">
+                                <a href="{invitation_link}" style="color: #818cf8; text-decoration: none;">{invitation_link}</a>
                             </p>
                         </td>
                     </tr>
@@ -1058,8 +1062,6 @@ def _build_team_invitation_html(team_name: str, variables: dict) -> str:
                         <td align="center" style="padding: 24px 40px; background-color: rgba(0, 0, 0, 0.2); border-top: 1px solid rgba(255, 255, 255, 0.04);">
                             <p style="color: #4b5563; font-size: 12px; margin: 0;">
                                 &copy; 2026 Craftmen. All rights reserved.
-                                <br>
-                                <a href="https://craftmen.com" style="color: #6b7280; text-decoration: none;">www.craftmen.com</a>
                             </p>
                         </td>
                     </tr>
@@ -1070,6 +1072,7 @@ def _build_team_invitation_html(team_name: str, variables: dict) -> str:
 </body>
 </html>
 """
+    
     return html
 
 
@@ -1082,26 +1085,17 @@ def _build_team_invitation_text(team_name: str, variables: dict) -> str:
     role = variables.get('role', 'Viewer')
     
     text = f"""
-Team Invitation - Craftmen
-=========================
-
 Hi {invited_name},
 
-{invited_by_name} has invited you to join the team "{team_name}" on Craftmen.
+{invited_by_name} has invited you to join the team {team_name} on Craftmen.
 
-Your Role: {role}
+Your role: {role.title()}
 
-To accept this invitation, click the link below:
+Open this link to accept the invitation:
 {invitation_link}
-
-This invitation will expire in 7 days. If you don't accept it before then, you'll need to request a new one from the team admin.
-
-Questions? Contact us at support@craftmen.com
 
 Best regards,
 The Craftmen Team
-
-© 2026 Craftmen. All rights reserved.
-www.craftmen.com
-"""
-    return text.strip()
+""".strip()
+    
+    return text
