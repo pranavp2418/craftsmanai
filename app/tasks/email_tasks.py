@@ -653,7 +653,7 @@ def send_customer_share_sms(self, to_number: str, customer_name: str, preview_ur
 
 
 @create_task(name="send_customer_share_email", max_retries=3)
-def send_customer_share_email(self, to_email: str, customer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, version: str = None, version_label: str = None):
+def send_customer_share_email(self, to_email: str, customer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, version: str = None, version_label: str = None, brand_logo_url: str = None):
     """
     Send an email to a customer with a link to review a shared design using customer_approval template.
     """
@@ -664,7 +664,7 @@ def send_customer_share_email(self, to_email: str, customer_name: str, preview_u
         import asyncio
         loop = asyncio.new_event_loop()
         loop.run_until_complete(
-            EmailService.send_customer_share(to_email, customer_name, preview_url, designer_name, retailer_name, render_image_url, design_code, jewelry_type, version, version_label)
+            EmailService.send_customer_share(to_email, customer_name, preview_url, designer_name, retailer_name, render_image_url, design_code, jewelry_type, version, version_label, brand_logo_url)
         )
         
         logger.info(f"✅ {task_name} completed successfully for {to_email}")
@@ -752,7 +752,7 @@ def send_manufacturer_share_sms(self, to_number: str, manufacturer_name: str, pr
 
 
 @create_task(name="send_manufacturer_share_email", max_retries=3)
-def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, metal: str = None):
+def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, metal: str = None, brand_logo_url: str = None):
     """
     Send an email to a manufacturer with a link to review a shared design using manufacturer_design_share template.
     """
@@ -763,7 +763,7 @@ def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, p
         import asyncio
         loop = asyncio.new_event_loop()
         loop.run_until_complete(
-            EmailService.send_manufacturer_share(to_email, manufacturer_name, preview_url, designer_name, retailer_name, render_image_url, design_code, jewelry_type, metal)
+            EmailService.send_manufacturer_share(to_email, manufacturer_name, preview_url, designer_name, retailer_name, render_image_url, design_code, jewelry_type, metal, brand_logo_url)
         )
         
         logger.info(f"✅ {task_name} completed successfully for {to_email}")

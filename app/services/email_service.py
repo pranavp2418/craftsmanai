@@ -252,7 +252,7 @@ class EmailService:
             raise e
     
     @staticmethod
-    async def send_customer_share(to_email: str, customer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, version: str = None, version_label: str = None):
+    async def send_customer_share(to_email: str, customer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, version: str = None, version_label: str = None, brand_logo_url: str = None):
         """Send an email to a customer with a link to review a shared design using customer_approval template."""
         from app.models.email_log import EmailStatus
         
@@ -260,7 +260,7 @@ class EmailService:
             to_email=to_email,
             template_name="customer_approval",
             subject=f"{designer_name} shared a design with you - Craftmen",
-            variables={"customer_name": customer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "version": version, "version_label": version_label}
+            variables={"customer_name": customer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "version": version, "version_label": version_label, "brand_logo_url": brand_logo_url}
         )
         try:
             logger.info(f"SENDING CUSTOMER SHARE EMAIL: To={to_email}, URL={preview_url}")
@@ -275,7 +275,8 @@ class EmailService:
                 "design_number": design_code or "",
                 "jewelry_type": jewelry_type or "Custom Jewelry",
                 "version_label": version_label or "Version 1",
-                "approval_url": preview_url
+                "approval_url": preview_url,
+                "brand_logo_url": brand_logo_url or ""
             }
             
             html_content = await render_template("customer_approval", context)
@@ -311,7 +312,7 @@ class EmailService:
             raise e
 
     @staticmethod
-    async def send_manufacturer_share(to_email: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, metal: str = None):
+    async def send_manufacturer_share(to_email: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, metal: str = None, brand_logo_url: str = None):
         """Send an email to a manufacturer with a link to review a shared design for quote using manufacturer_design_share template."""
         from app.models.email_log import EmailStatus
         
@@ -319,7 +320,7 @@ class EmailService:
             to_email=to_email,
             template_name="manufacturer_design_share",
             subject=f"Quote Request from {designer_name} - Craftmen",
-            variables={"manufacturer_name": manufacturer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "metal": metal}
+            variables={"manufacturer_name": manufacturer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "metal": metal, "brand_logo_url": brand_logo_url}
         )
         try:
             logger.info(f"SENDING MANUFACTURER SHARE EMAIL: To={to_email}, URL={preview_url}")
@@ -333,7 +334,8 @@ class EmailService:
                 "design_number": design_code or "",
                 "jewelry_type": jewelry_type or "Custom Jewelry",
                 "metal": metal or "Not specified",
-                "details_sheet_url": preview_url
+                "details_sheet_url": preview_url,
+                "brand_logo_url": brand_logo_url or ""
             }
             
             html_content = await render_template("manufacturer_design_share", context)

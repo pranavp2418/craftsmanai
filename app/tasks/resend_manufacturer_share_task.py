@@ -163,6 +163,12 @@ def resend_manufacturer_share_email(
         metal = share.shared_metal or "Not specified"
         designer_name = owner.full_name or owner.username
         design_code = design.design_code
+        
+        # Determine brand logo based on subscription plan
+        # Pro plan users get their brand logo; Starter plan users get the default CraftsmanAI logo
+        brand_logo_url = None
+        if owner.subscription_plan and owner.subscription_plan.lower() == "pro":
+            brand_logo_url = brand_setting.logo_url if brand_setting else None
 
         # ── 7. Log the resend in the email_logs table for traceability
         resend_log = EmailLog(
@@ -202,6 +208,7 @@ def resend_manufacturer_share_email(
                         design_code=design_code,
                         jewelry_type=jewelry_type,
                         metal=metal,
+                        brand_logo_url=brand_logo_url,
                     )
                 )
             finally:

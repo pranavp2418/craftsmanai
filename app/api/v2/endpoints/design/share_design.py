@@ -160,6 +160,12 @@ def share_design_variant(
                 version = f"v{variant.version_number}.{variant.version_number}" if variant.version_number else "v1.0"
                 version_label = f"Version {variant.version_number}" if variant.version_number else "Version 1"
                 
+                # Determine brand logo based on subscription plan
+                # Pro plan users get their brand logo; Starter plan users get the default CraftsmanAI logo
+                brand_logo_url = None
+                if current_user.subscription_plan and current_user.subscription_plan.lower() == "pro":
+                    brand_logo_url = brand_setting.logo_url if brand_setting else None
+                
                 send_customer_share_email.delay(
                     to_email=primary_email,
                     customer_name=customer.full_name or "Customer",
@@ -170,7 +176,8 @@ def share_design_variant(
                     design_code=design.design_code,
                     jewelry_type=jewelry_type,
                     version=version,
-                    version_label=version_label
+                    version_label=version_label,
+                    brand_logo_url=brand_logo_url
                 )
                 
         if customer and hasattr(customer, 'phone_number') and customer.phone_number:
