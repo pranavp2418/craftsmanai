@@ -26,12 +26,15 @@ from app.core.security import create_access_token
 
 def create_committed_admin(email: str, username: str) -> User:
     """Helper to create a committed superuser/admin in the real test DB"""
+    from sqlalchemy import text
     session = TestingSessionLocal()
     try:
         user_repo = UserRepository(session)
         # Clean up any existing user first
         existing = user_repo.get_user_by_email(email)
         if existing:
+            session.execute(text("DELETE FROM brand_settings WHERE user_id = :uid"), {"uid": existing.id})
+            session.execute(text("DELETE FROM notification_settings WHERE user_id = :uid"), {"uid": existing.id})
             session.query(OTP).filter(OTP.email == email).delete()
             session.query(RefreshToken).filter(RefreshToken.user_id == existing.id).delete()
             session.query(UserDevice).filter(UserDevice.user_id == existing.id).delete()
@@ -59,10 +62,13 @@ def create_committed_admin(email: str, username: str) -> User:
 
 def cleanup_admin_by_email(email: str):
     """Helper to clean up the committed admin user and associated subscription structures"""
+    from sqlalchemy import text
     session = TestingSessionLocal()
     try:
         user = session.query(User).filter(User.email == email).first()
         if user:
+            session.execute(text("DELETE FROM brand_settings WHERE user_id = :uid"), {"uid": user.id})
+            session.execute(text("DELETE FROM notification_settings WHERE user_id = :uid"), {"uid": user.id})
             session.query(OTP).filter(OTP.email == email).delete()
             session.query(RefreshToken).filter(RefreshToken.user_id == user.id).delete()
             session.query(UserDevice).filter(UserDevice.user_id == user.id).delete()
@@ -84,20 +90,16 @@ class TestSubscriptionManagement:
             token = create_access_token(data={"sub": str(admin.id), "email": admin.email})
             headers = {"Authorization": f"Bearer {token}"}
 
-            # 2. Test POST /admin/subscription-plans/ (Create plan)
             plan_payload = {
                 "name": "Test Enterprise Plan",
                 "description": "Premium features for large shops",
                 "price": 499.99,
                 "monthly_price": 499.99,
-                "yearly_price": 4999.99,
                 "duration_days": 30,
                 "is_active": True,
                 "is_most_popular": True,
                 "feature_points": ["Custom Watermark", "Dedicated Agent", "Fastest AI Speed"],
-                "monthly_renders": 5000,
-                "customer_shares": -1,
-                "manufacturer_quotes": -1
+                "monthly_renders": 5000
             }
             
             res_create = client.post("/api/v2/admin/subscription-plans/", json=plan_payload, headers=headers)
@@ -248,6 +250,24 @@ class TestSubscriptionManagement:
             assert res_user_subs.status_code == 200
             assert res_user_subs.json()["success"] is True
             assert len(res_user_subs.json()["data"]) >= 1
+
+            # 21. Test Get User Detail endpoint (Admin only)
+            from unittest.mock import patch, MagicMock
+            mock_pm = MagicMock()
+            mock_pm.card.brand = "visa"
+            mock_pm.card.last4 = "4242"
+            mock_pm.card.exp_month = 12
+            mock_pm.card.exp_year = 2030
+            
+            mock_list = MagicMock(data=[mock_pm])
+            
+            with patch("stripe.PaymentMethod.list", return_value=mock_list):
+                res_detail = client.get(f"/api/v2/admin/subscription-plans/get-user-detail?user_id={admin.id}", headers=headers)
+                assert res_detail.status_code == 200
+                detail_data = res_detail.json()
+                assert detail_data["plan_name"] == "Updated Test Enterprise Plan"
+                assert detail_data["payment_method"]["brand"] == "visa"
+                assert detail_data["payment_method"]["last4"] == "4242"
 
         finally:
             cleanup_admin_by_email(email)

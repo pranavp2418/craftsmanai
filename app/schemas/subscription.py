@@ -9,14 +9,11 @@ class SubscriptionPlanBase(BaseModel):
     description: Optional[str] = None
     price: Optional[Decimal] = None
     monthly_price: Optional[Decimal] = None
-    yearly_price: Optional[Decimal] = None
     duration_days: Optional[int] = None
     is_active: bool = True
     is_most_popular: bool = False
     feature_points: Optional[List[str]] = None
     monthly_renders: int = -1
-    customer_shares: int = -1
-    manufacturer_quotes: int = -1
 
 class SubscriptionPlanCreate(SubscriptionPlanBase):
     pass
@@ -26,14 +23,11 @@ class SubscriptionPlanUpdate(BaseModel):
     description: Optional[str] = None
     price: Optional[Decimal] = None
     monthly_price: Optional[Decimal] = None
-    yearly_price: Optional[Decimal] = None
     duration_days: Optional[int] = None
     is_active: Optional[bool] = None
     is_most_popular: Optional[bool] = None
     feature_points: Optional[List[str]] = None
     monthly_renders: Optional[int] = None
-    customer_shares: Optional[int] = None
-    manufacturer_quotes: Optional[int] = None
 
 class SubscriptionPlanInDBBase(SubscriptionPlanBase):
     id: UUID4

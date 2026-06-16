@@ -20,6 +20,6 @@ def read_subscription_plans(
     """
     Retrieve all subscription plans.
     """
-    query = select(SubscriptionPlan).offset(skip).limit(limit)
+    query = select(SubscriptionPlan).where(SubscriptionPlan.is_active == True).offset(skip).limit(limit)
     plans = db.execute(query).scalars().all()
     return plans

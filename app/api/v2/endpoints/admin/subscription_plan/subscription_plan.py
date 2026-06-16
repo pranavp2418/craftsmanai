@@ -27,14 +27,11 @@ def create_subscription_plan(
         description=plan_in.description,
         price=plan_in.price or plan_in.monthly_price,
         monthly_price=plan_in.monthly_price,
-        yearly_price=plan_in.yearly_price,
         duration_days=plan_in.duration_days or 30,
         is_active=plan_in.is_active,
         is_most_popular=plan_in.is_most_popular,
         feature_points=plan_in.feature_points,
-        monthly_renders=plan_in.monthly_renders,
-        customer_shares=plan_in.customer_shares,
-        manufacturer_quotes=plan_in.manufacturer_quotes
+        monthly_renders=plan_in.monthly_renders
     )
     db.add(plan)
     try:
