@@ -398,6 +398,13 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
         return []
     replacements = []
 
+    _STRUCTURAL_JEWELRY_WORDS = {
+        "row", "rows", "diamond", "diamonds", "stone", "stones", "gem", "gems", "enamel", 
+        "bale", "bail", "chain", "prong", "prongs", "metal", "gold", "silver", "platinum",
+        "pendant", "necklace", "ring", "bracelet", "jewelry", "carat", "ct", "shape", "shapes",
+        "colour", "color", "background", "size", "inch", "mm", "width", "height", "thickness"
+    }
+
     def clean_phrase(p: str) -> str:
         p_clean = p.strip()
         lower = p_clean.lower()
@@ -413,6 +420,17 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
         # the new value is also an animal/motif word (e.g. the name "RAM").
         if old_txt.strip().lower() in _GENERIC_TEXT_OLD:
             return True
+
+        old_lower = old_txt.lower()
+        new_lower = new_txt.lower()
+        
+        # If the text change contains any structural or jewelry material keywords, 
+        # it is a physical/design edit, NOT a spelling/text change.
+        for word in _STRUCTURAL_JEWELRY_WORDS:
+            pattern = rf"\b{word}\b"
+            if re.search(pattern, old_lower) or re.search(pattern, new_lower):
+                return False
+
         # Otherwise a DESIGN-element swap (bull -> lion, heart -> star) is NOT a text
         # replacement — route it to the general edit path so the motif changes and the rest
         # of the piece is preserved.
@@ -428,6 +446,8 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
     matches1 = re.findall(r"\b([\w \t']{1,40})\s+instead\s+of\s+([\w \t']{1,40})\b", prompt, re.IGNORECASE)
     for m in matches1:
         new_txt, old_txt = _trim_secondary_instruction(clean_phrase(m[0])), clean_phrase(m[1])
+        if any(x in old_txt.lower() or x in new_txt.lower() for x in ["metal", "color", "tone", "gold", "silver", "font", "fonts"]):
+            continue
         if new_txt and _is_text_change(old_txt, new_txt):
             replacements.append((old_txt, new_txt))
 
@@ -435,7 +455,7 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
     matches2 = re.findall(r"\bchange\s+([\w \t']{1,40})\s+to\s+([\w \t']{1,60})", prompt, re.IGNORECASE)
     for m in matches2:
         old_txt, new_txt = clean_phrase(m[0]), _trim_secondary_instruction(clean_phrase(m[1]))
-        if any(x in old_txt.lower() or x in new_txt.lower() for x in ["metal", "color", "tone", "gold", "silver"]):
+        if any(x in old_txt.lower() or x in new_txt.lower() for x in ["metal", "color", "tone", "gold", "silver", "font", "fonts"]):
             continue
         if new_txt and _is_text_change(old_txt, new_txt):
             replacements.append((old_txt, new_txt))
@@ -444,6 +464,8 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
     matches3 = re.findall(r"\breplace\s+([\w \t']{1,40})\s+with\s+([\w \t']{1,60})", prompt, re.IGNORECASE)
     for m in matches3:
         old_txt, new_txt = clean_phrase(m[0]), _trim_secondary_instruction(clean_phrase(m[1]))
+        if any(x in old_txt.lower() or x in new_txt.lower() for x in ["metal", "color", "tone", "gold", "silver", "font", "fonts"]):
+            continue
         if new_txt and _is_text_change(old_txt, new_txt):
             replacements.append((old_txt, new_txt))
 
