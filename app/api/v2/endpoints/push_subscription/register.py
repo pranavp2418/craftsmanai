@@ -2,7 +2,7 @@
 Push Subscription endpoints - register, list, remove, and test push notifications.
 """
 
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, status, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -106,93 +106,58 @@ def test_send_push(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    TEMP ENDPOINT: Send a test push notification to the authenticated user.
-    Only works if the user has active push subscriptions and push_notifications enabled.
-    Remove this endpoint before production deployment.
+    Send a test push notification to the authenticated user's ALL active devices.
+    Uses the production WebPushService.send_push which sends to every subscription.
 
     NOTE: For the push to actually work, you need a REAL browser push subscription.
-    A fake/test endpoint URL will not receive notifications.
     """
-    from app.models.notification_setting import NotificationSetting
-    from app.models.push_subscription import PushSubscription
+    sent_count = WebPushService.send_push(
+        db=db,
+        user_id=current_user.id,
+        title=payload.title,
+        body=payload.body,
+        url=payload.url,
+        data={"type": "test", "source": "test-endpoint"},
+    )
 
-    # Debug info
-    notif_setting = db.query(NotificationSetting).filter(
-        NotificationSetting.user_id == current_user.id
-    ).first()
-    push_enabled = notif_setting.push_notifications if notif_setting else True
-    active_subs = db.query(PushSubscription).filter(
-        PushSubscription.user_id == current_user.id,
-        PushSubscription.is_active == True,
-    ).count()
+    if sent_count == 0:
+        # Check why it failed
+        from app.models.notification_setting import NotificationSetting
+        from app.models.push_subscription import PushSubscription
 
-    if active_subs == 0:
+        notif_setting = db.query(NotificationSetting).filter(
+            NotificationSetting.user_id == current_user.id
+        ).first()
+        push_enabled = notif_setting.push_notifications if notif_setting else True
+        active_subs = db.query(PushSubscription).filter(
+            PushSubscription.user_id == current_user.id,
+            PushSubscription.is_active == True,
+        ).count()
+
+        if active_subs == 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No active push subscriptions found for your account. "
+                    "First register a subscription via POST /push-subscriptions/ "
+                    "with real browser push subscription data."
+                ),
+            )
+        if not push_enabled:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Push notifications are DISABLED in your notification settings. "
+                    "Enable push_notifications first."
+                ),
+            )
         raise HTTPException(
-            status_code=400,
-            detail=(
-                "No active push subscriptions found for your account. "
-                "First register a subscription via POST /push-subscriptions/ "
-                "with real browser push subscription data."
-            ),
+            status_code=500,
+            detail="Push notification failed. Check VAPID key configuration.",
         )
-
-    if not push_enabled:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Push notifications are DISABLED in your notification settings. "
-                "Enable push_notifications first."
-            ),
-        )
-
-    # Try direct push with detailed error reporting
-    from pywebpush import webpush, WebPushException
-    from py_vapid import Vapid
-    from cryptography.hazmat.primitives.serialization import load_pem_private_key
-    from app.core.config import settings as cfg
-    import json as _json
-
-    vapid_key_str = cfg.VAPID_PRIVATE_KEY
-    if vapid_key_str:
-        vapid_key_str = vapid_key_str.replace("\\n", "\n")
-    priv_key = load_pem_private_key(vapid_key_str.encode(), password=None)
-    vapid = Vapid()
-    vapid.private_key = priv_key
-    vapid_claims = {"sub": cfg.VAPID_CLAIM_EMAIL} if cfg.VAPID_CLAIM_EMAIL else None
-
-    # Get the most recent subscription (the real one)
-    last_sub = db.query(PushSubscription).filter(
-        PushSubscription.user_id == current_user.id,
-        PushSubscription.is_active == True,
-    ).order_by(PushSubscription.id.desc()).first()
-
-    if not last_sub:
-        raise HTTPException(status_code=400, detail="No active subscriptions")
-
-    subscription_info = {
-        "endpoint": last_sub.endpoint,
-        "keys": {"p256dh": last_sub.p256dh, "auth": last_sub.auth},
-    }
-    payload_str = _json.dumps({"title": payload.title, "body": payload.body, "url": payload.url, "data": {"type": "test"}})
-
-    errors = []
-    try:
-        webpush(subscription_info, payload_str, vapid_private_key=vapid, vapid_claims=vapid_claims, ttl=86400)
-        return {"message": "Push notification sent successfully!", "subscription_id": last_sub.id}
-    except WebPushException as exc:
-        resp = getattr(exc, 'response', None)
-        status = getattr(resp, 'status_code', 'unknown') if resp else 'unknown'
-        body = ''
-        if resp:
-            try:
-                body = resp.text if hasattr(resp, 'text') else str(resp)
-            except:
-                body = str(resp)
-        raise HTTPException(status_code=400, detail=f"Push failed (HTTP {status}): {body[:500]}")
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Push error: {str(exc)}")
 
     return {
-        "message": f"Push notification sent successfully to {sent_count} subscription(s)",
+        "message": f"Push notification sent to {sent_count} device(s)",
         "sent_count": sent_count,
+        "note": f"Sent to ALL {sent_count} active subscriptions for this user.",
     }
