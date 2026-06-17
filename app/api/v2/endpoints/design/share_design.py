@@ -105,6 +105,14 @@ def share_design_variant(
     # Normalize metal to lowercase for consistent lookup
     metal = payload.metal.lower() if payload.metal else None
 
+    # Check if this variant was already shared with the same customer
+    existing_shares = sharing_service.share_repo.list_for_design_variant(variant.id)
+    is_resend_to_same_customer = (
+        payload.customer_id is not None
+        and existing_shares
+        and existing_shares[0].customer_id == payload.customer_id
+    )
+
     try:
         share = sharing_service.create_share(
             design_variant_id=variant.id,
@@ -120,9 +128,9 @@ def share_design_variant(
             )
         raise
 
-    # Update the design status to SHARED when shared with a customer
+    # Only update design status to SHARED if this is a new share (not a resend to same customer)
     from app.models.design import DesignStatus
-    if design.status != DesignStatus.SHARED:
+    if not is_resend_to_same_customer and design.status != DesignStatus.SHARED:
         design_service.update_design(design, status=DesignStatus.SHARED)
 
     # Queue email to customer if customer exists and has email/phone
