@@ -174,7 +174,7 @@ class ManufacturerListResponse(BaseModel):
 class SentRequest(BaseModel):
     id: int
     design_code: str
-    name: str
+    name: Optional[str] = None
     jewellery_type: Optional[str] = None
     status: str
     created_at: datetime
