@@ -1,5 +1,15 @@
-// Service Worker for WebPush notifications - v2
+// Service Worker for WebPush notifications - v3
 // Place this file in your frontend's public/ directory for production use
+
+// Activate immediately on install so the SW isn't stuck in "waiting" phase
+self.addEventListener('install', function(event) {
+    self.skipWaiting();
+});
+
+// Take control of all open pages immediately
+self.addEventListener('activate', function(event) {
+    event.waitUntil(clients.claim());
+});
 
 self.addEventListener('push', function(event) {
     const data = event.data ? event.data.json() : {};
@@ -9,8 +19,8 @@ self.addEventListener('push', function(event) {
     event.waitUntil(
         self.registration.showNotification(data.title || 'Notification', {
             body: data.body || '',
-            icon: '/favicon.ico',
-            badge: '/favicon.ico',
+            icon: data.icon || '/favicon.ico',
+            badge: data.icon || '/favicon.ico',
             data: data.data || {},
             tag: uniqueTag,
             renotify: true   // Play sound/vibrate even with unique tag

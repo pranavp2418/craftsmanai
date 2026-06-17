@@ -62,6 +62,81 @@ def _extract_customer_email(customer: Customer) -> Optional[str]:
     return None
 
 
+def _send_customer_notifications(
+    db: Session,
+    current_user: User,
+    customer: Customer,
+    share,
+    variant,
+    design,
+    preview_url: str,
+):
+    """Helper to send email and SMS notifications to a customer for a share."""
+    from app.tasks.email_tasks import send_customer_share_email, send_customer_share_sms
+    from app.core.config import settings
+    from app.repositories.brand_setting import BrandSettingRepository
+    import json
+
+    brand_repo = BrandSettingRepository(db)
+    brand_setting = brand_repo.get_by_user_id(current_user.id)
+
+    # --- Email ---
+    if customer and hasattr(customer, 'emails') and customer.emails:
+        try:
+            emails_data = json.loads(customer.emails)
+            if isinstance(emails_data, list) and len(emails_data) > 0:
+                primary_email = emails_data[0].get("email") if isinstance(emails_data[0], dict) else emails_data[0]
+            elif isinstance(emails_data, dict):
+                primary_email = emails_data.get("email")
+            else:
+                primary_email = str(emails_data)
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            primary_email = str(customer.emails).split(',')[0].strip()
+
+        if primary_email:
+            retailer_name = brand_setting.brand_name if brand_setting else (current_user.full_name or current_user.username)
+            render_image_url = variant.base_design_image_url or ""
+            jewelry_type = design.jewellery_type or "Custom Jewelry"
+            version = f"v{variant.version_number}.{variant.version_number}" if variant.version_number else "v1.0"
+            version_label = f"Version {variant.version_number}" if variant.version_number else "Version 1"
+
+            brand_logo_url = None
+            if current_user.subscription_plan and current_user.subscription_plan.lower() == "pro":
+                brand_logo_url = brand_setting.logo_url if brand_setting else None
+
+            send_customer_share_email.delay(
+                to_email=primary_email,
+                customer_name=customer.full_name or "Customer",
+                preview_url=preview_url,
+                designer_name=current_user.full_name or current_user.username,
+                retailer_name=retailer_name,
+                render_image_url=render_image_url,
+                design_code=design.design_code,
+                jewelry_type=jewelry_type,
+                version=version,
+                version_label=version_label,
+                brand_logo_url=brand_logo_url,
+            )
+
+    # --- SMS ---
+    if customer and hasattr(customer, 'phone_number') and customer.phone_number:
+        retailer_phone = brand_setting.phone_number if brand_setting else current_user.whatsapp_number
+        retailer_email = brand_setting.business_email if brand_setting else current_user.email
+        retailer_address = ""
+
+        send_customer_share_sms.delay(
+            to_number=customer.phone_number,
+            customer_name=customer.full_name or "Customer",
+            preview_url=preview_url,
+            designer_name=current_user.full_name or current_user.username,
+            design_code=design.design_code,
+            retailer_phone=retailer_phone or "",
+            retailer_email=retailer_email or "",
+            retailer_address=retailer_address,
+            render_image_url=variant.base_design_image_url or "",
+        )
+
+
 @router.post("/variants/{variant_id}/share", response_model=DesignShareResponse, status_code=status.HTTP_201_CREATED)
 def share_design_variant(
     variant_id: int,
@@ -86,21 +161,44 @@ def share_design_variant(
     if not design:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
 
-    # Check if customer exists and is active before sharing
-    if payload.customer_id:
-        from app.repositories.customer import CustomerRepository
-        customer_repo = CustomerRepository(db)
-        customer = customer_repo.get_by_id(payload.customer_id)
-        if not customer:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Customer not found",
-            )
-        if not customer.is_active:
+    # --- If no customer_id provided, check for existing share or reject ---
+    if not payload.customer_id:
+        existing_shares = sharing_service.share_repo.list_for_design_variant(variant.id)
+        if not existing_shares:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid customer",
+                detail="customer_id is required",
             )
+        # Resend notification to the existing customer
+        share = existing_shares[0]
+        if share.customer:
+            from app.core.config import settings
+            preview_url = f"{settings.FRONTEND_URL}/customer/review/{share.public_token}"
+            _send_customer_notifications(
+                db=db,
+                current_user=current_user,
+                customer=share.customer,
+                share=share,
+                variant=variant,
+                design=design,
+                preview_url=preview_url,
+            )
+        return share
+
+    # --- customer_id IS provided --- validate the customer ---
+    from app.repositories.customer import CustomerRepository
+    customer_repo = CustomerRepository(db)
+    customer = customer_repo.get_by_id(payload.customer_id)
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found",
+        )
+    if not customer.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid customer",
+        )
 
     # Normalize metal to lowercase for consistent lookup
     metal = payload.metal.lower() if payload.metal else None
@@ -108,8 +206,7 @@ def share_design_variant(
     # Check if this variant was already shared with the same customer
     existing_shares = sharing_service.share_repo.list_for_design_variant(variant.id)
     is_resend_to_same_customer = (
-        payload.customer_id is not None
-        and existing_shares
+        existing_shares
         and existing_shares[0].customer_id == payload.customer_id
     )
 
@@ -133,82 +230,18 @@ def share_design_variant(
     if not is_resend_to_same_customer and design.status != DesignStatus.SHARED:
         design_service.update_design(design, status=DesignStatus.SHARED)
 
-    # Queue email to customer if customer exists and has email/phone
-    if payload.customer_id:
-        from app.tasks.email_tasks import send_customer_share_email, send_customer_share_sms
-        from app.core.config import settings
-
-        customer = customer_repo.get_by_id(payload.customer_id)
-        
-        preview_url = f"{settings.FRONTEND_URL}/customer/review/{share.public_token}"
-        
-        if customer and hasattr(customer, 'emails') and customer.emails:
-            import json
-            try:
-                emails_data = json.loads(customer.emails)
-                if isinstance(emails_data, list) and len(emails_data) > 0:
-                    primary_email = emails_data[0].get("email") if isinstance(emails_data[0], dict) else emails_data[0]
-                elif isinstance(emails_data, dict):
-                    primary_email = emails_data.get("email")
-                else:
-                    primary_email = str(emails_data)
-            except (json.JSONDecodeError, TypeError, AttributeError):
-                # Fallback if it's stored differently
-                primary_email = str(customer.emails).split(',')[0].strip()
-            
-            if primary_email:
-                # Get brand settings for retailer name
-                from app.repositories.brand_setting import BrandSettingRepository
-                brand_repo = BrandSettingRepository(db)
-                brand_setting = brand_repo.get_by_user_id(current_user.id)
-                
-                retailer_name = brand_setting.brand_name if brand_setting else (current_user.full_name or current_user.username)
-                render_image_url = variant.base_design_image_url or ""
-                jewelry_type = design.jewellery_type or "Custom Jewelry"
-                version = f"v{variant.version_number}.{variant.version_number}" if variant.version_number else "v1.0"
-                version_label = f"Version {variant.version_number}" if variant.version_number else "Version 1"
-                
-                # Determine brand logo based on subscription plan
-                # Pro plan users get their brand logo; Starter plan users get the default CraftsmanAI logo
-                brand_logo_url = None
-                if current_user.subscription_plan and current_user.subscription_plan.lower() == "pro":
-                    brand_logo_url = brand_setting.logo_url if brand_setting else None
-                
-                send_customer_share_email.delay(
-                    to_email=primary_email,
-                    customer_name=customer.full_name or "Customer",
-                    preview_url=preview_url,
-                    designer_name=current_user.full_name or current_user.username,
-                    retailer_name=retailer_name,
-                    render_image_url=render_image_url,
-                    design_code=design.design_code,
-                    jewelry_type=jewelry_type,
-                    version=version,
-                    version_label=version_label,
-                    brand_logo_url=brand_logo_url
-                )
-                
-        if customer and hasattr(customer, 'phone_number') and customer.phone_number:
-            # Get brand settings for retailer contact info
-            from app.repositories.brand_setting import BrandSettingRepository
-            brand_repo = BrandSettingRepository(db)
-            brand_setting = brand_repo.get_by_user_id(current_user.id)
-            
-            retailer_phone = brand_setting.phone_number if brand_setting else current_user.whatsapp_number
-            retailer_email = brand_setting.business_email if brand_setting else current_user.email
-            retailer_address = ""  # Address not currently stored in brand settings
-            
-            send_customer_share_sms.delay(
-                to_number=customer.phone_number,
-                customer_name=customer.full_name or "Customer",
-                preview_url=preview_url,
-                designer_name=current_user.full_name or current_user.username,
-                design_code=design.design_code,
-                retailer_phone=retailer_phone or "",
-                retailer_email=retailer_email or "",
-                retailer_address=retailer_address,
-                render_image_url=variant.base_design_image_url or ""
-            )
+    # Queue email/SMS to customer
+    from app.core.config import settings
+    preview_url = f"{settings.FRONTEND_URL}/customer/review/{share.public_token}"
+    _send_customer_notifications(
+        db=db,
+        current_user=current_user,
+        customer=customer,
+        share=share,
+        variant=variant,
+        design=design,
+        preview_url=preview_url,
+    )
 
     return share
 
