@@ -117,7 +117,9 @@ class NotificationService:
 
             if loop and loop.is_running():
                 # Schedule on the running event loop
-                loop.create_task(_async_push())
+                # Use run_coroutine_threadsafe to avoid "Future attached to a different loop" errors
+                # This safely handles cross-thread and cross-loop contexts
+                asyncio.run_coroutine_threadsafe(_async_push(), loop)
             else:
                 # No running event loop (e.g., CLI, tests)
                 new_loop = asyncio.new_event_loop()

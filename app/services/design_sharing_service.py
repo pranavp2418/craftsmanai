@@ -1,4 +1,5 @@
 import secrets
+import time
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -220,7 +221,7 @@ class DesignSharingService:
                                 "status": status.value,
                                 "type": "design_approval_alert",
                             },
-                            tag=f"design-share-{share.id}-{status.value}",
+                            tag=f"design-share-{share.id}-{status.value}-{int(time.time())}",
                         )
             except Exception as e:
                 import logging

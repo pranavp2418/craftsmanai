@@ -274,7 +274,7 @@ def resend_manufacturer_share_email(
                             f"quote! View it here: {review_url}"
                         )
                     sms_service.send_sms(
-                        to_number=manufacturer.phone_number, message=message
+                        to_number=manufacturer.phone_number, message=message, media_url=render_image_url
                     )
             except Exception as sms_exc:
                 # SMS failures should not fail the email resend
