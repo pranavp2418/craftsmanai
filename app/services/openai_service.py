@@ -2778,6 +2778,46 @@ def _font_style_clause(user_prompt: str) -> str:
     return ""
 
 
+def _font_change_directive(user_prompt: str) -> Optional[str]:
+    """Safe instruction for a FONT change during a refine: keep the existing name, apply the
+    font as a STYLE (with a visual description for known fonts), and NEVER write the font name
+    as text. Returns None when it isn't a font change."""
+    if not _user_requests_font_change(user_prompt):
+        return None
+    p = (user_prompt or "").lower()
+    name = desc = None
+    for n, d in _FONT_DESCRIPTIONS.items():          # dict is ordered longest-key-first
+        if n in p:
+            name, desc = n, d
+            break
+    style = f'the "{name}" font ({desc})' if desc else "the exact font / character style the user named"
+    not_text = (f' The phrase "{name}" is the NAME OF A FONT, not text — do NOT write the words '
+                f'"{name}" (or any new words) anywhere on the piece.') if name else ""
+
+    # Extract any secondary design instruction (e.g. "complete the borders with diamonds")
+    # by scrubbing the font change request out of the prompt.
+    non_font_part = user_prompt
+    if name:
+        non_font_part = re.sub(rf"(?i)\b(?:change|replace|switch|update|set)\s+(?:the\s+)?(?:font|fonts|lettering|lettering style|style)\s+(?:to|with)\s+{re.escape(name)}(?:\s+fonts?)?\b", "", non_font_part)
+        non_font_part = re.sub(rf"(?i)\b{re.escape(name)}\b", "", non_font_part)
+    
+    # Clean up leftover conjunctions/punctuation
+    non_font_part = re.sub(r"(?i)^[\s,;.&]*(?:and|also|plus|then|with|just)?\s*", "", non_font_part.strip()).strip()
+    non_font_part = re.sub(r"(?i)\b(?:keep everything else same|keep same design|keep everything else identical|do not change anything else)\b", "", non_font_part)
+    non_font_part = non_font_part.strip(" ,;.&")
+
+    directive = (
+        "change ONLY the FONT / lettering STYLE. KEEP the EXACT same name / word(s) and spelling that "
+        "already appear on the piece — do not add, remove, or change any letters. Re-letter that SAME "
+        f"text in {style}.{not_text} Keep the same stones, stone cuts, borders, metal, and layout."
+    )
+    
+    if non_font_part:
+        directive += f"\n\nALSO MAKE THIS ADDITIONAL CHANGE to the design: \"{non_font_part}\"."
+        
+    return directive
+
+
 # Border / edge fidelity — a design's defining detail is often the polished metal border
 # that frames the piece (and each letter/element) plus the channel-walls around stone rows.
 # The model tends to blur or drop these, so we call them out explicitly. Type-agnostic.
@@ -2999,6 +3039,10 @@ def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[D
     change_desc = user_prompt
     if refinement_intent and refinement_intent.get("normalized_prompt"):
         change_desc = refinement_intent["normalized_prompt"]
+    elif not replacements:
+        _font_dir = _font_change_directive(user_prompt)
+        if _font_dir:
+            change_desc = _font_dir
 
     # Two-step / two-layer stacked structure when the user asks for it.
     layered_block = f"\n\n{LAYERED_RULE}" if _user_wants_layered(user_prompt) else ""
