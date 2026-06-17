@@ -777,6 +777,62 @@ def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, p
         )
 
 
+@create_task(name="send_customer_action_email_task", max_retries=3)
+def send_customer_action_email_task(
+    self,
+    to_email: str,
+    retailer_name: str,
+    customer_name: str,
+    action: str,
+    design_name: str,
+    variant_name: str,
+    design_code: str = None,
+    jewelry_type: str = None,
+    version: str = None,
+    version_label: str = None,
+    render_image_url: str = None,
+    brand_logo_url: str = None,
+    comment: str = None,
+):
+    """
+    Send an email to the retailer when a customer takes action on a shared design
+    (approve, reject, or request refinement).
+    """
+    task_name = "send_customer_action_email_task"
+    try:
+        logger.info(f"📧 Starting {task_name} for {to_email} - Action: {action}")
+        
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            EmailService.send_customer_action_email(
+                to_email=to_email,
+                retailer_name=retailer_name,
+                customer_name=customer_name,
+                action=action,
+                design_name=design_name,
+                variant_name=variant_name,
+                design_code=design_code,
+                jewelry_type=jewelry_type,
+                version=version,
+                version_label=version_label,
+                render_image_url=render_image_url,
+                brand_logo_url=brand_logo_url,
+                comment=comment,
+            )
+        )
+        
+        logger.info(f"✅ {task_name} completed successfully for {to_email}")
+        return True
+    except Exception as exc:
+        logger.error(f"❌ {task_name} failed for {to_email}: {str(exc)}")
+        raise self.retry(
+            exc=exc, 
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3
+        )
+
+
 @create_task(name="send_contact_notification_email", max_retries=3)
 def send_contact_notification_email(self, full_name: str, business_name: str, email: str, phone: str = None, store_type: str = None, interest: str = None):
     """

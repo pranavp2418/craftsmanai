@@ -101,6 +101,7 @@ class WebPushService:
         payload = {
             "title": title,
             "body": body,
+            "icon": "https://craftsmanai.app/dark%20mode%20logo.png",
         }
         if url:
             payload["url"] = url

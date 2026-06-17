@@ -474,6 +474,136 @@ Message:
             raise e
 
     @staticmethod
+    async def send_customer_action_email(
+        to_email: str,
+        retailer_name: str,
+        customer_name: str,
+        action: str,
+        design_name: str,
+        variant_name: str,
+        design_code: str = None,
+        jewelry_type: str = None,
+        version: str = None,
+        version_label: str = None,
+        render_image_url: str = None,
+        brand_logo_url: str = None,
+        comment: str = None,
+    ):
+        """
+        Send an email to the retailer when a customer takes action on a shared design
+        (approve, reject, or request refinement).
+        Uses the customer_action_notification template.
+        
+        Args:
+            to_email: Retailer's email address
+            retailer_name: Retailer's brand/display name
+            customer_name: Customer who took the action
+            action: 'approved', 'rejected', or 'refinement_requested'
+            design_name: Name of the design
+            variant_name: Name of the variant
+            design_code: Design code/number
+            jewelry_type: Type of jewelry
+            version: Version string
+            version_label: Human-readable version label
+            render_image_url: URL of the design render
+            brand_logo_url: URL of the brand logo
+            comment: Optional comment from the customer
+        """
+        from app.models.email_log import EmailStatus
+        
+        action_display = {
+            "approved": "Approved",
+            "rejected": "Rejected",
+            "refinement_requested": "Requested Changes",
+        }.get(action, action)
+        
+        subject = f"Customer {action_display}: {design_name or 'Design'} - Craftmen"
+        
+        log_id = EmailService._create_email_log(
+            to_email=to_email,
+            template_name="customer_action_notification",
+            subject=subject,
+            variables={
+                "retailer_name": retailer_name,
+                "customer_name": customer_name,
+                "action": action,
+                "design_name": design_name,
+                "variant_name": variant_name,
+                "design_code": design_code,
+                "jewelry_type": jewelry_type,
+                "version": version,
+                "version_label": version_label,
+                "render_image_url": render_image_url,
+                "brand_logo_url": brand_logo_url,
+                "comment": comment,
+            }
+        )
+        try:
+            logger.info(f"SENDING CUSTOMER ACTION EMAIL: To={to_email}, Action={action}, Customer={customer_name}")
+            
+            # Build context for the template
+            context = {
+                "action": action,
+                "customer_name": customer_name,
+                "design_name": design_name or "N/A",
+                "variant_name": variant_name or "N/A",
+                "render_image_url": render_image_url or "",
+                "version": version or "v1.0",
+                "design_number": design_code or "",
+                "jewelry_type": jewelry_type or "Custom Jewelry",
+                "version_label": version_label or "Version 1",
+                "brand_logo_url": brand_logo_url or "",
+                "comment": comment or "",
+                "dashboard_url": "#",
+            }
+            
+            html_content = await render_template("customer_action_notification", context)
+            
+            action_past_tense = {
+                "approved": "approved",
+                "rejected": "rejected",
+                "refinement_requested": "requested changes to",
+            }.get(action, "taken action on")
+            
+            text_body = (
+                f"Hi {retailer_name},\n\n"
+                f"Your customer {customer_name} has {action_past_tense} the design.\n\n"
+                f"Design: {design_name or 'N/A'} ({variant_name or 'N/A'})\n"
+                f"Design Code: {design_code or 'N/A'}\n"
+                f"Jewelry Type: {jewelry_type or 'Custom Jewelry'}\n"
+                f"Version: {version or 'v1.0'}\n"
+                + (f"\nCustomer's note: {comment}\n" if comment else "")
+                + "\nCheck the design in your Craftmen dashboard for more details.\n\n"
+                "Best regards,\nThe Craftmen Team"
+            )
+            
+            result = await EmailService._send_via_zeptomail(
+                to_email=to_email,
+                subject=subject,
+                html_content=html_content,
+                text_body=text_body
+            )
+            
+            if result["success"]:
+                logger.info(f"Successfully sent customer action email to {to_email}")
+                EmailService._update_email_log_status(
+                    log_id=log_id,
+                    status=EmailStatus.SENT,
+                    smtp_response=result["message"]
+                )
+            else:
+                raise Exception(result["message"])
+                
+        except Exception as e:
+            logger.error(f"Failed to send customer action email to {to_email}: {str(e)}")
+            EmailService._update_email_log_status(
+                log_id=log_id,
+                status=EmailStatus.FAILED,
+                error_message=str(e)
+            )
+            raise e
+
+    @staticmethod
     async def send_welcome_email(to: str, user_name: str, dashboard_url: str = "#"):
         """Send welcome email after successful verification"""
         from app.models.email_log import EmailStatus
