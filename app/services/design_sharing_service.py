@@ -206,7 +206,7 @@ class DesignSharingService:
                     NotificationSetting.user_id == recipient_user_id
                 ).first()
 
-                if notif_setting and notif_setting.design_approval_alerts:
+                if notif_setting and notif_setting.design_approval_alerts and notif_setting.push_notifications:
                     push_title = notification_title
                     push_body = notification_message
 
@@ -242,7 +242,7 @@ class DesignSharingService:
                     NotificationSetting.user_id == recipient_user_id
                 ).first()
 
-                if notif_setting and notif_setting.email_notifications:
+                if notif_setting and notif_setting.email_notifications and notif_setting.design_approval_alerts:
                     # Get recipient user's email
                     recipient_user = self.db.query(User).filter(User.id == recipient_user_id).first()
                     if recipient_user and recipient_user.email:
