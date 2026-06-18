@@ -2285,28 +2285,6 @@ def download_reference_images(image_urls: list[str]) -> list[bytes]:
     return blobs
 
 
-def _choose_output_size(image_blobs) -> str:
-    """Pick the gpt-image-2 output size that matches the reference's aspect ratio, so wide
-    pieces render at 1536x1024 (crisper, larger stones) and tall pieces at 1024x1536 instead
-    of being squeezed into a 1024x1024 square. Falls back to square on any failure."""
-    try:
-        if not image_blobs:
-            return "1024x1024"
-        import io
-        from PIL import Image
-        w, h = Image.open(io.BytesIO(image_blobs[0])).size
-        if not w or not h:
-            return "1024x1024"
-        ratio = w / h
-        if ratio >= 1.2:
-            return "1536x1024"   # wide / landscape
-        if ratio <= 0.83:
-            return "1024x1536"   # tall / portrait
-        return "1024x1024"       # near-square
-    except Exception:
-        return "1024x1024"
-
-
 def generate_with_openai_image(
     image_urls: list[str],
     prompt_text: str,
@@ -2339,8 +2317,6 @@ def generate_with_openai_image(
         image_blobs = download_reference_images(image_urls)
 
     truncated_prompt = prompt_text[:32000]
-    # Match output resolution to the reference's shape — bigger canvas = crisper, larger stones.
-    out_size = _choose_output_size(image_blobs)
     max_attempts = 3
 
     for attempt in range(1, max_attempts + 1):
@@ -2355,7 +2331,7 @@ def generate_with_openai_image(
                     "model": "gpt-image-2",
                     "prompt": truncated_prompt,
                     "n": "1",
-                    "size": out_size,
+                    "size": "1024x1024",
                     "quality": "high",
                     "background": "opaque",
                 }
@@ -2378,7 +2354,7 @@ def generate_with_openai_image(
                         "model": "gpt-image-2",
                         "prompt": truncated_prompt,
                         "n": 1,
-                        "size": out_size,
+                        "size": "1024x1024",
                         "quality": "high",
                         "background": "opaque",
                     },
