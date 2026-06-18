@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 
 
 METAL_DESCRIPTIONS = {
-    "gold": "rich warm yellow gold (bright golden color)",
-    "yellow_gold": "rich warm yellow gold (bright golden color)",
+    "gold": "light, soft, true 10K CAD-style yellow gold (a lighter realistic gold, not a bright glossy yellow)",
+    "yellow_gold": "light, soft, true 10K CAD-style yellow gold (a lighter realistic gold, not a bright glossy yellow)",
     "white_gold": "bright white gold (cool silvery-white color)",
     "rose_gold": "warm rose gold (soft pink-copper color)",
     "rose": "warm rose gold (soft pink-copper color)",
@@ -60,7 +60,7 @@ def _build_metal_variant_prompt(metal: str, jewellery_type: str = "pendant") -> 
 
     return f"""Recolor the metal of this {jewellery_type} to {metal_desc}. Change the metal color completely to this new color, including all metal surfaces, prongs, and settings.{white_clause}
 
-CRITICAL STONE PROTECTION: Do NOT change the color, shape, position, or type of any gemstones. All gemstones (including clear diamonds and colored stones like green, red, pink, blue, etc.) must preserve their original color, vibrancy, saturation, and transparency exactly as seen in the reference image. Do NOT recolor, desaturate, or turn colored gems into white/silver or metal.
+CRITICAL STONE PROTECTION: Do NOT change the color, shape, position, or type of any gemstones. KEEP EVERY stone exactly where it is, with the same coverage and density — NEVER turn a diamond-set or pavé surface into plain polished metal, and NEVER render rows of stones as plain metal beads, dots, or a smooth textured border. Diamonds must stay diamonds. All gemstones (including clear diamonds and colored stones like green, red, pink, blue, etc.) must preserve their original color, vibrancy, saturation, and transparency exactly as seen in the reference image. Do NOT recolor, desaturate, or turn colored gems into white/silver or metal.
 
 Keep EVERYTHING else exactly the same — same overall design, same components, same shape and silhouette, same proportions, same stones (count, cut, arrangement and setting), same engraving/text, same borders and edges, same structure, same viewpoint. Only the metal COLOR changes; do not redesign or alter any other part.
 
