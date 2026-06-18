@@ -155,13 +155,14 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                 if prompt_metal:
                     input_metal = prompt_metal
                     logger.info("User prompt explicitly specified metal='%s' for design_id=%s", input_metal, design_id)
-                    # If it's a single non-jewelry graphic but user requested a metal, append the non-jewelry metal instruction
-                    # using the user's requested metal instead of default gold.
+                    # Apply the "convert to plain solid metal (NO stones)" instruction ONLY when the
+                    # reference is genuinely NON-jewelry (a logo / graphic / artwork), using the user's
+                    # requested metal instead of the default gold. For a real JEWELRY input the metal is
+                    # just a recolour and the render prompt keeps every stone — appending the non-jewelry
+                    # instruction here previously WIPED the diamonds off iced pieces (the de-gem bug).
                     _nonjewelry = [c for c in _classified if not c.get("is_jewelry", True)]
-                    if not _nonjewelry:
-                        if len(_refs) == 1:
-                            _internal += build_non_jewelry_metal_instruction(input_metal)
-                    elif len(_refs) == 1:
+                    _jewelry = [c for c in _classified if c.get("is_jewelry", True)]
+                    if _nonjewelry and not _jewelry and len(_refs) == 1:
                         _internal += build_non_jewelry_metal_instruction(input_metal)
                 else:
                     _jewelry = [c for c in _classified if c.get("is_jewelry", True)]
