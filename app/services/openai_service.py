@@ -3357,11 +3357,26 @@ def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[D
     refine_angle_rule = FRONT_FACING_RULE if _user_wants_front(user_prompt) else PRESERVE_ANGLE_RULE
     refine_centering = "Front-facing, upright, and centered." if _user_wants_front(user_prompt) else "Keep the reference's camera angle; centered."
 
+    # Metal-colour lock — refines tend to drift the metal (e.g. rose gold -> yellow gold) even
+    # when the user only asked for a stone/shape change. Lock the colour UNLESS the user
+    # explicitly asked to change the metal/colour.
+    _rp = (user_prompt or "").lower()
+    _wants_metal_change = any(w in _rp for w in [
+        "gold", "silver", "platinum", "rose", "white gold", "two tone", "two-tone", "rhodium",
+        "metal colour", "metal color", "recolor", "recolour", "color", "colour", "tone",
+    ])
+    metal_lock = "" if _wants_metal_change else (
+        " CRITICAL — KEEP THE EXACT SAME METAL COLOUR/TONE as the reference image: if it is ROSE GOLD keep it "
+        "rose gold, if YELLOW gold keep yellow, if WHITE gold / platinum / silver keep white, and if it is "
+        "TWO-TONE keep the EXACT same two-tone layout. Do NOT change, warm, cool, yellow, or shift the metal "
+        "colour in any way."
+    )
+
     # Ultra-minimal — just the change + one-line preserve instruction.
     # This is the exact ChatGPT flow: take the reference, apply ONLY the requested
     # change, re-render photorealistically on a white background.
     if replacement_block:
-        return f"""{replacement_block} Keep the exact same design, backing plate, stones, shape, font style, underlines/lines, and all other details unchanged — only the text/number content changes{(", plus the additional change described below" if residual_block else "")}.{residual_block}
+        return f"""{replacement_block} Keep the exact same design, backing plate, stones, shape, font style, underlines/lines, metal colour, and all other details unchanged — only the text/number content changes{(", plus the additional change described below" if residual_block else "")}.{residual_block}{metal_lock}
 
 {PHOTO_PRESERVE_RULE}
 
@@ -3391,7 +3406,7 @@ One image only."""
     else:
         return f"""Apply ONLY this change to the attached jewelry: {change_desc}
 
-Keep EVERYTHING else exactly the same as the reference — same overall design, shape, silhouette, proportions, every existing stone, metal and structure, borders and edges. Make ONLY the requested change; do not redesign, restyle, or alter any other part. If the requested change is to ADD or restore stones / diamonds (or any element the user explicitly asks for), DO add them as described while keeping the rest identical.
+Keep EVERYTHING else exactly the same as the reference — same overall design, shape, silhouette, proportions, every existing stone, metal colour and structure, borders and edges. Make ONLY the requested change; do not redesign, restyle, or alter any other part. If the requested change is to ADD or restore stones / diamonds (or any element the user explicitly asks for), DO add them as described while keeping the rest identical.{metal_lock}
 
 {NO_DEGEM_RULE}
 
