@@ -60,7 +60,7 @@ class Settings(BaseSettings):
 
     # CORS
     BACKEND_CORS_ORIGINS: List[str]
-    # BACKEND_CORS_ORIGINS: List[str] = ["https://craftmenai.txogavideo.in", "http://localhost:3000"]
+    # BACKEND_CORS_ORIGINS: List[str] = ["https://craftmenai.txogavideo.in", "http://localhost:3000","https://b38f2wvf-3000.inc1.devtunnels.ms","https://nr201rgm-8000.inc1.devtunnels.ms"]
 
     # Socket.IO
     SOCKETIO_PATH: str = "/socket.io"

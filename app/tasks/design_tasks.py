@@ -84,6 +84,8 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
         elif design.input_image_url:
             reference_image_source = design.input_image_url
 
+        detected_metal = None
+        metal_variations_json = None
         if reference_image_source:
             # Publish initial stage events
             _publish_sse(
@@ -92,7 +94,7 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                     "design_id": design.id,
                     "design_code": design.design_code,
                     "stage": "generating",
-                    "message": "Generating jewelry render with Gemini...",
+                    "message": "Generating jewelry render with OpenAI...",
                 },
                 event="design.generating",
             )
@@ -193,10 +195,13 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             # Use the newly migrated Gemini high-fidelity pipeline (Primary + Fallback + QA Checks)
             generated_item = openai_service.generate_base_image(
                 image_source=reference_image_source,
-                user_prompt=gen_prompt,
+                user_prompt=prompt,
                 jewellery_type=design.jewellery_type or "pendant",
-                metal_tone=input_metal,
+                metal_tone=None
             )
+
+            # Retrieve the dynamically detected metal tone from the vision translator
+            detected_metal = getattr(generated_item, "detected_metal", None) or "yellow_gold"
 
             final_image_bytes, content_type = _extract_generated_image_data(generated_item)
             _validate_image_bytes(final_image_bytes, content_type)
@@ -208,22 +213,11 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
         else:
             # ── Fallback: prompt-only generation (no reference image) ─
             generated_item = openai_service.generate_image_from_prompt(prompt)
-            final_image_bytes, content_type = _extract_generated_image_data(generated_item)
-            _validate_image_bytes(final_image_bytes, content_type)
+            image_bytes, content_type = _extract_generated_image_data(generated_item)
+            _validate_image_bytes(image_bytes, content_type)
 
             bucket_path = f"generated/base/{design.design_code}"
-            generated_image_url = upload_image_to_supabase(final_image_bytes, bucket_path)
-
-        # Detect the base image's metal color so the UI can default-select the matching
-        # swatch and skip regenerating that color. Register the base under that metal.
-        try:
-            import base64 as _b64
-            from app.services.openai_service import detect_metal_color
-            base_metal = detect_metal_color(_b64.b64encode(final_image_bytes).decode("utf-8"))
-        except Exception as _bm_err:
-            logger.warning("Base metal detection failed for design_id=%s: %s", design_id, _bm_err)
-            base_metal = "gold"
-        logger.info("Base image metal detected as '%s' for design_id=%s", base_metal, design_id)
+            generated_image_url = upload_image_to_supabase(image_bytes, bucket_path)
 
         variant_service = DesignVariantService(db)
         variant = variant_service.create_initial_variant(
@@ -231,26 +225,8 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             base_design_image_url=generated_image_url,
             prompt_used=prompt,
             model_used=openai_service.model,
-            # Seed ONLY the detected base metal so the other metal swatches are "missing" and
-            # regenerate on click. Passing this also skips the repo's auto-detect seeding.
-            metal_variations_json={base_metal: generated_image_url},
+            metal_variations_json=metal_variations_json,
         )
-
-        # Persist the detected base metal and register the base image under that metal.
-        # IMPORTANT: overwrite metal_variations_json with ONLY the detected base metal.
-        # create_initial_variant runs an older pixel-based detector that can register the
-        # base image under a WRONG metal (e.g. rose_gold), which would make the UI think
-        # that color already exists and skip generating it. Our vision detection wins.
-        try:
-            from app.repositories.design_variant import DesignVariantRepository
-            _variant_repo = DesignVariantRepository(db)
-            _variant_repo.update_variant(
-                variant,
-                base_metal=base_metal,
-                metal_variations_json={base_metal: generated_image_url},
-            )
-        except Exception as _upd_err:
-            logger.warning("Failed to persist base_metal for variant=%s: %s", getattr(variant, "id", None), _upd_err)
 
         AIGenerationWorkflowService(db).complete_generation(
             design,
@@ -380,30 +356,33 @@ def refine_design_variant_image(
         design = db.query(DesignModel).filter(DesignModel.id == design_id).first()
         jewellery_type = design.jewellery_type if design else ""
 
-        # Build the refine prompt. The USER PROMPT is the only edit instruction — do exactly
-        # what it says and nothing else. style_tags / design_focus are OPTIONAL *visual style*
-        # direction (how the jewellery should look/feel); they are NOT text and must never be
-        # written or engraved onto the piece. Keep them on a clearly separated block with an
-        # explicit no-engraving rule so they shape the aesthetic instead of leaking into the
-        # text/engraving (which previously caused tag words to be carved into the piece).
-        combined_prompt = (prompt or "").strip()
-        style_bits = []
+        # Build a combined prompt incorporating style_tags and design_focus
+        combined_prompt = prompt or ""
         if style_tags:
-            style_bits.append(str(style_tags).strip())
+            combined_prompt = f"{combined_prompt}\nStyle tags: {style_tags}"
         if design_focus:
-            style_bits.append(f"emphasis on {str(design_focus).strip()}")
-        if style_bits:
-            combined_prompt = (
-                f"{combined_prompt}\n\n"
-                "STYLE DIRECTION (visual aesthetic only — describes HOW the piece should look and "
-                "feel; do NOT write, letter, engrave, or add ANY of these words as text/characters "
-                f"anywhere on the jewellery): {', '.join(style_bits)}. "
-                "Apply this as overall styling while keeping the same overall design and only the "
-                "user-requested change."
-            ).strip()
+            combined_prompt = f"{combined_prompt}\nFocus on: {design_focus}"
+
+        # Resolve metal tone from the parent variant's database record
+        parent_metal = None
+        if parent_variant:
+            if parent_variant.metal_variations_json:
+                # Find the key whose value matches the parent's base_design_image_url
+                for m, url in parent_variant.metal_variations_json.items():
+                    if url == parent_variant.base_design_image_url:
+                        parent_metal = m
+                        break
+                if not parent_metal:
+                    # Fallback: get the first key
+                    parent_metal = list(parent_variant.metal_variations_json.keys())[0]
 
         # Generate refined image via OpenAI using the resolved reference images
-        generated_item = openai_service.generate_base_image(reference_image_source, combined_prompt, jewellery_type=jewellery_type)
+        generated_item = openai_service.generate_base_image(
+            reference_image_source,
+            combined_prompt,
+            jewellery_type=jewellery_type,
+            metal_tone=parent_metal
+        )
         image_bytes, content_type = _extract_generated_image_data(generated_item)
         _validate_image_bytes(image_bytes, content_type)
 
@@ -417,26 +396,10 @@ def refine_design_variant_image(
         if not variant:
             raise ValueError(f"Variant {variant_id} not found for image update")
 
-        # Detect the refined image's metal color (vision) so the UI default-selects the
-        # right swatch and registers the base under ONLY that metal (others regenerate).
-        try:
-            import base64 as _b64
-            from app.services.openai_service import detect_metal_color
-            refined_metal = detect_metal_color(_b64.b64encode(image_bytes).decode("utf-8"))
-        except Exception as _rm_err:
-            logger.warning("Refine metal detection failed for variant=%s: %s", variant_id, _rm_err)
-            refined_metal = "gold"
-        logger.info("Refined image metal detected as '%s' for variant_id=%s", refined_metal, variant_id)
-
-        # Update the variant: new base image + detected metal + clean metal map (only base).
+        # Update the variant's base_design_image_url
         from app.repositories.design_variant import DesignVariantRepository
         variant_repo = DesignVariantRepository(db)
-        variant_repo.update_variant(
-            variant,
-            base_design_image_url=generated_image_url,
-            base_metal=refined_metal,
-            metal_variations_json={refined_metal: generated_image_url},
-        )
+        variant_repo.update_variant(variant, base_design_image_url=generated_image_url)
 
         _publish_sse(
             channel,

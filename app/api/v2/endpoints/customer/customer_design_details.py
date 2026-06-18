@@ -68,7 +68,7 @@ def get_customer_design_shares(
             "email": customer_email,
             "shared_on": share.created_at if share.created_at else None,
             "status": status_val,
-            "customer_comment": share.comment,
+            "customer_comment_or_feedback": share.comment,
             "token": share.public_token,
         })
 
