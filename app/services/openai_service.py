@@ -2965,12 +2965,20 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
     """Short, type-appropriate wearable-form instruction driven by the user's SELECTED
     jewelry type (Pendant -> add a bail, Ring -> band, Earring -> pair, etc.) so the chosen
     type actually shapes the output. Kept short to avoid re-bloating the prompt."""
-    t = (item_type or "").lower()
+    t = (item_type or "").strip().lower()
+    _PENDANT = (
+        " Make it a wearable PENDANT: if it does NOT already have a bail/hook at the top, add a simple smooth "
+        "plain-metal loop bail at the top-centre that a chain can pass through; if a chain or cord is shown, "
+        "remove the chain and show only the pendant (keep the bail)."
+    )
+    # Check the most specific / collision-prone types first (earring/cufflink contain 'ring').
     if "earring" in t or "ear ring" in t:
         return " Render as a matching PAIR of EARRINGS with posts/backs so they can be worn."
+    if "cufflink" in t or "cuff link" in t or "cuff-link" in t:
+        return " Render as a matching PAIR of CUFFLINKS with the standard swivel-bar backs."
     if "ring" in t:
         return " Present the design as the face/top of a wearable RING on a smooth polished band/shank."
-    if "bracelet" in t or "bangle" in t or "cuff" in t:
+    if "bracelet" in t or "bangle" in t or ("cuff" in t and "link" not in t):
         return " Render as a wearable BRACELET form."
     if "brooch" in t:
         return " Render as a BROOCH with a hidden pin/clasp on the back."
@@ -2978,16 +2986,21 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
         return " Render as wearable GRILLZ for the teeth."
     if "watch" in t:
         return " Render as a WATCH."
+    if "buckle" in t:
+        return " Render as a BELT BUCKLE."
+    if "clasp" in t:
+        return " Render as a jewelry CLASP (a working fastener/connector)."
+    if "bail" in t:
+        return " Render as a pendant BAIL — the small top loop a chain passes through."
     if "body" in t:
         return " Render as wearable BODY JEWELRY suited to the design."
-    # Pendant / Necklace / Charm / default (this product is predominantly pendants).
-    if _is_pendant_like(item_type, user_prompt):
-        return (
-            " Make it a wearable PENDANT: if it does NOT already have a bail/hook at the top, add a simple smooth "
-            "plain-metal loop bail at the top-centre that a chain can pass through; if a chain or cord is shown, "
-            "remove the chain and show only the pendant (keep the bail)."
-        )
-    return ""
+    if any(k in t for k in ["pendant", "necklace", "charm"]):
+        return _PENDANT
+    # Custom / unknown type the user typed in: render it as that exact named object — do NOT
+    # force a pendant bail onto it. Only fall back to a pendant for a truly generic/blank type.
+    if t and t not in ("jewelry", "jewellery", "custom", "custom object", "other"):
+        return f" Render as a real, wearable {item_type} — the actual {item_type} form, not a pendant (no bail unless the {item_type} naturally hangs from a chain)."
+    return _PENDANT
 
 
 def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[str, Any]], metal_tone: str, has_images: bool, image_count: int = 0) -> str:
