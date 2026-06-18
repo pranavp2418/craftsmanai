@@ -3060,23 +3060,27 @@ def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[s
         )
 
     if has_images:
-        # Lean, prioritised prompt: lead with faithful reproduction + keep-every-stone (the two
-        # signals that matter most), then only the rules relevant to THIS piece. Over-instructing
-        # makes gpt-image-2 re-interpret the design, so non-relevant blocks are intentionally omitted.
-        return f"""Re-render this EXACT jewelry design as a clean CAD-style 3D jewelry render, {angle_phrase}, on a pure solid white background (#FFFFFF) with NO background scene.
+        # EMPIRICALLY VALIDATED (2026-06-18, side-by-side A/B/C/D test on the real iced "00"):
+        # gpt-image-2 reproduces dense pavé RELIABLY only with a SHORT prompt. A long rule-stack
+        # (~8.8K chars) makes it re-interpret an iced piece as plain/beaded metal (and inconsistently).
+        # A ~250-char prompt keeps every diamond every time. So this branch is intentionally minimal.
+        # When the input image exists it IS the source of truth — copy it; don't over-instruct.
+        if _is_metal_only_change(user_prompt):
+            _mp = _detected_metal_phrase(user_prompt) or "the requested metal"
+            change_line = f" Change ONLY the metal colour to {_mp}; keep the design and EVERY stone identical to the image."
+        elif user_prompt:
+            change_line = f" Apply ONLY this change and keep everything else identical to the image: {user_prompt}"
+        else:
+            change_line = ""
+        chain_line = (
+            " If a chain or cord is threaded through the bail, remove it and show only the pendant (keep the bail)."
+            if _is_pendant_like(item_type, user_prompt) else ""
+        )
+        return f"""Recreate this EXACT jewelry piece as a clean CAD-style 3D render on a pure solid white background (#FFFFFF), {angle_phrase}.
 
-{DESIGN_PRESERVATION}
+Keep the design IDENTICAL to the image — the same shape, proportions, structure, borders and lettering, and EVERY stone. If the piece is set with diamonds / pavé, keep EVERY diamond exactly where it is, with the same coverage and density — do NOT turn any diamond or pavé surface into plain or beaded metal; diamonds must stay diamonds.{change_line}{chain_line}{variations_block}{merge_block}{gold_note}
 
-{NO_DEGEM_RULE}
-
-{SETTING_QUALITY}{metal_only_block}{bail_block}{font_block}{text_rules_block}{backing_block}{sketch_block}{layered_block}{variations_block}{merge_block}
-
-{angle_rule}
-
-Apply ONLY what the user asks below — change nothing else, and keep every other detail (especially every stone) exactly as in the reference.{f' User request: {user_prompt}' if user_prompt else ''}
-
-{REALISM_DESCRIPTOR} {centering_phrase}. Pure white background (#FFFFFF).{metal_line}{gold_note}
-One image only."""
+Clean even studio lighting, sharp focus, realistic metal and stones, no background scene. One image only."""
     else:
         # Prompt-only generation (no reference image). Default to SIMPLE GOLD when the
         # user does not specify a metal, and render ONLY what the prompt describes —
