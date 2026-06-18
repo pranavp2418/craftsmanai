@@ -2285,6 +2285,46 @@ def download_reference_images(image_urls: list[str]) -> list[bytes]:
     return blobs
 
 
+def generate_with_gemini_image(image_blobs, prompt_text: str) -> Optional[str]:
+    """FALLBACK image generator via Gemini (gemini-2.5-flash-image). Used ONLY when OpenAI
+    refuses a render on content-policy / copyright grounds — Gemini's moderation differs, so
+    some OpenAI-blocked prompts succeed here. Returns base64 PNG, or None on any failure.
+
+    image_blobs: optional reference image bytes (image-to-image); empty/None = text-to-image.
+    """
+    key = os.getenv("GEMINI_API_KEY") or getattr(settings, "GEMINI_API_KEY", None)
+    if not key:
+        logger.warning("Gemini image fallback skipped: no GEMINI_API_KEY")
+        return None
+    parts = [{"text": prompt_text}]
+    for blob in (image_blobs or []):
+        parts.append({"inline_data": {"mime_type": "image/png", "data": base64.b64encode(blob).decode("utf-8")}})
+    try:
+        resp = requests.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=" + key,
+            headers={"Content-Type": "application/json"},
+            json={"contents": [{"parts": parts}], "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}},
+            timeout=(15, 300),
+        )
+        if not resp.ok:
+            logger.error("Gemini image fallback HTTP %d: %s", resp.status_code, resp.text[:200])
+            return None
+        cands = resp.json().get("candidates", [])
+        if not cands:
+            logger.error("Gemini image fallback: no candidates returned")
+            return None
+        for p in cands[0].get("content", {}).get("parts", []):
+            inline = p.get("inlineData") or p.get("inline_data")
+            if inline and inline.get("data"):
+                logger.info("Gemini image fallback succeeded")
+                return inline["data"]
+        logger.error("Gemini image fallback: response had no image part")
+        return None
+    except Exception as e:
+        logger.error("Gemini image fallback exception: %s", e)
+        return None
+
+
 def generate_with_openai_image(
     image_urls: list[str],
     prompt_text: str,
@@ -2381,11 +2421,35 @@ def generate_with_openai_image(
                 raise ValueError("No b64_json in OpenAI response")
 
             transient = response.status_code in [408, 429, 500, 502, 503, 504]
-            error_text = response.text[:300]
+            error_text = response.text[:400]
             logger.error(
                 "OpenAI image error (attempt %d/%d): %d %s",
                 attempt, max_attempts, response.status_code, error_text,
             )
+
+            # Content-policy / copyright block → fall back to Gemini image generation (its
+            # moderation differs). Retrying OpenAI would just block again, so we go straight
+            # to Gemini and return on success; if Gemini also fails, raise (no more retries).
+            low = error_text.lower()
+            is_policy = response.status_code in (400, 403) and any(k in low for k in [
+                "content_policy", "content policy", "safety system", "safety", "moderation",
+                "copyright", "violat", "not allowed", "rejected", "flagged",
+            ])
+            if is_policy:
+                logger.warning("OpenAI blocked (policy/copyright) — falling back to Gemini image generation")
+                g64 = generate_with_gemini_image(image_blobs, truncated_prompt)
+                if g64:
+                    if whiten_output:
+                        try:
+                            g64 = base64.b64encode(
+                                _whiten_background(base64.b64decode(g64), tag="gemini_white_bg")
+                            ).decode("utf-8")
+                        except Exception as _wb:
+                            logger.warning("Gemini output white-bg post-process skipped: %s", _wb)
+                    return g64
+                # RuntimeError is NOT caught by the retry handler below → propagates immediately.
+                raise RuntimeError(f"OpenAI blocked (policy/copyright) and Gemini fallback failed: {error_text}")
+
             if not transient or attempt == max_attempts:
                 raise ValueError(f"OpenAI failed: {response.status_code} {error_text}")
 
