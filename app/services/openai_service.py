@@ -3120,11 +3120,14 @@ Clean even studio lighting, sharp focus, realistic metal and stones, no backgrou
         else:
             metal_phrase = ""  # the user named a metal in their prompt — let it drive
             plain_note = " If the description does not mention diamonds or gemstones, do not add any stones."
+        # Selected-type form (Pendant -> bail, Ring -> band, Earring -> pair, etc.) so the chosen
+        # jewelry type shapes a text-only render too (not just image inputs).
+        type_line = _type_form_clause(item_type, user_prompt)
         return f"""Create a clean CAD-style 3D jewelry render of a {item_type}{metal_phrase}, front-facing and centered, on a pure solid white background (#FFFFFF) with NO background scene.
 
-Design exactly and ONLY what is described below — do NOT add any stones, diamonds, engraving, patterns, or extra elements that are not explicitly mentioned.{plain_note}
+Design exactly and ONLY what is described below — do NOT add any stones, diamonds, engraving, patterns, or extra elements that are not explicitly mentioned.{plain_note}{type_line}
 
-{user_prompt if user_prompt else f'a simple plain {item_type}'}{font_style_block}{prompt_only_bail_block}{layered_block}{variations_block}
+{user_prompt if user_prompt else f'a simple plain {item_type}'}{font_style_block}{layered_block}{variations_block}
 
 {SETTING_QUALITY}
 
@@ -3760,15 +3763,20 @@ class OpenAIService:
     def generate_image_from_prompt(
         self,
         user_prompt: str,
-        size: str = "1024x1024"
+        size: str = "1024x1024",
+        jewellery_type: str = ""
     ) -> OpenAIImageObject:
         """
         Generate image using prompt only (no reference image) via Gemini Pipeline.
+
+        jewellery_type is the user's SELECTED type (Pendant/Ring/Earring/...) so the
+        text-only render takes the right wearable form (e.g. a Ring instead of a pendant).
         """
-        logger.info("Generating prompt-only image using Gemini Pipeline")
+        logger.info("Generating prompt-only image using Gemini Pipeline (type=%s)", jewellery_type)
         result = generate_with_fallback(
             image_source=None,
             user_prompt=user_prompt,
+            parsed_data={"item_type": jewellery_type} if jewellery_type else None,
             metal_tone="yellow_gold",
             mode="initial"
         )

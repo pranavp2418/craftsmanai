@@ -208,7 +208,9 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
 
         else:
             # ── Fallback: prompt-only generation (no reference image) ─
-            generated_item = openai_service.generate_image_from_prompt(prompt)
+            generated_item = openai_service.generate_image_from_prompt(
+                prompt, jewellery_type=(design.jewellery_type or "")
+            )
             final_image_bytes, content_type = _extract_generated_image_data(generated_item)
             _validate_image_bytes(final_image_bytes, content_type)
 
