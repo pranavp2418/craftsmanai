@@ -902,7 +902,7 @@ def interpret_refinement(params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
             headers={"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"},
             json={
-                "model": "gemini-1.5-flash",
+                "model": "gemini-2.5-flash",
                 "messages": [
                     {"role": "system", "content": REFINEMENT_INTERPRETER_SYSTEM},
                     {"role": "user", "content": user_content},
@@ -1056,7 +1056,7 @@ def qa_refinement_check(params: Dict[str, Any]) -> Dict[str, Any]:
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
             headers={"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"},
             json={
-                "model": "gemini-1.5-flash",
+                "model": "gemini-2.5-flash",
                 "messages": [
                     {"role": "system", "content": "You are a strict jewelry-render QA inspector. You only call the emit_qa_verdict tool."},
                     {"role": "user", "content": user_content},
@@ -1136,7 +1136,7 @@ def _ocr_pendant_text(image_b64: str, expected_join: str) -> Optional[str]:
             resp = requests.post(
                 "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
                 headers={"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"},
-                json={"model": "gemini-1.5-flash", "messages": messages, "temperature": 0},
+                json={"model": "gemini-2.5-flash", "messages": messages, "temperature": 0},
                 timeout=30,
             )
             if resp.ok:
@@ -2332,7 +2332,7 @@ def generate_with_openai_image(
                     "prompt": truncated_prompt,
                     "n": "1",
                     "size": "1024x1024",
-                    "quality": "auto",
+                    "quality": "high",
                     "background": "opaque",
                 }
                 response = requests.post(
@@ -2355,7 +2355,7 @@ def generate_with_openai_image(
                         "prompt": truncated_prompt,
                         "n": 1,
                         "size": "1024x1024",
-                        "quality": "auto",
+                        "quality": "high",
                         "background": "opaque",
                     },
                     timeout=(15, 300),
@@ -2548,6 +2548,99 @@ STONE_DENSITY_RULE = (
     "reference, not heavier or lighter."
 )
 
+# Setting & stone quality — the client's #1 visual complaint: current renders show melty,
+# loose, uneven, unclear stone settings. This POSITIVE rule (front-loaded in the live
+# builders) forces crisp, individually-defined, manufacturable settings + clean stone clarity.
+SETTING_QUALITY = (
+    "SETTING & STONE QUALITY (critical — must be flawless): every stone must sit in a CRISP, CLEAN, individually "
+    "well-defined setting with sharp, solid, evenly-shaped metal (prongs / bezels / channel walls / pavé beads), "
+    "each setting clearly visible, fully formed and identical in style across the same region. The setting metal "
+    "must be SOLID and smooth with clean sharp edges — absolutely NO melted, melty, droopy, blobby, fused, wavy, "
+    "gummy, loose, uneven, smeared or half-formed settings, and NO stones sinking into or floating above the "
+    "metal. Every stone is seated flush and secure. Stones must have clean, realistic CAD clarity with a bright, "
+    "even luminance/sparkle (not dull, not glassy, not over-blown). The whole piece must read as a precise, "
+    "manufacturable CAD render a jeweler could actually produce."
+)
+
+# Default stone arrangement when the model must ADD or DEFAULT stones (i.e. NOT defined by
+# the reference). Client-confirmed (2026-06-18): PARALLEL rows, NON-UNIFORM spacing/sizing.
+STONE_ARRANGEMENT_DEFAULT = (
+    "DEFAULT STONE ARRANGEMENT (apply ONLY when stones are not already defined by the reference and you must add "
+    "or default them): use small ROUND white diamonds laid out in PARALLEL rows that follow the form of the "
+    "piece, with natural, slightly NON-UNIFORM spacing and sizing — never a rigid, perfectly-uniform mechanical "
+    "grid. If the reference already shows a stone arrangement, REPLICATE that arrangement exactly instead of this default."
+)
+
+# Camera angle — client-confirmed (2026-06-18): for IMAGE inputs keep the reference's angle;
+# only force a straight front view when the user explicitly asks (or for text-only inputs).
+PRESERVE_ANGLE_RULE = (
+    "CAMERA / ORIENTATION: Keep the SAME viewing angle as the reference image — if the reference is shot "
+    "front-on, render front-on; if it is at a three-quarter, isometric, side or tilted angle, render the piece at "
+    "that SAME angle. Do NOT rotate, straighten, re-orient, or change the camera angle of the piece; preserve the "
+    "reference's angle exactly while applying only the requested change."
+)
+
+# Pendants must be shown WITHOUT the chain (client requirement) — only the pendant itself.
+CHAIN_REMOVAL_RULE = (
+    "NO CHAIN: show ONLY the pendant piece itself. If the reference shows a chain, cord, or necklace threaded "
+    "through the bail, REMOVE the chain/cord completely and render just the pendant on its own (keep the bail/hook, "
+    "but with no chain passing through it). Do NOT add a chain that is not part of the pendant."
+)
+
+# Sketch / drawing input — interpret the intended design and render real jewelry; do not copy
+# the drawing's strokes / shading / paper literally.
+SKETCH_RULE = (
+    "IF THE REFERENCE IS A HAND-DRAWN SKETCH OR DRAWING (not a photo of real jewelry): treat it as the intended "
+    "design and produce a clean, realistic, manufacturable CAD jewelry render of that design — interpret the "
+    "drawn lines as actual metal and stones. Do NOT reproduce pencil/pen strokes, sketch shading, paper texture, "
+    "or rough drawing artifacts; turn the sketch into a real, polished, producible piece while keeping its "
+    "intended shape and layout."
+)
+
+# Custom bail handling — when the user supplies/asks for a custom-shaped bail (e.g. a heart),
+# use it AS the bail with a hidden rear loop; never stack a second regular bail on top.
+CUSTOM_BAIL_RULE = (
+    "CUSTOM BAIL: the user wants a custom-shaped bail. Use the custom shape AS the pendant's bail at the "
+    "top-centre and connect it cleanly to the top of the design. Behind the custom shape, add a SMALL HIDDEN loop "
+    "(not visible from the front) for the chain to pass through. Do NOT also add a separate ordinary loop/teardrop "
+    "bail on top of, beside, or below the custom bail — there must be exactly ONE bail (the custom one). From the "
+    "front, only the custom bail and the pendant are visible."
+)
+
+
+def _user_wants_front(user_prompt: str) -> bool:
+    """True if the user explicitly asks for a straight front / head-on view."""
+    p = (user_prompt or "").lower()
+    return any(w in p for w in [
+        "front view", "front-facing", "front facing", "head on", "head-on", "straight on",
+        "straighten", "face on", "face-on", "from the front", "frontal",
+    ])
+
+
+def _user_wants_variations(user_prompt: str) -> bool:
+    """True if the user asks for MULTIPLE variations in ONE image (e.g. 'show me 6 fonts')."""
+    p = (user_prompt or "").lower()
+    if any(w in p for w in [
+        "different font", "different fonts", "different version", "different versions",
+        "different style", "different styles", "different design", "different designs",
+        "variations", "side by side", "side-by-side", "in a grid", "grid of", "collage",
+        "multiple versions", "multiple options", "few options",
+    ]):
+        return True
+    # "show me 6 fonts", "5 different styles", "several versions", etc.
+    return bool(re.search(r"\b(\d+|few|several|some|multiple)\s+(different\s+)?(font|version|style|design|option|variation)s?\b", p))
+
+
+def _user_wants_custom_bail(user_prompt: str, image_count: int = 0) -> bool:
+    """True if the user is adding a custom-shaped bail (mentions a bail change/addition)."""
+    p = (user_prompt or "").lower()
+    if "bail" not in p and "hook" not in p:
+        return False
+    return any(w in p for w in [
+        "custom bail", "add bail", "add a bail", "this bail", "heart bail", "shaped bail",
+        "as bail", "as the bail", "change bail", "change the bail", "new bail", "custom hook",
+    ])
+
 
 def _user_requests_case(user_prompt: str) -> bool:
     """True if the user's prompt explicitly specifies a letter case for the text."""
@@ -2671,10 +2764,12 @@ PENDANT_BAIL_ROLE_RULE = (
 
 # Two-step / two-layer stacked nameplate (client requested "step up, 2 layers").
 LAYERED_RULE = (
-    "STEP-UP / TWO-LAYER STRUCTURE: build the design as a raised TWO-LAYER stepped piece — a lower base layer "
-    "and a second upper layer of the same outline sitting on top of it, slightly offset so there is a clear "
-    "stepped 3D edge/ledge visible between the two layers (a two-tier look). Cover both layers fully in stones "
-    "if requested. Keep it a clean CAD-style render with the layering clearly readable."
+    "STEP-UP / RAISED TWO-LAYER STRUCTURE (also called 3D, raised, double-layer, two-tier): build the design as a "
+    "raised piece sitting on a bordered BACKPLATE — add a flat backing plate of the SAME outline shape as the "
+    "design but slightly larger, with a clean polished border (a clearly visible bordered plate) running all "
+    "around the edge, and seat the main design raised on TOP of that plate so there is a clear stepped 3D ledge "
+    "between the two layers. Stones may cover both the backplate border and the raised design if requested. Keep "
+    "it a clean CAD-style render with the two-layer step clearly readable."
 )
 
 
@@ -2834,7 +2929,7 @@ BORDER_RULE = (
 )
 
 
-def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[str, Any]], metal_tone: str, has_images: bool) -> str:
+def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[str, Any]], metal_tone: str, has_images: bool, image_count: int = 0) -> str:
     """Build a short, focused prompt for initial generation — ultra-minimal like ChatGPT.
 
     Key insight: gpt-image-2 does BEST with minimal instructions. ChatGPT sends very
@@ -2854,13 +2949,20 @@ def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[s
         metal = ""  # User specified it, don't override
 
     metal_line = f" in {metal}" if metal else ""
+    # Client default: gold must be a LIGHT, true 10K CAD shade — not a bright glossy yellow.
+    gold_note = ""
+    if metal and "gold" in metal.lower() and "white" not in metal.lower() and "rose" not in metal.lower():
+        gold_note = (
+            " Render the gold as a LIGHT, soft, true 10K CAD-style gold shade (a lighter, realistic, slightly "
+            "matte gold) — NOT a bright, saturated, glossy yellow gold."
+        )
 
-    # Pendant bail/hook handling (double-lug rectangular hook + practical connection +
-    # correct pendant-vs-bail roles).
+    # Pendant bail/hook handling (bail rule + correct pendant-vs-bail roles + chain removal +
+    # optional custom bail).
     if _is_pendant_like(item_type, user_prompt):
-        bail_block = f"\n\n{BAIL_RULE}\n\n{PENDANT_BAIL_ROLE_RULE}"
-        # No-image (prompt-only) pendants use the client's preferred default hook: a
-        # rectangular pavé-diamond bail with an open rectangular lug at its base.
+        bail_block = f"\n\n{BAIL_RULE}\n\n{PENDANT_BAIL_ROLE_RULE}\n\n{CHAIN_REMOVAL_RULE}"
+        if _user_wants_custom_bail(user_prompt, image_count):
+            bail_block += f"\n\n{CUSTOM_BAIL_RULE}"
         prompt_only_bail_block = f"\n\n{PROMPT_ONLY_BAIL_RULE}"
     else:
         bail_block = ""
@@ -2873,10 +2975,39 @@ def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[s
     # Two-step / two-layer stacked structure when the user asks for it.
     layered_block = f"\n\n{LAYERED_RULE}" if _user_wants_layered(user_prompt) else ""
 
+    # Camera angle — client-confirmed: for IMAGE inputs keep the reference angle; only force a
+    # straight front view when the user explicitly asks (text-only always defaults to front).
+    keep_ref_angle = has_images and not _user_wants_front(user_prompt)
+    angle_rule = PRESERVE_ANGLE_RULE if keep_ref_angle else FRONT_FACING_RULE
+    angle_phrase = "keeping the SAME camera angle as the reference image" if keep_ref_angle else "shown in a straight FRONT-FACING view"
+    centering_phrase = "Centered" if keep_ref_angle else "Front-facing, upright, and centered"
+
+    # Multiple variations in ONE image (e.g. "show me 6 fonts for this design").
+    variations_block = ""
+    if _user_wants_variations(user_prompt):
+        variations_block = (
+            "\n\nMULTIPLE VARIATIONS: the user asked to see several variations of this design in ONE image. Lay "
+            "them out as a clean, evenly-spaced grid of separate variants on the same pure-white background, each "
+            "variant clearly separated, all sharing the same base design and differing only by the requested "
+            "variation. (This is the ONLY case where more than one piece may appear in the output.)"
+        )
+    # Multiple reference images describing ONE piece → merge them into a single unified piece.
+    merge_block = ""
+    if has_images and image_count > 1:
+        merge_block = (
+            "\n\nMULTIPLE REFERENCE IMAGES: the attached images show different parts, components, or views of the "
+            "SAME single piece. COMBINE them into ONE unified piece of jewelry — do NOT output them separately or "
+            "side by side. Integrate every shown component into a single coherent design."
+        )
+
     if has_images:
-        return f"""Re-render this exact jewelry design as a clean CAD-style 3D jewelry render, shown in a straight FRONT-FACING view, on a pure solid white background (#FFFFFF) with NO background scene.
+        return f"""Re-render this exact jewelry design as a clean CAD-style 3D jewelry render, {angle_phrase}, on a pure solid white background (#FFFFFF) with NO background scene.
 
 {DESIGN_PRESERVATION}
+
+{SETTING_QUALITY}
+
+{STONE_ARRANGEMENT_DEFAULT}
 
 {NO_ADDITIONS_RULE}
 
@@ -2892,11 +3023,13 @@ def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[s
 
 {DOT_CONNECTION_RULE}
 
-{BACKING_PLATE_RULE}{bail_block}{font_block}{layered_block}
+{SKETCH_RULE}
 
-{FRONT_FACING_RULE}
+{BACKING_PLATE_RULE}{bail_block}{font_block}{layered_block}{variations_block}{merge_block}
 
-{REALISM_DESCRIPTOR} Front-facing, upright, and centered. Pure white background (#FFFFFF).{metal_line}
+{angle_rule}
+
+{REALISM_DESCRIPTOR} {centering_phrase}. Pure white background (#FFFFFF).{metal_line}{gold_note}
 {f'{chr(10)}{user_prompt}' if user_prompt else ''}
 One image only."""
     else:
@@ -2916,11 +3049,15 @@ One image only."""
 
 Design exactly and ONLY what is described below — do NOT add any stones, diamonds, engraving, patterns, or extra elements that are not explicitly mentioned.{plain_note}
 
-{user_prompt if user_prompt else f'a simple plain {item_type}'}{font_style_block}{prompt_only_bail_block}{layered_block}
+{user_prompt if user_prompt else f'a simple plain {item_type}'}{font_style_block}{prompt_only_bail_block}{layered_block}{variations_block}
+
+{SETTING_QUALITY}
+
+{STONE_ARRANGEMENT_DEFAULT}
 
 {DOT_CONNECTION_RULE}
 
-{REALISM_DESCRIPTOR}
+{REALISM_DESCRIPTOR}{gold_note}
 
 One image only."""
 
@@ -3060,6 +3197,11 @@ def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[D
         elif attempt >= 3:
             intensity = " This is the final attempt — the change MUST be clearly visible."
 
+    # Camera angle — a refine always operates on a prior render, so KEEP that image's angle
+    # unless the user explicitly asks for a front view.
+    refine_angle_rule = FRONT_FACING_RULE if _user_wants_front(user_prompt) else PRESERVE_ANGLE_RULE
+    refine_centering = "Front-facing, upright, and centered." if _user_wants_front(user_prompt) else "Keep the reference's camera angle; centered."
+
     # Ultra-minimal — just the change + one-line preserve instruction.
     # This is the exact ChatGPT flow: take the reference, apply ONLY the requested
     # change, re-render photorealistically on a white background.
@@ -3080,11 +3222,13 @@ def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[D
 
 {STONE_DENSITY_RULE}
 
+{SETTING_QUALITY}
+
 {CONNECTION_RULE}{layered_block}
 
-{FRONT_FACING_RULE}
+{refine_angle_rule}
 
-{REALISM_DESCRIPTOR} Front-facing, upright, and centered. Pure white background (#FFFFFF).{intensity}
+{REALISM_DESCRIPTOR} {refine_centering} Pure white background (#FFFFFF).{intensity}
 
 One image only."""
     else:
@@ -3104,11 +3248,13 @@ Keep EVERYTHING else exactly the same as the reference — same overall design, 
 
 {BORDER_RULE}
 
+{SETTING_QUALITY}
+
 {CONNECTION_RULE}{layered_block}
 
-{FRONT_FACING_RULE}
+{refine_angle_rule}
 
-{REALISM_DESCRIPTOR} Front-facing, upright, and centered. Pure white background (#FFFFFF).{intensity}
+{REALISM_DESCRIPTOR} {refine_centering} Pure white background (#FFFFFF).{intensity}
 
 One image only."""
 
@@ -3203,7 +3349,7 @@ def generate_with_fallback(
         if is_refine:
             base = _build_concise_refine_prompt(user_prompt, refinement_intent, attempt, forced_case=forced_case)
         else:
-            base = _build_concise_initial_prompt(user_prompt, parsed_data, metal_tone, bool(resolved_image_urls))
+            base = _build_concise_initial_prompt(user_prompt, parsed_data, metal_tone, bool(resolved_image_urls), len(resolved_image_urls or []))
         if correction_notes:
             base += (
                 "\n\nIMPORTANT — the previous attempt differed from the reference in these ways. FIX each one "
@@ -3597,7 +3743,7 @@ class OpenAIService:
                 "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
                 headers={"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"},
                 json={
-                    "model": "gemini-1.5-flash",
+                    "model": "gemini-2.5-flash",
                     "messages": [
                         {
                             "role": "system",
@@ -3676,7 +3822,7 @@ class OpenAIService:
                 "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
                 headers={"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"},
                 json={
-                    "model": "gemini-1.5-flash",
+                    "model": "gemini-2.5-flash",
                     "messages": [
                         {
                             "role": "system",

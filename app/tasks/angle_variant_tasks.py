@@ -45,8 +45,8 @@ logger = logging.getLogger(__name__)
 
 
 METAL_DESCRIPTIONS = {
-    "gold": "warm yellow gold with rich golden tones",
-    "yellow_gold": "warm yellow gold with rich golden tones",
+    "gold": "light, soft, true 10K CAD-style yellow gold (a lighter realistic gold, not a bright glossy yellow)",
+    "yellow_gold": "light, soft, true 10K CAD-style yellow gold (a lighter realistic gold, not a bright glossy yellow)",
     "white_gold": "bright white gold / platinum with cool silver tones",
     "rose_gold": "warm rose gold with soft pink-copper tones",
     "rose": "warm rose gold with soft pink-copper tones",
@@ -57,7 +57,7 @@ METAL_DESCRIPTIONS = {
 
 VIEW_PROMPTS = {
     "side_view": "slightly turned view — rotate the piece only about 10 degrees from straight front (a very subtle turn that just hints at the side depth/thickness). This is NOT a full side profile; the front face must still be clearly visible, almost front-on, just gently angled by ~10 degrees",
-    "back_view": "rear / back view (the back of the piece, showing the reverse side and its construction)",
+    "back_view": "rear / back view shown as a clean GALLERY-STYLE HOLLOW layout — the open, hollowed-out back construction (open gallery work, hollow under-settings and cut-outs) the way a real CAD jeweler shows the reverse of a piece, NOT a solid filled back",
     "worn_view": "worn on a real person",
 }
 
