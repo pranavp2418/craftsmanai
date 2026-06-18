@@ -20,7 +20,7 @@ class DesignService:
     def _generate_design_code(self, owner_user: User, owner_id: int) -> tuple[str, int]:
         if getattr(owner_user, "business_name", None):
             words = [word for word in owner_user.business_name.split() if word]
-            prefix = "".join(word[0] for word in words[:2]).upper()
+            prefix = "".join(word[0] for word in words[:3]).upper()
         elif owner_user.design_prefix:
             prefix = owner_user.design_prefix.strip().upper()
         elif owner_user.full_name:

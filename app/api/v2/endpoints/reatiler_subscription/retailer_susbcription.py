@@ -513,6 +513,8 @@ def get_token_status(
         from sqlalchemy import or_
         from app.services.subscription_service import SubscriptionService
         
+        now = datetime.now(timezone.utc)
+        
         active_sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == current_user_id,
             UserSubscription.is_queued == False,
