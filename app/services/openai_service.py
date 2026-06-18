@@ -3245,7 +3245,16 @@ def _spelling_guide(word: str) -> str:
     return f'"{w}" — {count} letters total, spelled {spelled}{note_str}'
 
 
-def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[Dict[str, Any]], attempt: int, forced_case: Optional[str] = None) -> str:
+def _user_wants_metal_change(user_prompt: str) -> bool:
+    """True if the prompt mentions changing the metal / colour (so a refine may recolour)."""
+    p = (user_prompt or "").lower()
+    return any(w in p for w in [
+        "gold", "silver", "platinum", "rose", "white gold", "two tone", "two-tone", "rhodium",
+        "metal colour", "metal color", "recolor", "recolour", "color", "colour", "tone",
+    ])
+
+
+def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[Dict[str, Any]], attempt: int, forced_case: Optional[str] = None, ref_metal: Optional[str] = None) -> str:
     """Build a short, focused prompt for refinement — ultra-minimal like ChatGPT.
 
     Key insight: ChatGPT sends almost NO wrapping for edits. When a user says
@@ -3357,20 +3366,32 @@ def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[D
     refine_angle_rule = FRONT_FACING_RULE if _user_wants_front(user_prompt) else PRESERVE_ANGLE_RULE
     refine_centering = "Front-facing, upright, and centered." if _user_wants_front(user_prompt) else "Keep the reference's camera angle; centered."
 
-    # Metal-colour lock — refines tend to drift the metal (e.g. rose gold -> yellow gold) even
-    # when the user only asked for a stone/shape change. Lock the colour UNLESS the user
-    # explicitly asked to change the metal/colour.
-    _rp = (user_prompt or "").lower()
-    _wants_metal_change = any(w in _rp for w in [
-        "gold", "silver", "platinum", "rose", "white gold", "two tone", "two-tone", "rhodium",
-        "metal colour", "metal color", "recolor", "recolour", "color", "colour", "tone",
-    ])
-    metal_lock = "" if _wants_metal_change else (
-        " CRITICAL — KEEP THE EXACT SAME METAL COLOUR/TONE as the reference image: if it is ROSE GOLD keep it "
-        "rose gold, if YELLOW gold keep yellow, if WHITE gold / platinum / silver keep white, and if it is "
-        "TWO-TONE keep the EXACT same two-tone layout. Do NOT change, warm, cool, yellow, or shift the metal "
-        "colour in any way."
-    )
+    # Metal-colour lock — refines drift the metal (e.g. rose gold -> yellow gold) even when the
+    # user only asked for a stone/shape change. Naming the DETECTED metal explicitly holds it far
+    # better than a generic "keep same colour". Lock UNLESS the user asked to change the metal.
+    if _user_wants_metal_change(user_prompt):
+        metal_lock = ""
+    else:
+        _MNAME = {
+            "rose_gold": "ROSE GOLD (a warm pink-copper gold)",
+            "rose": "ROSE GOLD (a warm pink-copper gold)",
+            "yellow_gold": "YELLOW GOLD (warm yellow gold)",
+            "gold": "YELLOW GOLD (warm yellow gold)",
+            "white_gold": "WHITE GOLD / silver (cool silvery-white)",
+            "silver": "WHITE GOLD / silver (cool silvery-white)",
+            "platinum": "PLATINUM / white (cool silvery-white)",
+        }.get((ref_metal or "").lower())
+        if ref_metal and "two" in (ref_metal or "").lower():
+            metal_lock = (" CRITICAL METAL COLOUR — keep the EXACT same TWO-TONE metal combination as the "
+                          "reference; do NOT change any area's metal colour.")
+        elif _MNAME:
+            metal_lock = (f" CRITICAL METAL COLOUR — the piece is {_MNAME}. Render ALL metal surfaces in that "
+                          f"SAME colour as the reference; do NOT change the metal to any other colour (in "
+                          f"particular do NOT turn it yellow gold).")
+        else:
+            metal_lock = (" CRITICAL — KEEP THE EXACT SAME METAL COLOUR/TONE as the reference image (rose gold "
+                          "stays rose gold, yellow stays yellow, white stays white, two-tone stays two-tone). "
+                          "Do NOT change, warm, cool, yellow, or shift the metal colour in any way.")
 
     # Ultra-minimal — just the change + one-line preserve instruction.
     # This is the exact ChatGPT flow: take the reference, apply ONLY the requested
@@ -3506,12 +3527,22 @@ def generate_with_fallback(
         except Exception as _ce:
             logger.warning("[casing] detection failed: %s", _ce)
 
+    # Detect the reference metal so a refine can EXPLICITLY hold the colour by NAME (rose/yellow/
+    # white/two-tone) — naming it stops gpt-image-2 from drifting it (e.g. rose gold -> yellow gold).
+    ref_metal: Optional[str] = None
+    if is_refine and input_b64 and not _user_wants_metal_change(user_prompt):
+        try:
+            ref_metal = detect_metal_color(input_b64)
+            logger.info("[refine metal-lock] detected ref_metal=%s", ref_metal)
+        except Exception as _me:
+            logger.warning("[refine metal-lock] detection failed: %s", _me)
+
     # Build concise prompts — short and direct like ChatGPT.
     # correction_notes (from the auto fidelity check) are appended on a retry so the
     # model fixes the exact details that drifted from the reference.
     def compose_prompt(attempt: int, correction_notes: str = "") -> str:
         if is_refine:
-            base = _build_concise_refine_prompt(user_prompt, refinement_intent, attempt, forced_case=forced_case)
+            base = _build_concise_refine_prompt(user_prompt, refinement_intent, attempt, forced_case=forced_case, ref_metal=ref_metal)
         else:
             base = _build_concise_initial_prompt(user_prompt, parsed_data, metal_tone, bool(resolved_image_urls), len(resolved_image_urls or []))
         if correction_notes:
