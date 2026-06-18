@@ -2314,9 +2314,9 @@ def generate_with_openai_image(
     if pre_downloaded_blobs is not None:
         image_blobs = list(pre_downloaded_blobs)
     else:
-        logger.info("[PROMPT TRANSLATION] Bypassing prompt translation layer as requested")
-        dalle_prompt = prompt_text
-    truncated_prompt = dalle_prompt[:32000]
+        image_blobs = download_reference_images(image_urls)
+
+    truncated_prompt = prompt_text[:32000]
     max_attempts = 3
 
     for attempt in range(1, max_attempts + 1):
