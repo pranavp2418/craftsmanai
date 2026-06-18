@@ -252,7 +252,7 @@ class EmailService:
             raise e
     
     @staticmethod
-    async def send_customer_share(to_email: str, customer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, version: str = None, version_label: str = None):
+    async def send_customer_share(to_email: str, customer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, version: str = None, version_label: str = None, brand_logo_url: str = None):
         """Send an email to a customer with a link to review a shared design using customer_approval template."""
         from app.models.email_log import EmailStatus
         
@@ -260,7 +260,7 @@ class EmailService:
             to_email=to_email,
             template_name="customer_approval",
             subject=f"{designer_name} shared a design with you - Craftmen",
-            variables={"customer_name": customer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "version": version, "version_label": version_label}
+            variables={"customer_name": customer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "version": version, "version_label": version_label, "brand_logo_url": brand_logo_url}
         )
         try:
             logger.info(f"SENDING CUSTOMER SHARE EMAIL: To={to_email}, URL={preview_url}")
@@ -275,7 +275,8 @@ class EmailService:
                 "design_number": design_code or "",
                 "jewelry_type": jewelry_type or "Custom Jewelry",
                 "version_label": version_label or "Version 1",
-                "approval_url": preview_url
+                "approval_url": preview_url,
+                "brand_logo_url": brand_logo_url or ""
             }
             
             html_content = await render_template("customer_approval", context)
@@ -311,7 +312,7 @@ class EmailService:
             raise e
 
     @staticmethod
-    async def send_manufacturer_share(to_email: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, metal: str = None):
+    async def send_manufacturer_share(to_email: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, metal: str = None, brand_logo_url: str = None):
         """Send an email to a manufacturer with a link to review a shared design for quote using manufacturer_design_share template."""
         from app.models.email_log import EmailStatus
         
@@ -319,7 +320,7 @@ class EmailService:
             to_email=to_email,
             template_name="manufacturer_design_share",
             subject=f"Quote Request from {designer_name} - Craftmen",
-            variables={"manufacturer_name": manufacturer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "metal": metal}
+            variables={"manufacturer_name": manufacturer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "metal": metal, "brand_logo_url": brand_logo_url}
         )
         try:
             logger.info(f"SENDING MANUFACTURER SHARE EMAIL: To={to_email}, URL={preview_url}")
@@ -333,7 +334,8 @@ class EmailService:
                 "design_number": design_code or "",
                 "jewelry_type": jewelry_type or "Custom Jewelry",
                 "metal": metal or "Not specified",
-                "details_sheet_url": preview_url
+                "details_sheet_url": preview_url,
+                "brand_logo_url": brand_logo_url or ""
             }
             
             html_content = await render_template("manufacturer_design_share", context)
@@ -468,6 +470,136 @@ Message:
                 log_id=log_id,
                 status=EmailStatus.FAILED,
                 error_message=str(e),
+            )
+            raise e
+
+    @staticmethod
+    async def send_customer_action_email(
+        to_email: str,
+        retailer_name: str,
+        customer_name: str,
+        action: str,
+        design_name: str,
+        variant_name: str,
+        design_code: str = None,
+        jewelry_type: str = None,
+        version: str = None,
+        version_label: str = None,
+        render_image_url: str = None,
+        brand_logo_url: str = None,
+        comment: str = None,
+    ):
+        """
+        Send an email to the retailer when a customer takes action on a shared design
+        (approve, reject, or request refinement).
+        Uses the customer_action_notification template.
+        
+        Args:
+            to_email: Retailer's email address
+            retailer_name: Retailer's brand/display name
+            customer_name: Customer who took the action
+            action: 'approved', 'rejected', or 'refinement_requested'
+            design_name: Name of the design
+            variant_name: Name of the variant
+            design_code: Design code/number
+            jewelry_type: Type of jewelry
+            version: Version string
+            version_label: Human-readable version label
+            render_image_url: URL of the design render
+            brand_logo_url: URL of the brand logo
+            comment: Optional comment from the customer
+        """
+        from app.models.email_log import EmailStatus
+        
+        action_display = {
+            "approved": "Approved",
+            "rejected": "Rejected",
+            "refinement_requested": "Requested Changes",
+        }.get(action, action)
+        
+        subject = f"Customer {action_display}: {design_name or 'Design'} - Craftmen"
+        
+        log_id = EmailService._create_email_log(
+            to_email=to_email,
+            template_name="customer_action_notification",
+            subject=subject,
+            variables={
+                "retailer_name": retailer_name,
+                "customer_name": customer_name,
+                "action": action,
+                "design_name": design_name,
+                "variant_name": variant_name,
+                "design_code": design_code,
+                "jewelry_type": jewelry_type,
+                "version": version,
+                "version_label": version_label,
+                "render_image_url": render_image_url,
+                "brand_logo_url": brand_logo_url,
+                "comment": comment,
+            }
+        )
+        try:
+            logger.info(f"SENDING CUSTOMER ACTION EMAIL: To={to_email}, Action={action}, Customer={customer_name}")
+            
+            # Build context for the template
+            context = {
+                "action": action,
+                "customer_name": customer_name,
+                "design_name": design_name or "N/A",
+                "variant_name": variant_name or "N/A",
+                "render_image_url": render_image_url or "",
+                "version": version or "v1.0",
+                "design_number": design_code or "",
+                "jewelry_type": jewelry_type or "Custom Jewelry",
+                "version_label": version_label or "Version 1",
+                "brand_logo_url": brand_logo_url or "",
+                "comment": comment or "",
+                "dashboard_url": "#",
+            }
+            
+            html_content = await render_template("customer_action_notification", context)
+            
+            action_past_tense = {
+                "approved": "approved",
+                "rejected": "rejected",
+                "refinement_requested": "requested changes to",
+            }.get(action, "taken action on")
+            
+            text_body = (
+                f"Hi {retailer_name},\n\n"
+                f"Your customer {customer_name} has {action_past_tense} the design.\n\n"
+                f"Design: {design_name or 'N/A'} ({variant_name or 'N/A'})\n"
+                f"Design Code: {design_code or 'N/A'}\n"
+                f"Jewelry Type: {jewelry_type or 'Custom Jewelry'}\n"
+                f"Version: {version or 'v1.0'}\n"
+                + (f"\nCustomer's note: {comment}\n" if comment else "")
+                + "\nCheck the design in your Craftmen dashboard for more details.\n\n"
+                "Best regards,\nThe Craftmen Team"
+            )
+            
+            result = await EmailService._send_via_zeptomail(
+                to_email=to_email,
+                subject=subject,
+                html_content=html_content,
+                text_body=text_body
+            )
+            
+            if result["success"]:
+                logger.info(f"Successfully sent customer action email to {to_email}")
+                EmailService._update_email_log_status(
+                    log_id=log_id,
+                    status=EmailStatus.SENT,
+                    smtp_response=result["message"]
+                )
+            else:
+                raise Exception(result["message"])
+                
+        except Exception as e:
+            logger.error(f"Failed to send customer action email to {to_email}: {str(e)}")
+            EmailService._update_email_log_status(
+                log_id=log_id,
+                status=EmailStatus.FAILED,
+                error_message=str(e)
             )
             raise e
 

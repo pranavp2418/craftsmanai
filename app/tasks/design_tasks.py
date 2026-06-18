@@ -18,6 +18,7 @@ from app.services.openai_service import openai_service
 from app.services.storage_service import _validate_image_bytes, upload_image_to_supabase
 from app.tasks.base import create_task
 from app.core.sse_manager import sse_manager
+from app.services.webpush_service import WebPushService
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,99 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                 event="design.generating",
             )
 
+            # Inspect the reference image(s) for: (a) the in-image brief / font, and
+            # (b) jewelry-vs-not classification per image, which drives the metal and whether
+            # this is a memorial photo pendant (person photo + a jewelry reference) or a
+            # non-jewelry logo (-> pure gold).
+            input_metal = "yellow_gold"
+            # Internal, generation-ONLY instructions (font / gold / memorial). These are
+            # appended to the prompt sent to the model but NOT to the user-facing prompt that
+            # gets saved + shown in the UI ("Design Prompt").
+            _internal = ""
+            try:
+                from app.services.openai_service import (
+                    extract_image_instructions, classify_reference_image,
+                    NON_JEWELRY_GOLD_INSTRUCTION, MEMORIAL_PHOTO_PENDANT_INSTRUCTION,
+                    extract_metal_from_prompt, build_non_jewelry_metal_instruction,
+                )
+                _refs = reference_image_source if isinstance(reference_image_source, list) else [reference_image_source]
+                _refs = [u for u in _refs if u][:4]
+
+                # Download + classify EACH reference (jewelry vs logo/graphic/person photo).
+                _first_b64 = None
+                _classified = []
+                for _u in _refs:
+                    try:
+                        _raw = requests.get(_u, timeout=20).content
+                        _b = base64.b64encode(_raw).decode("utf-8")
+                        if _first_b64 is None:
+                            _first_b64 = _b
+                        _classified.append(classify_reference_image(_b))
+                    except Exception as _ce:
+                        logger.warning("Reference classify/fetch failed (%s): %s", str(_u)[:60], _ce)
+                        _classified.append({"is_jewelry": True, "metal": "gold"})
+
+                # (a) Read the written brief + any requested font only if the text box is empty.
+                if not (prompt or "").strip() and _first_b64:
+                    _brief, _font_style = extract_image_instructions(_first_b64)
+                    if _brief:
+                        prompt = _brief
+                        logger.info("Extracted in-image brief for design_id=%s: %s", design_id, _brief[:250])
+                        try:
+                            design.user_prompt = _brief
+                            db.commit()
+                        except Exception:
+                            db.rollback()
+                    if _font_style:
+                        _internal += (
+                            f"\n\nFONT — CHANGE IT: render ALL the lettering in this EXACT font style: {_font_style}. "
+                            "This is a NEW font the customer requires — do NOT keep the reference's font; the "
+                            "lettering STYLE is the one thing that must change. Keep the design, colours, enamel, "
+                            "layers and everything else exactly the same."
+                        )
+                        logger.info("Applied requested font style for design_id=%s: %s", design_id, _font_style[:160])
+
+                # (b) Metal + jewelry/non-jewelry handling across ALL references.
+                # First, check if the user prompt explicitly specifies a metal:
+                prompt_metal = extract_metal_from_prompt(prompt)
+                if prompt_metal:
+                    input_metal = prompt_metal
+                    logger.info("User prompt explicitly specified metal='%s' for design_id=%s", input_metal, design_id)
+                    # If it's a single non-jewelry graphic but user requested a metal, append the non-jewelry metal instruction
+                    # using the user's requested metal instead of default gold.
+                    _nonjewelry = [c for c in _classified if not c.get("is_jewelry", True)]
+                    if not _nonjewelry:
+                        if len(_refs) == 1:
+                            _internal += build_non_jewelry_metal_instruction(input_metal)
+                    elif len(_refs) == 1:
+                        _internal += build_non_jewelry_metal_instruction(input_metal)
+                else:
+                    _jewelry = [c for c in _classified if c.get("is_jewelry", True)]
+                    _nonjewelry = [c for c in _classified if not c.get("is_jewelry", True)]
+                    if _jewelry:
+                        # At least one real JEWELRY reference → match its metal, keep its stones.
+                        _m = _jewelry[0].get("metal")
+                        if _m in ("gold", "silver", "rose_gold", "two_tone"):
+                            input_metal = _m
+                        if _nonjewelry and len(_refs) > 1:
+                            # PERSON photo + JEWELRY reference → memorial photo pendant: copy the
+                            # reference pendant's design and embed the person's portrait inside it.
+                            _internal += MEMORIAL_PHOTO_PENDANT_INSTRUCTION
+                            logger.info("Memorial photo pendant (embed photo into jewelry design) for design_id=%s", design_id)
+                        logger.info("Reference has jewelry (metal='%s') for design_id=%s", input_metal, design_id)
+                    elif len(_refs) == 1:
+                        # Single NON-jewelry image (logo/graphic) → default to gold (10KT Yellow Gold) and append instruction
+                        input_metal = "gold"
+                        _internal += NON_JEWELRY_GOLD_INSTRUCTION
+                        logger.info("Single non-jewelry input with no metal specified → pure gold pendant for design_id=%s", design_id)
+                    # else: multiple non-jewelry images → leave defaults (rare, ambiguous).
+            except Exception as _pre_err:
+                logger.warning("Pre-generation image read failed for design_id=%s: %s", design_id, _pre_err)
+
+            # Generation prompt = the user-facing prompt + internal generation-only instructions.
+            # The user-facing `prompt` itself is saved/displayed; `gen_prompt` goes to the model.
+            gen_prompt = (prompt or "") + _internal
+
             # Use the newly migrated Gemini high-fidelity pipeline (Primary + Fallback + QA Checks)
             generated_item = openai_service.generate_base_image(
                 image_source=reference_image_source,
@@ -177,6 +271,20 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             sse_manager.publish_close(channel)
         except Exception:
             logger.warning("Failed to publish SSE failure event for design_id=%s", design_id)
+
+        # Send WebPush notification if user has push_notifications enabled
+        try:
+            _design = db.query(Design).filter(Design.id == design_id).first()
+            if _design:
+                WebPushService.send_design_failed_push(
+                    db=db,
+                    user_id=_design.user_id,
+                    design_id=design_id,
+                    design_code=getattr(_design, 'design_code', None),
+                    error_message=str(exc),
+                )
+        except Exception as _push_err:
+            logger.warning("Failed to send push notification for design_id=%s: %s", design_id, _push_err)
 
         raise self.retry(
             exc=exc,
@@ -335,7 +443,21 @@ def refine_design_variant_image(
             )
             sse_manager.publish_close(channel)
         except Exception:
-            logger.warning("Failed to publish SSE failure event for channel=%s", channel)
+            logger.warning("Failed to publish SSE failure event for design_id=%s", design_id)
+
+        # Send WebPush notification if user has push_notifications enabled
+        try:
+            _design = db.query(Design).filter(Design.id == design_id).first()
+            if _design:
+                WebPushService.send_design_failed_push(
+                    db=db,
+                    user_id=_design.user_id,
+                    design_id=design_id,
+                    design_code=getattr(_design, 'design_code', None),
+                    error_message=str(exc),
+                )
+        except Exception as _push_err:
+            logger.warning("Failed to send push notification for design_id=%s: %s", design_id, _push_err)
 
         raise self.retry(
             exc=exc,

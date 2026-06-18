@@ -200,6 +200,12 @@ def share_variant_with_manufacturer(
                 jewelry_type = design.jewellery_type or "Custom Jewelry"
                 metal = shared_metal or "Not specified"
                 
+                # Determine brand logo based on subscription plan
+                # Pro plan users get their brand logo; Starter plan users get the default CraftsmanAI logo
+                brand_logo_url = None
+                if current_user.subscription_plan and current_user.subscription_plan.lower() == "pro":
+                    brand_logo_url = brand_setting.logo_url if brand_setting else None
+                
                 send_manufacturer_share_email.delay(
                     to_email=primary_email,
                     manufacturer_name=manufacturer.name,
@@ -209,7 +215,8 @@ def share_variant_with_manufacturer(
                     render_image_url=render_image_url,
                     design_code=design.design_code,
                     jewelry_type=jewelry_type,
-                    metal=metal
+                    metal=metal,
+                    brand_logo_url=brand_logo_url
                 )
                 
             if hasattr(manufacturer, 'phone_number') and manufacturer.phone_number:
@@ -232,7 +239,8 @@ def share_variant_with_manufacturer(
                     design_code=design.design_code,
                     retailer_phone=retailer_phone or "",
                     retailer_email=retailer_email or "",
-                    retailer_address=retailer_address
+                    retailer_address=retailer_address,
+                    render_image_url=variant.base_design_image_url or ""
                 )
 
         shares_response.append({

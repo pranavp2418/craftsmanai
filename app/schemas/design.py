@@ -68,7 +68,7 @@ class DesignResponse(BaseModel):
     created_by_user_id: Optional[int] = None
     design_code: str
     sequence_number: int
-    name: str
+    name: Optional[str] = None
     jewellery_type: Optional[str]
     user_prompt: Optional[str]
     input_image_url: Optional[str]

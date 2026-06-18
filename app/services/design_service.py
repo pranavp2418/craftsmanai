@@ -65,7 +65,7 @@ class DesignService:
         self,
         *,
         user: User,
-        name: str,
+        name: Optional[str] = None,
         jewellery_type: Optional[str] = None,
         user_prompt: Optional[str] = None,
         input_image_url: Optional[str] = None,

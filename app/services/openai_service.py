@@ -186,7 +186,7 @@ STYLE: Clean CAD-styled jewelry approval render. Isolated piece on a pure, solid
 """
 
 STONE_RULES = """
-STONES: Use realistic small-to-mid stones unless the user asks for bold/large. On paved/iced surfaces use staggered/honeycomb arrangements that follow the surface curvature, taper cleanly at edges, and respect any explicit row counts (resize stones to fit). Keep prong/setting style uniform within a region.
+STONES: Use realistic small-to-mid stones unless the user asks for bold/large. On paved/iced surfaces use staggered/honeycomb arrangements that follow the surface curvature, taper cleanly at edges, and respect any explicit row counts (resize stones to fit). Keep prong/setting style uniform within a region. The stones size and shape has to be even and equal to each other until and unless user clearly asks for otherwise.
 """
 
 ANTI_HALLUCINATION = """
@@ -300,6 +300,28 @@ def ensure_default_gold(prompt: str) -> str:
         return prompt
     return f"10KT Yellow Gold. {prompt}"
 
+def extract_metal_from_prompt(prompt: Optional[str]) -> Optional[str]:
+    if not prompt:
+        return None
+    lower = prompt.lower()
+    # Check for two-tone/mixed metal
+    if any(x in lower for x in ["two tone", "two-tone", "mixed metal", "mixed-metal", "multi-tone", "multi-tone"]):
+        return "two_tone"
+    # Check for white gold, silver, platinum
+    if any(x in lower for x in ["white gold", "white-gold", "silver", "platinum"]):
+        return "silver"
+    # Check for rose gold
+    if any(x in lower for x in ["rose gold", "rose-gold", "pink gold", "pink-gold"]):
+        return "rose_gold"
+    # Check for yellow gold
+    if any(x in lower for x in ["yellow gold", "yellow-gold", "10k", "14k", "18k", "10kt", "14kt", "18kt"]):
+        return "gold"
+    # Check for plain gold
+    if "gold" in lower:
+        return "gold"
+    return None
+
+
 # Common DESIGN-ELEMENT words (animals / motifs / objects). When a "change X to Y" or
 # "replace X with Y" instruction involves one of these, it is a DESIGN swap (e.g. swap a
 # bull motif for a lion) — NOT a request to render the WORD "lion" as diamond text. These
@@ -376,6 +398,13 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
         return []
     replacements = []
 
+    _STRUCTURAL_JEWELRY_WORDS = {
+        "row", "rows", "diamond", "diamonds", "stone", "stones", "gem", "gems", "enamel", 
+        "bale", "bail", "chain", "prong", "prongs", "metal", "gold", "silver", "platinum",
+        "pendant", "necklace", "ring", "bracelet", "jewelry", "carat", "ct", "shape", "shapes",
+        "colour", "color", "background", "size", "inch", "mm", "width", "height", "thickness"
+    }
+
     def clean_phrase(p: str) -> str:
         p_clean = p.strip()
         lower = p_clean.lower()
@@ -391,6 +420,17 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
         # the new value is also an animal/motif word (e.g. the name "RAM").
         if old_txt.strip().lower() in _GENERIC_TEXT_OLD:
             return True
+
+        old_lower = old_txt.lower()
+        new_lower = new_txt.lower()
+        
+        # If the text change contains any structural or jewelry material keywords, 
+        # it is a physical/design edit, NOT a spelling/text change.
+        for word in _STRUCTURAL_JEWELRY_WORDS:
+            pattern = rf"\b{word}\b"
+            if re.search(pattern, old_lower) or re.search(pattern, new_lower):
+                return False
+
         # Otherwise a DESIGN-element swap (bull -> lion, heart -> star) is NOT a text
         # replacement — route it to the general edit path so the motif changes and the rest
         # of the piece is preserved.
@@ -406,6 +446,8 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
     matches1 = re.findall(r"\b([\w \t']{1,40})\s+instead\s+of\s+([\w \t']{1,40})\b", prompt, re.IGNORECASE)
     for m in matches1:
         new_txt, old_txt = _trim_secondary_instruction(clean_phrase(m[0])), clean_phrase(m[1])
+        if any(x in old_txt.lower() or x in new_txt.lower() for x in ["metal", "color", "tone", "gold", "silver", "font", "fonts"]):
+            continue
         if new_txt and _is_text_change(old_txt, new_txt):
             replacements.append((old_txt, new_txt))
 
@@ -413,7 +455,7 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
     matches2 = re.findall(r"\bchange\s+([\w \t']{1,40})\s+to\s+([\w \t']{1,60})", prompt, re.IGNORECASE)
     for m in matches2:
         old_txt, new_txt = clean_phrase(m[0]), _trim_secondary_instruction(clean_phrase(m[1]))
-        if any(x in old_txt.lower() or x in new_txt.lower() for x in ["metal", "color", "tone", "gold", "silver"]):
+        if any(x in old_txt.lower() or x in new_txt.lower() for x in ["metal", "color", "tone", "gold", "silver", "font", "fonts"]):
             continue
         if new_txt and _is_text_change(old_txt, new_txt):
             replacements.append((old_txt, new_txt))
@@ -422,6 +464,8 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
     matches3 = re.findall(r"\breplace\s+([\w \t']{1,40})\s+with\s+([\w \t']{1,60})", prompt, re.IGNORECASE)
     for m in matches3:
         old_txt, new_txt = clean_phrase(m[0]), _trim_secondary_instruction(clean_phrase(m[1]))
+        if any(x in old_txt.lower() or x in new_txt.lower() for x in ["metal", "color", "tone", "gold", "silver", "font", "fonts"]):
+            continue
         if new_txt and _is_text_change(old_txt, new_txt):
             replacements.append((old_txt, new_txt))
 
@@ -1279,11 +1323,26 @@ NON_JEWELRY_GOLD_INSTRUCTION = (
     "artwork — do NOT copy them; make the whole piece solid yellow gold."
 )
 
+def build_non_jewelry_metal_instruction(metal: str) -> str:
+    metal_name = "YELLOW GOLD"
+    if metal == "silver":
+        metal_name = "WHITE GOLD / SILVER"
+    elif metal == "rose_gold":
+        metal_name = "ROSE GOLD"
+    return (
+        f"\n\nIMPORTANT — THE REFERENCE IS NOT JEWELRY: it is a logo / graphic / artwork / photo. Convert it faithfully "
+        f"into a real, solid, wearable PENDANT of the SAME shapes, letters and composition. Render it in PURE SOLID "
+        f"{metal_name} — smooth polished plain metal with NO diamonds, NO stones and NO pavé, UNLESS the written "
+        f"brief/prompt explicitly asks for diamonds/stones. The colours in the reference are just artwork — "
+        f"do NOT copy them; make the whole piece solid {metal_name.lower()}."
+    )
+
+
 
 def classify_reference_image(image_b64: str) -> Dict[str, Any]:
     """Classify an uploaded reference image via fast vision.
 
-    Returns {'is_jewelry': bool, 'metal': 'gold'|'silver'|'rose_gold'}.
+    Returns {'is_jewelry': bool, 'metal': 'gold'|'silver'|'rose_gold'|'two_tone'}.
       - is_jewelry=False for a logo, graphic, drawing, cartoon, icon, text/word-mark, or a
         photo of an object/animal/person (i.e. NOT a real finished piece of jewelry).
       - metal is the jewelry's dominant metal when is_jewelry=True (else 'gold').
@@ -1298,8 +1357,9 @@ def classify_reference_image(image_b64: str) -> Dict[str, Any]:
         "earring, grill, etc.). false if it is a LOGO, graphic, drawing, cartoon, icon, sticker, text/word-mark, "
         "or a photo of an object, animal or person — i.e. NOT actual jewelry. "
         "2) metal: if it IS jewelry, the dominant METAL colour as 'gold' (warm yellow gold), 'silver' (white gold, "
-        "platinum or silver), or 'rose_gold' (pink/copper); if it is NOT jewelry, just use 'gold'. "
-        "Respond ONLY as JSON: {\"is_jewelry\": true|false, \"metal\": \"gold\"|\"silver\"|\"rose_gold\"}."
+        "platinum or silver), 'rose_gold' (pink/copper), or 'two_tone' if the piece clearly combines multiple different metal colors "
+        "(such as a white gold chain with rose gold charms or yellow gold borders with white gold components); if it is NOT jewelry, just use 'gold'. "
+        "Respond ONLY as JSON: {\"is_jewelry\": true|false, \"metal\": \"gold\"|\"silver\"|\"rose_gold\"|\"two_tone\"}."
     )
     messages = [
         {"role": "system", "content": "You classify jewelry reference images. Respond ONLY with the requested JSON."},
@@ -1335,7 +1395,9 @@ def classify_reference_image(image_b64: str) -> Dict[str, Any]:
             metal = "silver"
         elif metal in ("rose gold", "rose"):
             metal = "rose_gold"
-        if metal not in ("gold", "silver", "rose_gold"):
+        elif metal in ("two tone", "two-tone"):
+            metal = "two_tone"
+        if metal not in ("gold", "silver", "rose_gold", "two_tone"):
             metal = "gold"
         return {"is_jewelry": is_jewelry, "metal": metal}
     except Exception as e:
@@ -1485,15 +1547,32 @@ def build_prompt_from_dummy(params: Dict[str, Any]) -> str:
         if not user_specifies_type or not user_specifies_metal:
             item_type = pd.get("item_type")
 
-    # If the user didn't mention a metal:
-    # 1. If the reference image is jewelry, default to the reference image metal fully.
+    # If the user specifies a metal in the note/prompt, override the metal tone.
+    # Otherwise, apply the default rules:
+    # 1. If reference image is jewelry, default to the reference image metal fully.
     # 2. If it's not jewelry (or no reference image), default to gold.
-    source_kind = pd.get("source_kind", "unknown")
-    is_jewelry_ref = source_kind in ("jewelry_reference", "cad_render", "existing_jewelry")
-    if not user_specifies_metal:
+    extracted_metal = extract_metal_from_prompt(note)
+    if extracted_metal:
+        if extracted_metal == "gold":
+            metal_tone = "yellow gold"
+        elif extracted_metal == "silver":
+            metal_tone = "white gold"
+        elif extracted_metal == "rose_gold":
+            metal_tone = "rose gold"
+        elif extracted_metal == "two_tone":
+            metal_tone = "two-tone (mixed white gold and yellow/rose gold accents from the reference image)"
+        else:
+            metal_tone = extracted_metal.replace("_", " ")
+    elif not user_specifies_metal:
+        source_kind = pd.get("source_kind", "unknown")
+        is_jewelry_ref = source_kind in ("jewelry_reference", "cad_render", "existing_jewelry")
         if image_count and is_jewelry_ref:
             if pd.get("metal_tone"):
-                metal_tone = pd.get("metal_tone")
+                _m = pd.get("metal_tone")
+                if _m == "two_tone":
+                    metal_tone = "two-tone (mixed white gold and yellow/rose gold accents from the reference image)"
+                else:
+                    metal_tone = _m
             else:
                 metal_tone = "same as the attached reference image"
         else:
@@ -2699,6 +2778,46 @@ def _font_style_clause(user_prompt: str) -> str:
     return ""
 
 
+def _font_change_directive(user_prompt: str) -> Optional[str]:
+    """Safe instruction for a FONT change during a refine: keep the existing name, apply the
+    font as a STYLE (with a visual description for known fonts), and NEVER write the font name
+    as text. Returns None when it isn't a font change."""
+    if not _user_requests_font_change(user_prompt):
+        return None
+    p = (user_prompt or "").lower()
+    name = desc = None
+    for n, d in _FONT_DESCRIPTIONS.items():          # dict is ordered longest-key-first
+        if n in p:
+            name, desc = n, d
+            break
+    style = f'the "{name}" font ({desc})' if desc else "the exact font / character style the user named"
+    not_text = (f' The phrase "{name}" is the NAME OF A FONT, not text — do NOT write the words '
+                f'"{name}" (or any new words) anywhere on the piece.') if name else ""
+
+    # Extract any secondary design instruction (e.g. "complete the borders with diamonds")
+    # by scrubbing the font change request out of the prompt.
+    non_font_part = user_prompt
+    if name:
+        non_font_part = re.sub(rf"(?i)\b(?:change|replace|switch|update|set)\s+(?:the\s+)?(?:font|fonts|lettering|lettering style|style)\s+(?:to|with)\s+{re.escape(name)}(?:\s+fonts?)?\b", "", non_font_part)
+        non_font_part = re.sub(rf"(?i)\b{re.escape(name)}\b", "", non_font_part)
+    
+    # Clean up leftover conjunctions/punctuation
+    non_font_part = re.sub(r"(?i)^[\s,;.&]*(?:and|also|plus|then|with|just)?\s*", "", non_font_part.strip()).strip()
+    non_font_part = re.sub(r"(?i)\b(?:keep everything else same|keep same design|keep everything else identical|do not change anything else)\b", "", non_font_part)
+    non_font_part = non_font_part.strip(" ,;.&")
+
+    directive = (
+        "change ONLY the FONT / lettering STYLE. KEEP the EXACT same name / word(s) and spelling that "
+        "already appear on the piece — do not add, remove, or change any letters. Re-letter that SAME "
+        f"text in {style}.{not_text} Keep the same stones, stone cuts, borders, metal, and layout."
+    )
+    
+    if non_font_part:
+        directive += f"\n\nALSO MAKE THIS ADDITIONAL CHANGE to the design: \"{non_font_part}\"."
+        
+    return directive
+
+
 # Border / edge fidelity — a design's defining detail is often the polished metal border
 # that frames the piece (and each letter/element) plus the channel-walls around stone rows.
 # The model tends to blur or drop these, so we call them out explicitly. Type-agnostic.
@@ -2724,7 +2843,10 @@ def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[s
     the design instead of faithfully reproducing it.
     """
     item_type = (parsed_data or {}).get("item_type") or infer_item_type_from_prompt(user_prompt) or "jewelry"
-    metal = metal_tone.replace("_", " ") if metal_tone else "yellow gold"
+    if metal_tone == "two_tone":
+        metal = "two-tone (mixed white gold and yellow/rose gold accents from the reference image)"
+    else:
+        metal = metal_tone.replace("_", " ") if metal_tone else "yellow gold"
 
     # Check if user specifies a metal in their prompt
     lower = (user_prompt or "").lower()
@@ -2917,6 +3039,10 @@ def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[D
     change_desc = user_prompt
     if refinement_intent and refinement_intent.get("normalized_prompt"):
         change_desc = refinement_intent["normalized_prompt"]
+    elif not replacements:
+        _font_dir = _font_change_directive(user_prompt)
+        if _font_dir:
+            change_desc = _font_dir
 
     # Two-step / two-layer stacked structure when the user asks for it.
     layered_block = f"\n\n{LAYERED_RULE}" if _user_wants_layered(user_prompt) else ""

@@ -163,6 +163,12 @@ def resend_manufacturer_share_email(
         metal = share.shared_metal or "Not specified"
         designer_name = owner.full_name or owner.username
         design_code = design.design_code
+        
+        # Determine brand logo based on subscription plan
+        # Pro plan users get their brand logo; Starter plan users get the default CraftsmanAI logo
+        brand_logo_url = None
+        if owner.subscription_plan and owner.subscription_plan.lower() == "pro":
+            brand_logo_url = brand_setting.logo_url if brand_setting else None
 
         # ── 7. Log the resend in the email_logs table for traceability
         resend_log = EmailLog(
@@ -202,6 +208,7 @@ def resend_manufacturer_share_email(
                         design_code=design_code,
                         jewelry_type=jewelry_type,
                         metal=metal,
+                        brand_logo_url=brand_logo_url,
                     )
                 )
             finally:
@@ -240,6 +247,7 @@ def resend_manufacturer_share_email(
                         "retailer_phone": retailer_phone or "",
                         "retailer_email": retailer_email or "",
                         "retailer_address": "",
+                        "render_url": render_image_url or ""
                     }
                     rendered_html = render_template_sync(
                         "manufacturer_sms_design_share", context
@@ -266,7 +274,7 @@ def resend_manufacturer_share_email(
                             f"quote! View it here: {review_url}"
                         )
                     sms_service.send_sms(
-                        to_number=manufacturer.phone_number, message=message
+                        to_number=manufacturer.phone_number, message=message, media_url=render_image_url
                     )
             except Exception as sms_exc:
                 # SMS failures should not fail the email resend

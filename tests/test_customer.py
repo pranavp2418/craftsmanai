@@ -190,7 +190,7 @@ class TestCustomerEndpoints:
                 session.add(variant)
                 session.commit()
 
-                with patch("app.api.v2.endpoints.design.share_design.send_design_review_email") as mock_send_review_email:
+                with patch("app.tasks.email_tasks.send_customer_share_email") as mock_send_email:
                     response = client.post(
                         f"/api/v2/design/variants/{variant.id}/share",
                         json={
@@ -204,16 +204,13 @@ class TestCustomerEndpoints:
                 payload = response.json()
                 assert payload["public_token"]
 
-                mock_send_review_email.delay.assert_called_once()
-                queued_args = mock_send_review_email.delay.call_args.args
-                assert queued_args[0] == "review.customer@example.com"
-                assert queued_args[1] == "Review Customer"
-                assert queued_args[2] == (
-                    f"http://localhost:3000/customer/review/{customer.public_token}"
-                    f"?token={payload['public_token']}"
+                mock_send_email.delay.assert_called_once()
+                call_kwargs = mock_send_email.delay.call_args.kwargs
+                assert call_kwargs["to_email"] == "review.customer@example.com"
+                assert call_kwargs["customer_name"] == "Review Customer"
+                assert call_kwargs["preview_url"] == (
+                    f"http://localhost:3000/customer/review/{payload['public_token']}"
                 )
-                assert queued_args[3] == design.name
-                assert queued_args[4] == variant.variant_name
             finally:
                 session.close()
         finally:
@@ -227,6 +224,96 @@ class TestCustomerEndpoints:
                     cleanup_session.commit()
             finally:
                 cleanup_session.close()
+            cleanup_user_by_email(email)
+
+    def test_share_design_variant_resend_to_same_customer_does_not_update_status(self, client: TestClient):
+        """Test that sharing a variant with the same customer again only resends email without updating design status"""
+        email = "resend_same_customer@example.com"
+        try:
+            user = create_committed_user(email=email, username="resendsame", full_name="Retailer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            session = TestingSessionLocal()
+            try:
+                customer = Customer(
+                    created_by_user_id=user.id,
+                    full_name="Resend Customer",
+                    emails='[{"label": "Work", "email": "resend.customer@example.com"}]',
+                    phone_number="+14155550124",
+                    tag="VIP Customer",
+                    location="Los Angeles",
+                    public_token="resend_customer_public_token",
+                    is_active=True,
+                )
+                session.add(customer)
+                session.flush()
+
+                design = Design(
+                    user_id=user.id,
+                    created_by_user_id=user.id,
+                    design_code="RESEND-001",
+                    sequence_number=1,
+                    name="Resend Ring",
+                    jewellery_type="Ring",
+                    user_prompt="Create a resend ring",
+                    status="GENERATED",
+                )
+                session.add(design)
+                session.flush()
+
+                variant = DesignVariant(
+                    design_id=design.id,
+                    variant_name="Variant Resend A",
+                    version_number=1,
+                    is_selected=True,
+                )
+                session.add(variant)
+                session.commit()
+
+                # First share - should update design status to SHARED
+                with patch("app.tasks.email_tasks.send_customer_share_email") as mock_email:
+                    response1 = client.post(
+                        f"/api/v2/design/variants/{variant.id}/share",
+                        json={
+                            "customer_id": customer.id,
+                            "comment": "First share",
+                        },
+                        headers=headers,
+                    )
+                assert response1.status_code == 201
+                share1 = response1.json()
+                assert share1["public_token"]
+
+                # Verify design status was updated to SHARED
+                session.refresh(design)
+                assert design.status == "SHARED"
+
+                # Second share to same customer - should NOT update design status again
+                with patch("app.tasks.email_tasks.send_customer_share_email") as mock_email2:
+                    response2 = client.post(
+                        f"/api/v2/design/variants/{variant.id}/share",
+                        json={
+                            "customer_id": customer.id,
+                            "comment": "Resend to same customer",
+                        },
+                        headers=headers,
+                    )
+                assert response2.status_code == 201
+                share2 = response2.json()
+
+                # Should return the same share (same public_token)
+                assert share2["public_token"] == share1["public_token"]
+
+                # Verify design status is still SHARED (not updated again)
+                session.refresh(design)
+                assert design.status == "SHARED"
+
+                # Verify email was sent again (resend)
+                assert mock_email2.delay.call_count == 1
+            finally:
+                session.close()
+        finally:
             cleanup_user_by_email(email)
 
     def test_create_customer_rejects_duplicate_email(self, client: TestClient):

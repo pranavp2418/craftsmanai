@@ -15,7 +15,7 @@ class PublicDesignAccessRequest(BaseModel):
 class PublicDesignAccessResponse(BaseModel):
     design_id: int
     design_code: str
-    name: str
+    name: Optional[str] = None
     jewellery_type: Optional[str] = None
     user_prompt: Optional[str] = None
     input_image_url: Optional[str] = None

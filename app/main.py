@@ -2,8 +2,12 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 
+import os
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 import socketio
 
@@ -88,6 +92,11 @@ fastapi_app.add_middleware(
 
 # Register REST API routes
 fastapi_app.include_router(api_router, prefix="/api/v2")
+
+# Serve static files (for push notification test page)
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.exists():
+    fastapi_app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 # ------------------------------------------------------------------
 # Wrap everything: Socket.IO as outer app, FastAPI as fallback

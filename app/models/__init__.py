@@ -41,6 +41,7 @@ from .retailer_team import (
 from .team_settings import AccountMember, MemberInvitation, TeamRole
 from .settings import SystemSettings, SystemSettingsLog
 from .contact import ContactSubmission
+from .push_subscription import PushSubscription
 
 __all__ = [
     "SystemSettings",
@@ -88,4 +89,5 @@ __all__ = [
     "SubscriptionActivityLog",
     "ProductionSheet",
     "ContactSubmission",
+    "PushSubscription",
 ]

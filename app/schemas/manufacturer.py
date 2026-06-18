@@ -11,14 +11,19 @@ from app.schemas.validations import normalize_phone_number
 
 
 class ManufacturerSpeciality(str, Enum):
+    FULL_SERVICE_MANUFACTURER = "Full-Service Manufacturer"
+    CAD_3D_DESIGN_STUDIO = "CAD-3D Design Studio"
+    CASTING_HOUSE = "Casting House"
+    DIAMOND_DEALER = "Diamond Dealer"
+    DIAMOND_SETTER = "Diamond Setter"
     GOLD_SPECIALIST = "Gold Specialist"
-    GEMSTONE_SPECIALIST = "Gemstone Specialist"
     PLATINUM_SPECIALIST = "Platinum Specialist"
-    DIAMOND_SETTING = "Diamond Setting"
-    COLORED_GEMSTONES = "Colored Gemstones"
-    PEARL_JEWELRY = "Pearl Jewelry"
-    SILVER_SPECIALIST = "Silver Specialist"
-    ENAMEL_WORK = "Enamel Work"
+    HIP_HOP_SPECIALIST = "Hip-Hop Specialist"
+    FINE_AND_BRIDAL_SPECIALIST = "Fine & Bridal Specialist"
+    HIGH_QUALITY_MANUFACTURER = "High-Quality Manufacturer"
+    FIRM_BUDGET_MANUFACTURER = "Firm-Budget Manufacturer"
+    REPAIRS_SPECIALIST = "Repairs Specialist"
+    POLISHING_AND_FINISH = "Polishing and Finish"
 
 
 class ManufacturerCreateRequest(BaseModel):
@@ -169,7 +174,7 @@ class ManufacturerListResponse(BaseModel):
 class SentRequest(BaseModel):
     id: int
     design_code: str
-    name: str
+    name: Optional[str] = None
     jewellery_type: Optional[str] = None
     status: str
     created_at: datetime

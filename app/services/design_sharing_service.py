@@ -1,9 +1,14 @@
+import logging
 import secrets
+import time
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.design import DesignShare, DesignShareStatus
+logger = logging.getLogger(__name__)
+
+from app.models.design import Design, DesignShare, DesignShareStatus, DesignStatus
+from app.repositories.design import DesignRepository
 from app.repositories.design_share import DesignShareRepository
 from app.repositories.activity_log import DesignActivityLogRepository
 from app.repositories.design_variant import DesignVariantRepository
@@ -124,6 +129,17 @@ class DesignSharingService:
             metadata={"share_id": share.id, "variant_id": share.design_variant_id, "status": status.value},
         )
 
+        # Sync the parent Design status with the customer's decision
+        if variant and variant.design:
+            design = variant.design
+            design_repo = DesignRepository(self.db)
+            if status == DesignShareStatus.ACCEPTED:
+                design_repo.update_design(design, status=DesignStatus.APPROVED)
+            elif status == DesignShareStatus.REJECTED:
+                design_repo.update_design(design, status=DesignStatus.DESIGN_REJECTED)
+            elif status == DesignShareStatus.NEEDS_REFINEMENT:
+                design_repo.update_design(design, status=DesignStatus.REFINEMENT_REQUESTED)
+
         # Trigger notification to the retailer (the user who created this customer or design)
         recipient_user_id = None
         if share.customer:
@@ -179,5 +195,92 @@ class DesignSharingService:
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).error(f"Failed to send customer access notification: {str(e)}")
+
+        # --- Web Push notification (if design_approval_alerts is enabled) ---
+        if recipient_user_id:
+            try:
+                from app.models.notification_setting import NotificationSetting
+                from app.services.webpush_service import WebPushService
+
+                notif_setting = self.db.query(NotificationSetting).filter(
+                    NotificationSetting.user_id == recipient_user_id
+                ).first()
+
+                if notif_setting and notif_setting.design_approval_alerts:
+                    push_title = notification_title
+                    push_body = notification_message
+
+                    if push_title and push_body:
+                        WebPushService.send_push(
+                            db=self.db,
+                            user_id=recipient_user_id,
+                            title=push_title,
+                            body=push_body,
+                            url=f"/designs/{design_id}" if design_id else None,
+                            data={
+                                "share_id": share.id,
+                                "design_id": design_id,
+                                "variant_id": share.design_variant_id,
+                                "status": status.value,
+                                "type": "design_approval_alert",
+                            },
+                            tag=f"design-share-{share.id}-{status.value}-{int(time.time())}",
+                        )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to send push notification: {str(e)}")
+
+        # --- Email notification (if email_notifications is enabled) ---
+        if recipient_user_id:
+            try:
+                from app.models.notification_setting import NotificationSetting
+                from app.tasks.email_tasks import send_customer_action_email_task
+                from app.repositories.brand_setting import BrandSettingRepository
+                from app.models.user import User
+
+                notif_setting = self.db.query(NotificationSetting).filter(
+                    NotificationSetting.user_id == recipient_user_id
+                ).first()
+
+                if notif_setting and notif_setting.email_notifications:
+                    # Get recipient user's email
+                    recipient_user = self.db.query(User).filter(User.id == recipient_user_id).first()
+                    if recipient_user and recipient_user.email:
+                        # Get brand settings for retailer name
+                        brand_repo = BrandSettingRepository(self.db)
+                        brand_setting = brand_repo.get_by_user_id(recipient_user_id)
+                        retailer_name = brand_setting.brand_name if brand_setting else (recipient_user.full_name or recipient_user.username)
+                        
+                        # Map status to action string
+                        action_map = {
+                            DesignShareStatus.ACCEPTED: "approved",
+                            DesignShareStatus.REJECTED: "rejected",
+                            DesignShareStatus.NEEDS_REFINEMENT: "refinement_requested",
+                        }
+                        action = action_map.get(status)
+                        
+                        if action and notification_title:
+                            send_customer_action_email_task.delay(
+                                to_email=recipient_user.email,
+                                retailer_name=retailer_name,
+                                customer_name=customer_name,
+                                action=action,
+                                design_name=design_name,
+                                variant_name=variant_name,
+                                design_code=variant.design.design_code if (variant and variant.design) else None,
+                                jewelry_type=variant.design.jewellery_type if (variant and variant.design) else None,
+                                version=f"v{variant.version_number}" if variant and variant.version_number else None,
+                                version_label=f"Version {variant.version_number}" if variant and variant.version_number else None,
+                                render_image_url=variant.base_design_image_url if variant else None,
+                                brand_logo_url=brand_setting.logo_url if brand_setting else None,
+                                comment=comment,
+                            )
+                            logger.info(
+                                "Customer action email queued: action=%s user_id=%s email=%s",
+                                action, recipient_user_id, recipient_user.email,
+                            )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to send customer action email: {str(e)}")
 
         return updated

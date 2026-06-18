@@ -2,7 +2,9 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.models.design import Design, DesignStatus
 from app.models.order import ManufacturerQuote, ManufacturerQuoteStatus
+from app.repositories.design import DesignRepository
 from app.repositories.manufacturer_quote import ManufacturerQuoteRepository
 from app.repositories.activity_log import OrderActivityLogRepository
 from app.repositories.order import OrderRepository
@@ -99,6 +101,11 @@ class ManufacturerQuoteService:
             order = quote.order or self.order_repo.get_by_id(quote.order_id)
             if order:
                 self.order_repo.assign_manufacturer(order, quote.manufacturer_id)
+
+                # Update the parent Design status to MANUFACTURER_APPROVED
+                if order.design:
+                    design_repo = DesignRepository(self.db)
+                    design_repo.update_design(order.design, status=DesignStatus.MANUFACTURER_APPROVED)
 
         # Keep design_variant_manufacturer_shares status synchronized.
         order = quote.order or self.order_repo.get_by_id(quote.order_id)

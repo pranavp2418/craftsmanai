@@ -29,6 +29,7 @@ class BrandSettingResponse(BaseModel):
     phone_number: Optional[str] = None
     primary_color: str
     powered_by_craftsman_ai: bool = True
+    is_deactivated: bool = False
     updated_at: datetime
 
     class Config:
@@ -48,6 +49,7 @@ class BrandSettingResponse(BaseModel):
                 "phone_number": data.phone_number,
                 "primary_color": data.primary_color,
                 "powered_by_craftsman_ai": plan in ("Starter", "Pro"),
+                "is_deactivated": getattr(data, "is_deactivated", False),
                 "updated_at": data.updated_at
             }
         return data

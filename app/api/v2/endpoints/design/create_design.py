@@ -31,7 +31,7 @@ router = APIRouter()
 
 @router.post("/", response_model=DesignResponse, status_code=status.HTTP_201_CREATED)
 async def create_design(
-    name: str = Form(None),
+    name: str = Form(default=None),
     jewellery_type: str = Form(...),
     user_prompt: str = Form(None),
     files: List[UploadFile] = File(default=None),

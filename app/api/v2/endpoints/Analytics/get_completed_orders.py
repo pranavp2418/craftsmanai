@@ -47,7 +47,7 @@ async def get_completed_orders(
 	window_start = month_starts[0]
 	window_end = now + timedelta(days=1)
 
-	from app.models.design import Design
+	from app.models.design import Design, DesignStatus
 
 	# Filter based on whether user is team member or team owner/regular user
 	owner_id = admin.team_owner_id if admin.is_team_member and admin.team_owner_id else admin.id
@@ -59,7 +59,7 @@ async def get_completed_orders(
 		.where(
 			Order.created_at >= window_start,
 			Order.created_at < window_end,
-			Order.status == OrderStatus.COMPLETED,
+			Design.status == DesignStatus.COMPLETED,
 			design_filter,
 		)
 	)

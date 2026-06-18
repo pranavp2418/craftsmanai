@@ -53,11 +53,14 @@ def _build_metal_variant_prompt(metal: str, jewellery_type: str = "pendant") -> 
             "surface — the whole frame, every letter/number body, prong, bezel, border, edge, channel wall, the "
             "bail and the back — to a BRIGHT, COOL, SILVERY-WHITE metal (white gold / rhodium / platinum / silver). "
             "There must be absolutely NO yellow, NO gold, NO brass, NO warm or champagne tint left ANYWHERE on the "
-            "metal — not even a faint one. 100% of the metal must read as clean white/silver. The diamonds stay "
-            "clear and white as before. Do NOT leave any part gold-coloured."
+            "metal surfaces — not even a faint one. 100% of the metal must read as clean white/silver. "
+            "Note: This ONLY applies to the metal; do NOT remove the red, pink, or green colors from any colored gemstones. "
+            "All colored gemstones must retain their original bright, vibrant colors exactly. Do NOT leave any part of the metal gold-coloured."
         )
 
     return f"""Recolor the metal of this {jewellery_type} to {metal_desc}. Change the metal color completely to this new color, including all metal surfaces, prongs, and settings.{white_clause}
+
+CRITICAL STONE PROTECTION: Do NOT change the color, shape, position, or type of any gemstones. All gemstones (including clear diamonds and colored stones like green, red, pink, blue, etc.) must preserve their original color, vibrancy, saturation, and transparency exactly as seen in the reference image. Do NOT recolor, desaturate, or turn colored gems into white/silver or metal.
 
 Keep EVERYTHING else exactly the same — same overall design, same components, same shape and silhouette, same proportions, same stones (count, cut, arrangement and setting), same engraving/text, same borders and edges, same structure, same viewpoint. Only the metal COLOR changes; do not redesign or alter any other part.
 

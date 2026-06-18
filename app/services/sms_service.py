@@ -23,7 +23,7 @@ class SMSService:
     def is_configured(self) -> bool:
         return bool(self.client and self.from_number)
 
-    def send_sms(self, to_number: str, message: str) -> bool:
+    def send_sms(self, to_number: str, message: str, media_url: Optional[str] = None) -> bool:
         """
         Send an SMS message using Twilio.
         
@@ -37,11 +37,23 @@ class SMSService:
 
         try:
             logger.info(f"Sending SMS to {to_number}...")
-            message_obj = self.client.messages.create(
-                body=message,
-                from_=self.from_number,
-                to=to_number
-            )
+            # message_obj = self.client.messages.create(
+            #     body=message,
+            #     from_=self.from_number,
+            #     to=to_number
+            # )
+
+            payload = {
+                "body": message,
+                "from_": self.from_number,
+                "to": to_number,
+            }
+
+            if media_url:
+                payload["media_url"] = [media_url]
+
+            message_obj = self.client.messages.create(**payload)
+            
             logger.info(f"SMS sent successfully. SID: {message_obj.sid}")
             return True
         except TwilioRestException as e:

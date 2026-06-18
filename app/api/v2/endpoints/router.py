@@ -68,4 +68,6 @@ api_router.include_router(retailer_subscription_router, prefix="/retailer/subscr
 from .Invoice import router as invoice_router
 api_router.include_router(invoice_router, prefix="/invoices", tags=["invoices"])
 
+from .push_subscription import router as push_subscription_router
+api_router.include_router(push_subscription_router)
 

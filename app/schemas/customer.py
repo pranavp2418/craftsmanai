@@ -55,10 +55,15 @@ def _coerce_customer_emails(data: any) -> any:
 
 
 class CustomerTag(str, Enum):
-    VIP = "VIP Customer"
-    ELITE = "Elite Customer"
-    PREMIUM = "Premium Customer"
-    REGULAR = "Regular Customer"
+    NEW_CUSTOMER = "New Customer"
+    VIP_CLIENT = "VIP Client"
+    PRICE_SENSITIVE_CUSTOMER = "Price-Sensitive Customer"
+    HIGH_TICKET_BUYER = "High-Ticket Buyer"
+    REPEAT_CUSTOMER = "Repeat Customer"
+    URGENT_BUYER = "Urgent Buyer"
+    CUSTOM_DESIGN_CLIENT = "Custom Design Client"
+    BRIDAL_CLIENT = "Bridal Client"
+    REPAIR_SERVICES_CUSTOMER = "Repair Services Customer"
 
 
 class EmailAddressSchema(BaseModel):

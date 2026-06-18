@@ -28,7 +28,12 @@ class DesignStatus(str, Enum):
     GENERATED = "GENERATED"
     UNDER_REVIEW = "UNDER_REVIEW"
     SHARED = "SHARED"
+    QUOTES_REQUESTED = "QUOTES_REQUESTED"
+    QUOTE_RECEIVED = "QUOTE_RECEIVED"
+    REFINEMENT_REQUESTED = "REFINEMENT_REQUESTED"
     APPROVED = "APPROVED"
+    DESIGN_REJECTED = "DESIGN_REJECTED"
+    MANUFACTURER_APPROVED = "MANUFACTURER_APPROVED"
     REJECTED = "REJECTED"
     IN_PRODUCTION = "IN_PRODUCTION"
     COMPLETED = "COMPLETED"
@@ -46,7 +51,7 @@ class Design(Base):
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True, doc="The actual creator (team member) if different from user_id (team owner)")
     design_code = Column(String(32), unique=True, nullable=False, index=True)
     sequence_number = Column(Integer, nullable=False)
-    name = Column(String(255), nullable=False)
+    name = Column(String(255), nullable=True)
     jewellery_type = Column(String(100), nullable=True)
     user_prompt = Column(Text, nullable=True)
     input_image_url = Column(String(500), nullable=True)
