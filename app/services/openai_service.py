@@ -2961,6 +2961,35 @@ def _is_metal_only_change(user_prompt: str) -> bool:
     return not any(w in p for w in other_change)
 
 
+def _type_form_clause(item_type: str, user_prompt: str) -> str:
+    """Short, type-appropriate wearable-form instruction driven by the user's SELECTED
+    jewelry type (Pendant -> add a bail, Ring -> band, Earring -> pair, etc.) so the chosen
+    type actually shapes the output. Kept short to avoid re-bloating the prompt."""
+    t = (item_type or "").lower()
+    if "earring" in t or "ear ring" in t:
+        return " Render as a matching PAIR of EARRINGS with posts/backs so they can be worn."
+    if "ring" in t:
+        return " Present the design as the face/top of a wearable RING on a smooth polished band/shank."
+    if "bracelet" in t or "bangle" in t or "cuff" in t:
+        return " Render as a wearable BRACELET form."
+    if "brooch" in t:
+        return " Render as a BROOCH with a hidden pin/clasp on the back."
+    if "grill" in t:
+        return " Render as wearable GRILLZ for the teeth."
+    if "watch" in t:
+        return " Render as a WATCH."
+    if "body" in t:
+        return " Render as wearable BODY JEWELRY suited to the design."
+    # Pendant / Necklace / Charm / default (this product is predominantly pendants).
+    if _is_pendant_like(item_type, user_prompt):
+        return (
+            " Make it a wearable PENDANT: if it does NOT already have a bail/hook at the top, add a simple smooth "
+            "plain-metal loop bail at the top-centre that a chain can pass through; if a chain or cord is shown, "
+            "remove the chain and show only the pendant (keep the bail)."
+        )
+    return ""
+
+
 def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[str, Any]], metal_tone: str, has_images: bool, image_count: int = 0) -> str:
     """Build a short, focused prompt for initial generation — ultra-minimal like ChatGPT.
 
@@ -3072,13 +3101,10 @@ def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[s
             change_line = f" Apply ONLY this change and keep everything else identical to the image: {user_prompt}"
         else:
             change_line = ""
-        chain_line = (
-            " If a chain or cord is threaded through the bail, remove it and show only the pendant (keep the bail)."
-            if _is_pendant_like(item_type, user_prompt) else ""
-        )
+        type_line = _type_form_clause(item_type, user_prompt)
         return f"""Recreate this EXACT jewelry piece as a clean CAD-style 3D render on a pure solid white background (#FFFFFF), {angle_phrase}.
 
-Keep the design IDENTICAL to the image — the same shape, proportions, structure, borders and lettering, and EVERY stone. If the piece is set with diamonds / pavé, keep EVERY diamond exactly where it is, with the same coverage and density — do NOT turn any diamond or pavé surface into plain or beaded metal; diamonds must stay diamonds.{change_line}{chain_line}{variations_block}{merge_block}{gold_note}
+Keep the design IDENTICAL to the image — the same shape, proportions, structure, borders and lettering, and EVERY stone. If the piece is set with diamonds / pavé, keep EVERY diamond exactly where it is, with the same coverage and density — do NOT turn any diamond or pavé surface into plain or beaded metal; diamonds must stay diamonds.{type_line}{change_line}{variations_block}{merge_block}{gold_note}
 
 Clean even studio lighting, sharp focus, realistic metal and stones, no background scene. One image only."""
     else:
