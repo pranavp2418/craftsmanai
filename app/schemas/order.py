@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.order import OrderStatus, ManufacturerQuoteStatus
 
@@ -51,6 +51,34 @@ class ManufacturerQuoteSubmitRequest(BaseModel):
     cost_price: Optional[float] = Field(default=None, ge=0)
     delivery_time_days: Optional[int] = Field(default=None, ge=0)
     notes: Optional[str] = None
+
+    @field_validator('cost_price', mode='before')
+    @classmethod
+    def validate_cost_price_digits_only(cls, v):
+        """Validate that cost_price contains only digits and optionally a decimal point."""
+        if v is None:
+            return v
+        v_str = str(v).strip()
+        if not v_str:
+            return v
+        # Allow digits and single decimal point for cost_price
+        if not all(c.isdigit() or c == '.' for c in v_str):
+            raise ValueError('cost_price must contain only digits, no letters allowed')
+        return v
+
+    @field_validator('delivery_time_days', mode='before')
+    @classmethod
+    def validate_delivery_time_digits_only(cls, v):
+        """Validate that delivery_time_days contains only digits."""
+        if v is None:
+            return v
+        v_str = str(v).strip()
+        if not v_str:
+            return v
+        # Only digits allowed for delivery_time_days (no decimal point)
+        if not all(c.isdigit() for c in v_str):
+            raise ValueError('delivery_time_days must contain only digits, no letters allowed')
+        return v
 
 
 class ManufacturerQuoteStatusUpdateRequest(BaseModel):
