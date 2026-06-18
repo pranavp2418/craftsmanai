@@ -136,8 +136,14 @@ class ManufacturerQuoteService:
         if order and order.design and order.design.user_id:
             status_label = "Approved" if status == ManufacturerQuoteStatus.APPROVED else "Rejected"
             if status in (ManufacturerQuoteStatus.APPROVED, ManufacturerQuoteStatus.REJECTED):
+                from app.models.notification_setting import NotificationSetting
+                from app.services.webpush_service import WebPushService
+
+                recipient_user_id = order.design.user_id
+
+                # In-app notification (always sent regardless of settings)
                 self.notification_service.send_notification(
-                    user_id=order.design.user_id,
+                    user_id=recipient_user_id,
                     type="quote_status",
                     title=f"Quote {status_label}",
                     message=message or f"Quote #{quote.id} was {status_label.lower()}.",
@@ -150,4 +156,26 @@ class ManufacturerQuoteService:
                         "status": status.value,
                     },
                 )
+
+                # Web Push notification (only if manufacturer_updates AND push_notifications are enabled)
+                notif_setting = self.db.query(NotificationSetting).filter(
+                    NotificationSetting.user_id == recipient_user_id
+                ).first()
+                if notif_setting and notif_setting.manufacturer_updates and notif_setting.push_notifications:
+                    manufacturer_name = quote.manufacturer.name if quote.manufacturer else "A manufacturer"
+                    WebPushService.send_push(
+                        db=self.db,
+                        user_id=recipient_user_id,
+                        title=f"Quote {status_label}",
+                        body=message or f"Quote from {manufacturer_name} was {status_label.lower()}.",
+                        url=f"/designs/{order.design_id}" if order.design_id else None,
+                        data={
+                            "quote_id": quote.id,
+                            "order_id": quote.order_id,
+                            "manufacturer_id": quote.manufacturer_id,
+                            "status": status.value,
+                            "type": "manufacturer_quote_status",
+                        },
+                        tag=f"manufacturer-quote-status-{quote.id}",
+                    )
         return updated

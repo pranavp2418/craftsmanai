@@ -184,7 +184,10 @@ class DesignVariantManufacturerShareService:
 
         if recipient_user_id:
             try:
+                from app.models.notification_setting import NotificationSetting
                 from app.services.notification_service import NotificationService
+                from app.services.webpush_service import WebPushService
+
                 notification_service = NotificationService(self.db)
                 
                 manufacturer_name = share.manufacturer.name if share.manufacturer else "A manufacturer"
@@ -196,6 +199,7 @@ class DesignVariantManufacturerShareService:
                 if notes:
                     notification_message += f" Note: {notes}"
                 
+                # In-app notification (always sent regardless of settings)
                 notification_service.send_notification(
                     user_id=recipient_user_id,
                     type="manufacturer_quote_submitted",
@@ -211,6 +215,30 @@ class DesignVariantManufacturerShareService:
                         "delivery_time_days": delivery_time_days,
                     }
                 )
+
+                # Check notification settings for email/push gating
+                notif_setting = self.db.query(NotificationSetting).filter(
+                    NotificationSetting.user_id == recipient_user_id
+                ).first()
+
+                # Web Push notification (only if manufacturer_updates AND push_notifications are enabled)
+                if notif_setting and notif_setting.manufacturer_updates and notif_setting.push_notifications:
+                    WebPushService.send_push(
+                        db=self.db,
+                        user_id=recipient_user_id,
+                        title=notification_title,
+                        body=notification_message,
+                        url=f"/designs/{variant.design_id}" if variant and variant.design_id else None,
+                        data={
+                            "share_id": share.id,
+                            "design_id": variant.design_id if variant else None,
+                            "variant_id": share.design_variant_id,
+                            "cost_price": cost_price,
+                            "delivery_time_days": delivery_time_days,
+                            "type": "manufacturer_quote_submitted",
+                        },
+                        tag=f"manufacturer-quote-{share.id}",
+                    )
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).error(f"Failed to send manufacturer quote notification: {str(e)}")
