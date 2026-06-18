@@ -2552,14 +2552,18 @@ STONE_DENSITY_RULE = (
 # loose, uneven, unclear stone settings. This POSITIVE rule (front-loaded in the live
 # builders) forces crisp, individually-defined, manufacturable settings + clean stone clarity.
 SETTING_QUALITY = (
-    "SETTING & STONE QUALITY (critical — must be flawless): every stone must sit in a CRISP, CLEAN, individually "
-    "well-defined setting with sharp, solid, evenly-shaped metal (prongs / bezels / channel walls / pavé beads), "
-    "each setting clearly visible, fully formed and identical in style across the same region. The setting metal "
-    "must be SOLID and smooth with clean sharp edges — absolutely NO melted, melty, droopy, blobby, fused, wavy, "
-    "gummy, loose, uneven, smeared or half-formed settings, and NO stones sinking into or floating above the "
-    "metal. Every stone is seated flush and secure. Stones must have clean, realistic CAD clarity with a bright, "
-    "even luminance/sparkle (not dull, not glassy, not over-blown). The whole piece must read as a precise, "
-    "manufacturable CAD render a jeweler could actually produce."
+    "SETTING QUALITY: every stone sits in a crisp, clean, well-defined setting with solid, smooth, sharp-edged "
+    "metal — NO melted, droopy, blobby, fused, wavy, loose, uneven or half-formed settings, and no stones sinking "
+    "into or floating above the metal. Stones read with clean, realistic CAD clarity and even sparkle."
+)
+
+# Anti de-gemming — the model's worst failure on iced pieces: it converts a diamond/pavé
+# surface into plain or beaded metal. This short, high-priority rule keeps stones as stones.
+NO_DEGEM_RULE = (
+    "KEEP EVERY STONE — DO NOT DE-GEM: if the reference is set with diamonds / gemstones / pavé, the output MUST "
+    "keep EVERY stone exactly where it is, with the same coverage and density. NEVER turn a diamond-set or pavé "
+    "surface into plain polished metal, and NEVER render rows of stones as plain metal beads, dots, granulation, "
+    "or a smooth textured border — diamonds must stay diamonds, not become metal."
 )
 
 # Default stone arrangement when the model must ADD or DEFAULT stones (i.e. NOT defined by
@@ -2929,6 +2933,34 @@ BORDER_RULE = (
 )
 
 
+_METAL_PHRASES = ["white gold", "rose gold", "yellow gold", "two-tone", "two tone", "platinum", "silver"]
+
+
+def _detected_metal_phrase(user_prompt: str) -> Optional[str]:
+    """Return the metal phrase the user named, if any."""
+    p = (user_prompt or "").lower()
+    for m in _METAL_PHRASES:
+        if m in p:
+            return m
+    return None
+
+
+def _is_metal_only_change(user_prompt: str) -> bool:
+    """True if the request is essentially JUST a metal-colour change (no other modification).
+
+    Used so 'same design but rose gold' freezes geometry AND every stone, changing only colour.
+    """
+    p = (user_prompt or "").lower()
+    if not _detected_metal_phrase(p) and not any(x in p for x in ["gold", "silver", "platinum"]):
+        return False
+    other_change = [
+        "add", "remove", "delete", "more", "less", "bigger", "smaller", "larger", "stone", "diamond",
+        "gem", "font", "bail", "chain", "shape", "engrav", "name", "text", "letter", "border", "layer",
+        "step", "backplate", "back plate", "cut", "prong", "hook",
+    ]
+    return not any(w in p for w in other_change)
+
+
 def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[str, Any]], metal_tone: str, has_images: bool, image_count: int = 0) -> str:
     """Build a short, focused prompt for initial generation — ultra-minimal like ChatGPT.
 
@@ -2982,6 +3014,33 @@ def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[s
     angle_phrase = "keeping the SAME camera angle as the reference image" if keep_ref_angle else "shown in a straight FRONT-FACING view"
     centering_phrase = "Centered" if keep_ref_angle else "Front-facing, upright, and centered"
 
+    # Text/nameplate-specific rules (connection, cavities, exact counts, stroke density, borders)
+    # only matter for lettering/number pieces — including them on rings/chains/etc just dilutes
+    # the prompt. Pendants are predominantly nameplates, so include for pendant-like pieces and
+    # whenever lettering/numbers are detected.
+    text_like = (
+        _is_pendant_like(item_type, user_prompt)
+        or bool(re.search(r"[0-9]", user_prompt or ""))
+        or any(w in lower for w in ["name", "initial", "letter", "number", "word", "text", "monogram", "spell", "says", "reads", "font"])
+    )
+    text_rules_block = (
+        f"\n\n{DOT_CONNECTION_RULE}\n\n{CAVITY_RULE}\n\n{COUNT_RULE}\n\n{BORDER_RULE}\n\n{STONE_DENSITY_RULE}" if text_like else ""
+    )
+    # Backing plate / step-up only when the user actually asks for it (otherwise preservation covers it).
+    backing_block = f"\n\n{BACKING_PLATE_RULE}" if any(w in lower for w in ["plate", "back plate", "backplate", "step", "layer", "raised", "tier"]) else ""
+    # Sketch normalization only when the input is described as a drawing.
+    sketch_block = f"\n\n{SKETCH_RULE}" if any(w in lower for w in ["sketch", "drawing", "draw", "hand drawn", "hand-drawn", "pencil", "doodle"]) else ""
+
+    # Metal-only reproduction (e.g. "same design but rose gold") — strongest stone-preserve framing.
+    metal_only_block = ""
+    if has_images and _is_metal_only_change(user_prompt):
+        _mp = _detected_metal_phrase(user_prompt) or "the requested metal"
+        metal_only_block = (
+            f"\n\nThis is a METAL-COLOUR CHANGE ONLY: reproduce the piece 100% identically — same shape, same EVERY "
+            f"stone (same count, size, placement, coverage and setting), same everything — and change ONLY the metal "
+            f"colour to {_mp}. Do NOT remove, reduce, or simplify any stones."
+        )
+
     # Multiple variations in ONE image (e.g. "show me 6 fonts for this design").
     variations_block = ""
     if _user_wants_variations(user_prompt):
@@ -3001,36 +3060,22 @@ def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[s
         )
 
     if has_images:
-        return f"""Re-render this exact jewelry design as a clean CAD-style 3D jewelry render, {angle_phrase}, on a pure solid white background (#FFFFFF) with NO background scene.
+        # Lean, prioritised prompt: lead with faithful reproduction + keep-every-stone (the two
+        # signals that matter most), then only the rules relevant to THIS piece. Over-instructing
+        # makes gpt-image-2 re-interpret the design, so non-relevant blocks are intentionally omitted.
+        return f"""Re-render this EXACT jewelry design as a clean CAD-style 3D jewelry render, {angle_phrase}, on a pure solid white background (#FFFFFF) with NO background scene.
 
 {DESIGN_PRESERVATION}
 
-{SETTING_QUALITY}
+{NO_DEGEM_RULE}
 
-{STONE_ARRANGEMENT_DEFAULT}
-
-{NO_ADDITIONS_RULE}
-
-{CAVITY_RULE}
-
-{COUNT_RULE}
-
-{BORDER_RULE}
-
-{STONE_DENSITY_RULE}
-
-{CONNECTION_RULE}
-
-{DOT_CONNECTION_RULE}
-
-{SKETCH_RULE}
-
-{BACKING_PLATE_RULE}{bail_block}{font_block}{layered_block}{variations_block}{merge_block}
+{SETTING_QUALITY}{metal_only_block}{bail_block}{font_block}{text_rules_block}{backing_block}{sketch_block}{layered_block}{variations_block}{merge_block}
 
 {angle_rule}
 
+Apply ONLY what the user asks below — change nothing else, and keep every other detail (especially every stone) exactly as in the reference.{f' User request: {user_prompt}' if user_prompt else ''}
+
 {REALISM_DESCRIPTOR} {centering_phrase}. Pure white background (#FFFFFF).{metal_line}{gold_note}
-{f'{chr(10)}{user_prompt}' if user_prompt else ''}
 One image only."""
     else:
         # Prompt-only generation (no reference image). Default to SIMPLE GOLD when the
@@ -3224,6 +3269,8 @@ def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[D
 
 {SETTING_QUALITY}
 
+{NO_DEGEM_RULE}
+
 {CONNECTION_RULE}{layered_block}
 
 {refine_angle_rule}
@@ -3234,23 +3281,15 @@ One image only."""
     else:
         return f"""Apply ONLY this change to the attached jewelry: {change_desc}
 
-Keep EVERYTHING else exactly the same as the reference — same overall design, same components, same shape and silhouette, same proportions, same stones (count, cut, arrangement and setting), same metal and structure, same borders and edges, same underlines/lines. Change ONLY what was requested above; do not redesign, restyle, or alter any other part of the piece.
+Keep EVERYTHING else exactly the same as the reference — same overall design, shape, silhouette, proportions, every existing stone, metal and structure, borders and edges. Make ONLY the requested change; do not redesign, restyle, or alter any other part. If the requested change is to ADD or restore stones / diamonds (or any element the user explicitly asks for), DO add them as described while keeping the rest identical.
+
+{NO_DEGEM_RULE}
 
 {PHOTO_PRESERVE_RULE}
 
-{NO_ADDITIONS_RULE}
-
-{CAVITY_RULE}
-
-{COUNT_RULE}
-
 {_font_clause(user_prompt, True)}
 
-{BORDER_RULE}
-
-{SETTING_QUALITY}
-
-{CONNECTION_RULE}{layered_block}
+{SETTING_QUALITY}{layered_block}
 
 {refine_angle_rule}
 
