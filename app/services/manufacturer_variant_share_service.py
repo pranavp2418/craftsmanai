@@ -157,10 +157,10 @@ class DesignVariantManufacturerShareService:
                 from app.models.design import DesignShareStatus
                 self.design_share_repo.update_status(shares[0], status=DesignShareStatus.Quoted)
 
-            # Update the parent Design status to QUOTE_RECEIVED
-            if variant and variant.design:
-                design_repo = DesignRepository(self.db)
-                design_repo.update_design(variant.design, status=DesignStatus.QUOTE_RECEIVED)
+        # Update the parent Design status to QUOTE_RECEIVED
+        if variant and variant.design:
+            design_repo = DesignRepository(self.db)
+            design_repo.update_design(variant.design, status=DesignStatus.QUOTE_RECEIVED)
 
         self.activity_repo.log(
             design_id=variant.design_id if variant else None,
@@ -174,6 +174,22 @@ class DesignVariantManufacturerShareService:
                 "delivery_time_days": delivery_time_days,
             },
         )
+
+        # Also log QUOTE_RECEIVED status change to DesignActivityLog
+        if variant and variant.design:
+            manufacturer_name = share.manufacturer.name if share.manufacturer else f"Manufacturer #{share.manufacturer_id}"
+            self.activity_repo.log(
+                design_id=variant.design_id,
+                action_type="QUOTE_RECEIVED",
+                message=f"Quote received from {manufacturer_name}: ${cost_price}, {delivery_time_days} days",
+                metadata={
+                    "variant_id": share.design_variant_id,
+                    "manufacturer_id": share.manufacturer_id,
+                    "share_id": share.id,
+                    "cost_price": cost_price,
+                    "delivery_time_days": delivery_time_days,
+                },
+            )
 
         # Trigger notification to the retailer
         recipient_user_id = None
