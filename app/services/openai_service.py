@@ -3090,11 +3090,13 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
     type actually shapes the output. Kept short to avoid re-bloating the prompt."""
     t = (item_type or "").strip().lower()
     _PENDANT = (
-        " This is a PENDANT and MUST be wearable: it MUST have a bail/hook at the very TOP for a chain to pass "
-        "through. If the reference / sketch does NOT already show a bail, you MUST ADD a simple smooth plain-metal "
-        "loop bail at the top-centre, connected to the top of the design — the bail is REQUIRED, never omit it even "
-        "if the reference has none. If a chain or cord is shown, remove the chain and show only the pendant (keep "
-        "the bail)."
+        " This is a PENDANT and MUST be wearable with a bail/hook at the very TOP for a chain. If the reference "
+        "already shows a bail, keep that exact bail. If it does NOT show a bail (or there is no reference image), "
+        "ADD the DEFAULT bail shape: a FLARED, FAN-SHAPED bail that is WIDER at the top and TAPERS downward, "
+        "narrowing into a small loop that connects to the top-centre of the pendant (the chain passes through the "
+        "bail). Match the bail's FINISH to the piece — same metal, pavé-set if the piece is iced/diamond-set, "
+        "otherwise smooth polished metal. The bail is REQUIRED — never omit it. If a chain or cord is shown, "
+        "remove the chain and show only the pendant (keep the bail)."
     )
     # Check the most specific / collision-prone types first (earring/cufflink contain 'ring').
     if "earring" in t or "ear ring" in t:
