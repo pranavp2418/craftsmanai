@@ -2372,7 +2372,7 @@ def generate_with_openai_image(
                     "prompt": truncated_prompt,
                     "n": "1",
                     "size": "1024x1024",
-                    "quality": "high",
+                    "quality": "medium",
                     "background": "opaque",
                 }
                 response = requests.post(
@@ -2395,7 +2395,7 @@ def generate_with_openai_image(
                         "prompt": truncated_prompt,
                         "n": 1,
                         "size": "1024x1024",
-                        "quality": "high",
+                        "quality": "medium",
                         "background": "opaque",
                     },
                     timeout=(15, 300),
@@ -3558,9 +3558,10 @@ def generate_with_fallback(
             )
         return base
 
-    # Attempt budget — at most ONE retry (2 attempts) to keep render time low, whenever
-    # any self-check is active; otherwise a single attempt.
-    any_check = needs_spelling_check or needs_fidelity_check or (is_refine and refinement_intent)
+    # Attempt budget — keep renders fast (<1:30 target). Only allow a 2nd full generation for a
+    # SPELLING fix on text/name changes (a wrong name is unacceptable); everything else is a single
+    # generation. The Gemini refinement-QA no longer forces a full re-render (it doubled render time).
+    any_check = needs_spelling_check
     max_qa_attempts = 2 if any_check else 1
     previous_ref_url = resolved_image_urls[0] if (is_refine and resolved_image_urls) else None
     final_b64 = None
