@@ -3450,6 +3450,50 @@ Keep EVERYTHING else exactly the same as the reference — same overall design, 
 One image only."""
 
 
+def enrich_jewelry_prompt(user_prompt: str, item_type: str = "") -> str:
+    """Expand a short TEXT-ONLY jewelry request into one vivid, accurate description for the image
+    model — the same thing ChatGPT does internally before generating. Adds real domain knowledge
+    (e.g. 'dos pesos' = Mexican 2-peso gold coin: numeral 2, 'DOS PESOS', laurel wreath, beaded rim)
+    so gpt-image-2 doesn't garble culturally/technically specific designs. Returns the original
+    prompt on any failure. Used for text-only generation only (image inputs are copied, not enriched).
+    """
+    api_key = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
+    if not api_key or not (user_prompt or "").strip():
+        return user_prompt
+    sys_p = (
+        "You are an expert jeweler writing prompts for an image generator. Expand the user's short jewelry "
+        "request into ONE vivid, concrete paragraph describing exactly how the finished piece looks. Use real "
+        "domain knowledge: if it references a known coin, emblem, symbol, script, font, religious/cultural motif, "
+        "or named style, describe what it ACTUALLY looks like (its text, numbers, wreaths, borders, textures, "
+        "shapes). Stay strictly faithful to the request — do NOT add stones, metals, or elements the user didn't "
+        "ask for. Describe only the single piece, suitable for a clean CAD-style jewelry render. Output ONLY the "
+        "description, no preamble."
+    )
+    try:
+        resp = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {"role": "system", "content": sys_p},
+                    {"role": "user", "content": f"Jewelry type: {item_type or 'jewelry'}. Request: {user_prompt}"},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 240,
+            },
+            timeout=30,
+        )
+        if resp.ok:
+            txt = (resp.json().get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+            if txt:
+                logger.info("[prompt-enrich] '%s' -> '%s'", (user_prompt or "")[:60], txt[:140])
+                return txt
+    except Exception as e:
+        logger.warning("[prompt-enrich] failed: %s", e)
+    return user_prompt
+
+
 def generate_with_fallback(
     image_source: Optional[str],
     user_prompt: str,
@@ -3482,6 +3526,13 @@ def generate_with_fallback(
 
     resolved_image_urls = resolve_image_urls(image_source, image_urls)
     is_refine = selected_mode == "refine"
+
+    # Text-only generation: enrich the terse prompt with domain knowledge (like ChatGPT does
+    # internally) so culturally/technically specific designs (e.g. "dos pesos coin", a named symbol
+    # or font) render correctly instead of being garbled. Skipped when there's a reference image
+    # (those are copied faithfully) and for refines.
+    if not has_reference_image and not is_refine and user_prompt:
+        user_prompt = enrich_jewelry_prompt(user_prompt, (parsed_data or {}).get("item_type", ""))
 
     # Refinement intelligence — use Gemini to interpret the user prompt
     refinement_intent = refinement_intent_override
