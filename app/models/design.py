@@ -49,7 +49,7 @@ class Design(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True, doc="The actual creator (team member) if different from user_id (team owner)")
-    design_code = Column(String(32), unique=True, nullable=False, index=True)
+    design_code = Column(String(32), nullable=False, index=True)
     sequence_number = Column(Integer, nullable=False)
     name = Column(String(255), nullable=True)
     jewellery_type = Column(String(100), nullable=True)

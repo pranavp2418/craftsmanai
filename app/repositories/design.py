@@ -20,27 +20,22 @@ class DesignRepository:
     def exists_design_code(self, design_code: str) -> bool:
         """True if any design (incl. soft-deleted) already uses this code.
 
-        The ix_designs_design_code unique constraint spans ALL rows, so this must
-        NOT filter on is_deleted — otherwise we'd regenerate a code that still
-        physically occupies the unique index and hit a UniqueViolation on insert.
+        Used as a safety check to prevent race conditions when generating
+        design codes. Does NOT filter on is_deleted since we need to detect
+        any duplicate code regardless of deletion status.
         """
         return self.db.query(Design.id).filter(Design.design_code == design_code).first() is not None
 
-    def get_next_sequence_for_prefix(self, prefix: str) -> int:
-        """Next free running number for a design-code *prefix* (e.g. 'SAN').
+    def exists_design_code_for_user(self, design_code: str, user_id: int) -> bool:
+        """True if this user already has a design (incl. soft-deleted) with this code.
 
-        design_code is GLOBALLY unique but the prefix is derived from the user's
-        name and is NOT unique across users, so two users sharing a prefix would
-        otherwise both generate 'SAN-001'. Compute the next number across ALL
-        designs (incl. soft-deleted) that share this prefix so codes never collide.
+        Only checks within the same user's designs, so different users can
+        have the same design code (e.g. both can have HWH-001).
         """
-        rows = self.db.query(Design.design_code).filter(Design.design_code.like(f"{prefix}-%")).all()
-        max_n = 0
-        for (code,) in rows:
-            tail = (code or "").rsplit("-", 1)[-1]
-            if tail.isdigit():
-                max_n = max(max_n, int(tail))
-        return max_n + 1
+        return self.db.query(Design.id).filter(
+            Design.design_code == design_code,
+            Design.user_id == user_id,
+        ).first() is not None
 
     def create_design(
         self,
