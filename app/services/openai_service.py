@@ -399,10 +399,19 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
     replacements = []
 
     _STRUCTURAL_JEWELRY_WORDS = {
-        "row", "rows", "diamond", "diamonds", "stone", "stones", "gem", "gems", "enamel", 
+        "row", "rows", "diamond", "diamonds", "stone", "stones", "gem", "gems", "enamel",
         "bale", "bail", "chain", "prong", "prongs", "metal", "gold", "silver", "platinum",
         "pendant", "necklace", "ring", "bracelet", "jewelry", "carat", "ct", "shape", "shapes",
-        "colour", "color", "background", "size", "inch", "mm", "width", "height", "thickness"
+        "colour", "color", "background", "size", "inch", "mm", "width", "height", "thickness",
+        # connectors / structure / motifs — a "change the LINK / CONNECTION / CLASP / CLOVER / motif
+        # to X" request is a STRUCTURAL edit, not text to spell out (e.g. "change the linking
+        # connection to infinity links" must NOT engrave those words on the piece).
+        "link", "links", "linking", "connection", "connections", "connector", "connectors",
+        "clasp", "clasps", "clover", "clovers", "motif", "motifs", "setting", "settings",
+        "infinity", "loop", "loops", "bar", "bars", "charm", "charms", "halo", "halos",
+        "border", "borders", "frame", "frames", "bezel", "channel", "channels", "layer", "layers",
+        "step", "band", "bands", "shank", "hook", "hooks", "flower", "flowers", "heart", "hearts",
+        "cross", "star", "stars", "backplate", "plate", "outline", "edge", "edges",
     }
 
     def clean_phrase(p: str) -> str:
