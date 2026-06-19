@@ -3372,26 +3372,32 @@ def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[D
     if _user_wants_metal_change(user_prompt):
         metal_lock = ""
     else:
-        _MNAME = {
-            "rose_gold": "ROSE GOLD (a warm pink-copper gold)",
-            "rose": "ROSE GOLD (a warm pink-copper gold)",
-            "yellow_gold": "YELLOW GOLD (warm yellow gold)",
-            "gold": "YELLOW GOLD (warm yellow gold)",
-            "white_gold": "WHITE GOLD / silver (cool silvery-white)",
-            "silver": "WHITE GOLD / silver (cool silvery-white)",
-            "platinum": "PLATINUM / white (cool silvery-white)",
-        }.get((ref_metal or "").lower())
-        if ref_metal and "two" in (ref_metal or "").lower():
+        rm = (ref_metal or "").lower()
+        if rm in ("silver", "white_gold", "white gold", "platinum"):
+            # WHITE metals drift to gold VERY strongly — needs a forceful clause (mirrors the
+            # gold->white metal-variant conversion that works). A moderate "keep white" is ignored.
+            metal_lock = (
+                " CRITICAL METAL COLOUR — the piece is WHITE GOLD (bright, cool, silvery-white, like rhodium / "
+                "platinum). Render EVERY metal surface — frame, every letter, bail, borders, prongs and back — in "
+                "BRIGHT COOL SILVERY-WHITE metal. There must be absolutely NO yellow, NO gold, NO brass, NO warm or "
+                "champagne tint ANYWHERE on the metal. Do NOT turn it gold — 100% of the metal must read as clean "
+                "white/silver, exactly like the reference."
+            )
+        elif rm in ("rose_gold", "rose"):
+            metal_lock = (
+                " CRITICAL METAL COLOUR — the piece is ROSE GOLD (a warm pink-copper gold). Render ALL metal "
+                "surfaces in that SAME rose gold; do NOT change it to yellow gold or any other colour."
+            )
+        elif rm and "two" in rm:
             metal_lock = (" CRITICAL METAL COLOUR — keep the EXACT same TWO-TONE metal combination as the "
                           "reference; do NOT change any area's metal colour.")
-        elif _MNAME:
-            metal_lock = (f" CRITICAL METAL COLOUR — the piece is {_MNAME}. Render ALL metal surfaces in that "
-                          f"SAME colour as the reference; do NOT change the metal to any other colour (in "
-                          f"particular do NOT turn it yellow gold).")
+        elif rm in ("yellow_gold", "gold"):
+            metal_lock = (" CRITICAL METAL COLOUR — the piece is YELLOW GOLD; keep it yellow gold and do NOT "
+                          "change the metal colour.")
         else:
-            metal_lock = (" CRITICAL — KEEP THE EXACT SAME METAL COLOUR/TONE as the reference image (rose gold "
-                          "stays rose gold, yellow stays yellow, white stays white, two-tone stays two-tone). "
-                          "Do NOT change, warm, cool, yellow, or shift the metal colour in any way.")
+            metal_lock = (" CRITICAL — KEEP THE EXACT SAME METAL COLOUR/TONE as the reference image (rose stays "
+                          "rose, yellow stays yellow, white stays white, two-tone stays two-tone). Do NOT change, "
+                          "warm, cool, or yellow the metal colour.")
 
     # Ultra-minimal — just the change + one-line preserve instruction.
     # This is the exact ChatGPT flow: take the reference, apply ONLY the requested

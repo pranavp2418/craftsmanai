@@ -405,8 +405,14 @@ def refine_design_variant_image(
                 "user-requested change."
             ).strip()
 
-        # Generate refined image via OpenAI using the resolved reference images
-        generated_item = openai_service.generate_base_image(reference_image_source, combined_prompt, jewellery_type=jewellery_type)
+        # Generate refined image via OpenAI using the resolved reference images.
+        # Force mode="refine": this is ALWAYS a refine of an existing variant, so do NOT rely on
+        # keyword auto-detection (prompts like "make the bail hinged" have no edit keyword and were
+        # being misclassified as a fresh generation — which forced default yellow gold and dropped
+        # the reference's real metal colour / design fidelity).
+        generated_item = openai_service.generate_base_image(
+            reference_image_source, combined_prompt, jewellery_type=jewellery_type, mode="refine"
+        )
         image_bytes, content_type = _extract_generated_image_data(generated_item)
         _validate_image_bytes(image_bytes, content_type)
 
