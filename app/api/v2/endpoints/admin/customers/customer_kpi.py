@@ -9,10 +9,10 @@ from app.models.order import Order
 
 router = APIRouter()
 
-@router.get("/customer/kpi", response_model=Dict[str, int])
+@router.get("/kpi", response_model=Dict[str, int])
 async def get_customer_kpi(
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.get_current_admin),
 ):
     """
     Get basic KPI stats for customers and orders.

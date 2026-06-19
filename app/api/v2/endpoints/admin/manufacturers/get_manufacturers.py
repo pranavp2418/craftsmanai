@@ -9,7 +9,6 @@ from app.models.user import User
 from app.models.manufacturer import Manufacturer
 from app.models.design import DesignVariantManufacturerShare
 from app.models.order import ManufacturerQuote
-from app.core.dependencies import get_db, get_current_superuser
 
 router = APIRouter()
 
@@ -24,8 +23,7 @@ async def get_admin_manufacturers(
     search: Optional[str] = Query(None, description="Search by name, email, phone number, or location"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    # admin: User = Depends(deps.get_current_admin)
-    admin: User = Depends(get_current_superuser)
+    admin: User = Depends(deps.get_current_admin)
 ):
     skip = (page - 1) * limit
 
@@ -135,6 +133,8 @@ async def get_admin_manufacturers(
         "manufacturers": manu_list,
         "pagination": {
             "page": page,
+            "limit": limit,
+            "total_items": total_items,
             "total_pages": (total_items + limit - 1) // limit
         },
         "available_letters": available_letters

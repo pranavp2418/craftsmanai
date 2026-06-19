@@ -2,14 +2,25 @@ from math import ceil
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, cast, String, desc, or_
+from sqlalchemy import func, cast, String, desc, or_, and_, union
 from sqlalchemy.orm import selectinload
 from app.api import deps
 from app.models.user import User
-from app.models.design import Design, DesignActivityLog
-from typing import Optional, Dict, Any
+from app.models.customer import Customer
+from app.models.manufacturer import Manufacturer
+from app.models.design import Design, DesignActivityLog, DesignShare, DesignVariant, DesignVariantManufacturerShare
+from typing import Optional, Dict, Any, List
 
 router = APIRouter()
+
+# Action types originating from customers/manufacturers
+CUSTOMER_ACTION_TYPES = {
+    "CUSTOMER_APPROVED", "CUSTOMER_REJECTED", "NEEDS_REFINEMENT", "DESIGN_SHARED"
+}
+MANUFACTURER_ACTION_TYPES = {
+    "MANUFACTURER_QUOTE_SUBMITTED", "VARIANT_SHARED_WITH_MANUFACTURER"
+}
+
 
 @router.get("/", response_model=Dict[str, Any])
 async def get_activity_logs(
@@ -23,34 +34,51 @@ async def get_activity_logs(
 ):
     skip = (page - 1) * limit
 
+    # --------------------------------------------------
+    # Build filters for DesignActivityLog query
+    # --------------------------------------------------
+    filters = []
+    
+    if actor_type and actor_type.lower() not in ["all", "all actor types"]:
+        actor_type_upper = actor_type.upper()
+        if actor_type_upper == "ADMIN":
+            filters.append(User.is_superuser == True)
+        elif actor_type_upper == "RETAILER":
+            filters.append(User.is_superuser == False)
+        elif actor_type_upper == "CUSTOMER":
+            # Customer actions: action_type in customer set, user_id = None
+            filters.append(
+                DesignActivityLog.action_type.in_(CUSTOMER_ACTION_TYPES)
+            )
+        elif actor_type_upper == "MANUFACTURER":
+            # Manufacturer actions: action_type in manufacturer set
+            filters.append(
+                DesignActivityLog.action_type.in_(MANUFACTURER_ACTION_TYPES)
+            )
+        elif actor_type_upper == "SYSTEM":
+            filters.append(DesignActivityLog.user_id == None)
+            # Exclude customer/manufacturer actions from "system"
+            filters.append(
+                DesignActivityLog.action_type.notin_(
+                    CUSTOMER_ACTION_TYPES | MANUFACTURER_ACTION_TYPES
+                )
+            )
+
+    if actor_id:
+        try:
+            actor_int_id = int(actor_id)
+            filters.append(DesignActivityLog.user_id == actor_int_id)
+        except ValueError:
+            filters.append(cast(DesignActivityLog.id, String).ilike(f"{actor_id}"))
+
     # Base query for data
     query = select(DesignActivityLog).outerjoin(
         Design, DesignActivityLog.design_id == Design.id
     ).outerjoin(
         User, DesignActivityLog.user_id == User.id
-    )
+    ).where(*filters)
 
-    # Dynamic Filters
-    if actor_type and actor_type.lower() not in ["all", "all actor types"]:
-        if actor_type.upper() == "ADMIN":
-            query = query.where(User.is_superuser == True)
-        elif actor_type.upper() == "RETAILER":
-            query = query.where(User.is_superuser == False)
-        elif actor_type.upper() == "SYSTEM":
-            query = query.where(DesignActivityLog.user_id == None)
-        
-    if actor_id:
-        try:
-            actor_int_id = int(actor_id)
-            query = query.where(
-                or_(
-                    DesignActivityLog.user_id == actor_int_id,
-                    cast(DesignActivityLog.id, String).ilike(f"{actor_id}")
-                )
-            )
-        except ValueError:
-            query = query.where(cast(DesignActivityLog.id, String).ilike(f"{actor_id}"))
-        
+    # Search filter
     if search:
         search_term = f"%{search}%"
         query = query.where(
@@ -64,33 +92,15 @@ async def get_activity_logs(
     # Sorting logic - Default to recently added
     query = query.order_by(desc(DesignActivityLog.created_at))
 
-    # Optimized count query
+    # --------------------------------------------------
+    # Count query
+    # --------------------------------------------------
     count_query = select(func.count(DesignActivityLog.id)).outerjoin(
         Design, DesignActivityLog.design_id == Design.id
     ).outerjoin(
         User, DesignActivityLog.user_id == User.id
-    )
-    
-    if actor_type and actor_type.lower() not in ["all", "all actor types"]:
-        if actor_type.upper() == "ADMIN":
-            count_query = count_query.where(User.is_superuser == True)
-        elif actor_type.upper() == "RETAILER":
-            count_query = count_query.where(User.is_superuser == False)
-        elif actor_type.upper() == "SYSTEM":
-            count_query = count_query.where(DesignActivityLog.user_id == None)
-        
-    if actor_id:
-        try:
-            actor_int_id = int(actor_id)
-            count_query = count_query.where(
-                or_(
-                    DesignActivityLog.user_id == actor_int_id,
-                    cast(DesignActivityLog.id, String).ilike(f"{actor_id}")
-                )
-            )
-        except ValueError:
-            count_query = count_query.where(cast(DesignActivityLog.id, String).ilike(f"{actor_id}"))
-        
+    ).where(*filters)
+
     if search:
         search_term = f"%{search}%"
         count_query = count_query.where(
@@ -112,13 +122,42 @@ async def get_activity_logs(
     result = await db.execute(query.offset(skip).limit(limit))
     logs = result.scalars().all()
 
-    # Prepare resolved logs
+    # --------------------------------------------------
+    # Resolve actors from metadata for customer/manufacturer actions
+    # --------------------------------------------------
     resolved_logs = []
     for log in logs:
         # Resolve actor name & type
         if log.user:
             actor_name = log.user.full_name or log.user.email
             actor_type_val = "Admin" if log.user.is_superuser else "Retailer"
+        elif log.action_type in CUSTOMER_ACTION_TYPES:
+            # Customer action - try to extract from metadata
+            meta = log.metadata_json or {}
+            customer_id = meta.get("customer_id")
+            actor_name = "Customer"
+            if customer_id:
+                # Try to get customer name from DB
+                customer_result = await db.execute(
+                    select(Customer.full_name).where(Customer.id == customer_id)
+                )
+                customer_row = customer_result.scalar()
+                if customer_row:
+                    actor_name = customer_row
+            actor_type_val = "Customer"
+        elif log.action_type in MANUFACTURER_ACTION_TYPES:
+            # Manufacturer action - try to extract from metadata
+            meta = log.metadata_json or {}
+            manufacturer_id = meta.get("manufacturer_id")
+            actor_name = "Manufacturer"
+            if manufacturer_id:
+                manufacturer_result = await db.execute(
+                    select(Manufacturer.name).where(Manufacturer.id == manufacturer_id)
+                )
+                manufacturer_row = manufacturer_result.scalar()
+                if manufacturer_row:
+                    actor_name = manufacturer_row
+            actor_type_val = "Manufacturer"
         else:
             actor_name = "System"
             actor_type_val = "System"

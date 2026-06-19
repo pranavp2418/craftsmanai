@@ -2,7 +2,7 @@ from typing import Any, List
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, cast, Date
+from sqlalchemy import func, cast, Date, and_
 from app.api import deps
 from app.models.user import User
 from app.models.design import Design
@@ -33,7 +33,13 @@ async def get_requests_trend(
     
     start_date = datetime.date.today() - datetime.timedelta(days=days)
     
-    query = select(cast(Design.created_at, Date), func.count(Design.id)).where(cast(Design.created_at, Date) >= start_date).group_by(cast(Design.created_at, Date))
+    query = select(cast(Design.created_at, Date), func.count(Design.id)).where(
+        and_(
+            cast(Design.created_at, Date) >= start_date,
+            Design.is_deleted == False,
+            Design.is_archived == False
+        )
+    ).group_by(cast(Design.created_at, Date))
     result = await db.execute(query.order_by(cast(Design.created_at, Date)))
     rows = result.all()
     
