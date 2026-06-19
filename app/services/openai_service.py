@@ -480,6 +480,56 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
 
     return replacements
 
+
+_TEXT_CHANGE_LLM_CACHE: Dict[str, bool] = {}
+
+
+def _llm_is_text_change(prompt: str) -> bool:
+    """LLM intent gate: True ONLY if the refine changes the literal TEXT / LETTERING / NAME /
+    NUMBERS written or engraved on the piece; False for any structural/design change (links,
+    connectors, clasp, settings, stones, metal, colour, shape, motif, size, layout...).
+
+    This is the robust replacement for keyword guessing — it understands typos and arbitrary
+    phrasing (e.g. 'change the linkingt to double staight lines' = design, not text). Cached per
+    prompt. Defaults to False on any failure (a structural edit wrongly engraved as text is the
+    worse bug)."""
+    key = (prompt or "").strip()
+    if not key:
+        return False
+    if key in _TEXT_CHANGE_LLM_CACHE:
+        return _TEXT_CHANGE_LLM_CACHE[key]
+    result = False
+    api_key = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
+    if api_key:
+        try:
+            resp = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": "gpt-4o-mini",
+                    "temperature": 0,
+                    "max_tokens": 4,
+                    "messages": [
+                        {"role": "system", "content": (
+                            "You classify a jewelry edit request. Reply with ONE word only: 'text' if the user wants "
+                            "to change the literal TEXT / LETTERING / NAME / NUMBERS / SPELLING written or engraved "
+                            "on the piece; 'design' for ANY other change (links, connectors, clasp, settings, stones, "
+                            "metal, colour, shape, motif, size, layout, etc.). If unsure, reply 'design'.")},
+                        {"role": "user", "content": key},
+                    ],
+                },
+                timeout=20,
+            )
+            if resp.ok:
+                ans = (resp.json().get("choices", [{}])[0].get("message", {}).get("content") or "").strip().lower()
+                result = ans.startswith("text")
+                logger.info("[text-change-gate] '%s' -> %s (%s)", key[:60], result, ans[:20])
+        except Exception as e:
+            logger.warning("[text-change-gate] failed: %s", e)
+    _TEXT_CHANGE_LLM_CACHE[key] = result
+    return result
+
+
 def extract_text(image_path: str) -> List[str]:
     if OCR_ENGINE is None:
         return []
@@ -3279,6 +3329,11 @@ def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[D
     # "hello" -> "helllo"), so we spell the target text out with an exact letter
     # count and call out doubled letters, plus a hard exact-spelling rule.
     replacements = extract_text_replacements(user_prompt)
+    # Robust intent gate: even if the "change X to Y" regex matched, confirm via LLM that this is a
+    # genuine TEXT/lettering change — not a structural edit ("change the links to ...") whose typos
+    # or phrasing slipped past the keyword filter (which would otherwise engrave the words).
+    if replacements and not _llm_is_text_change(user_prompt):
+        replacements = []
     # Secondary instruction in a compound prompt, e.g. "add red diamonds" in
     # "change name to ram and add red diamonds". Applied as a DESIGN/MATERIAL change, NOT text.
     residual_instruction = refine_residual_instruction(user_prompt, replacements) if replacements else ""
@@ -3560,6 +3615,8 @@ def generate_with_fallback(
     expected_texts: List[str] = []
     if is_refine and user_prompt:
         expected_texts = [new for (_old, new) in extract_text_replacements(user_prompt) if new and new.strip()]
+        if expected_texts and not _llm_is_text_change(user_prompt):
+            expected_texts = []
     vision_available = bool(os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY)
     needs_spelling_check = bool(expected_texts) and vision_available
 
