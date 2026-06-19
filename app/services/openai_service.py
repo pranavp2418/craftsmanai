@@ -3241,10 +3241,25 @@ def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[s
             change_line = f" Apply ONLY this change and keep everything else identical to the image: {user_prompt}"
         else:
             change_line = ""
-        type_line = _type_form_clause(item_type, user_prompt)
-        return f"""Recreate this EXACT jewelry piece as a clean CAD-style 3D render on a pure solid white background (#FFFFFF), {angle_phrase}.
+        # For pendants the bail must be a PRIMARY instruction (in the opening), otherwise the strong
+        # "keep identical to the image" pressure makes gpt-image-2 omit the bail when the reference
+        # (e.g. a sketch) has none. Non-pendant types get their form clause appended as before.
+        if _is_pendant_like(item_type, user_prompt):
+            opening = (
+                f"Recreate this exact jewelry design as a clean CAD-style 3D render of a wearable PENDANT, "
+                f"{angle_phrase}, on a pure solid white background (#FFFFFF). The finished pendant MUST have a "
+                f"bail/hook at the very TOP: if the reference already shows a bail keep it, but if it shows NO bail "
+                f"(or it is a sketch) you MUST ADD a FLARED, FAN-SHAPED bail (wider at the top, tapering down to a "
+                f"small loop) at the top-centre, connected to the top of the piece — this bail is REQUIRED, never "
+                f"omit it. If a chain/cord is shown, remove it and show only the pendant (keep the bail)."
+            )
+            form_line = ""  # bail handled in the opening
+        else:
+            opening = f"Recreate this EXACT jewelry piece as a clean CAD-style 3D render on a pure solid white background (#FFFFFF), {angle_phrase}."
+            form_line = _type_form_clause(item_type, user_prompt)
+        return f"""{opening}
 
-Keep the design IDENTICAL to the image — the same shape, proportions, structure, borders and lettering, and EVERY stone. If the piece is set with diamonds / pavé, keep EVERY diamond exactly where it is, with the same coverage and density — do NOT turn any diamond or pavé surface into plain or beaded metal; diamonds must stay diamonds.{type_line}{change_line}{variations_block}{merge_block}{gold_note}
+Keep the design IDENTICAL to the image — the same shape, proportions, structure, borders and lettering, and EVERY stone. If the piece is set with diamonds / pavé, keep EVERY diamond exactly where it is, with the same coverage and density — do NOT turn any diamond or pavé surface into plain or beaded metal; diamonds must stay diamonds.{form_line}{change_line}{variations_block}{merge_block}{gold_note}
 
 Clean even studio lighting, sharp focus, realistic metal and stones, no background scene. One image only."""
     else:
