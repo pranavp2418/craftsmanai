@@ -5,6 +5,9 @@ from typing import Any
 
 from app.core.database import get_db
 from app.core.rate_limiter import check_auth_rate_limit
+from app.core.token_blacklist import token_blacklist
+from app.models.blacklisted_token import BlacklistedToken
+from datetime import timedelta
 from app.core.config import settings
 from app.core.device_fingerprint import get_device_info_from_request
 from app.schemas.auth import LoginRequest, LoginResponse, DeviceInfo
@@ -14,6 +17,29 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _blacklist_token_in_db(db: Session, jti: str, token_type: str, expires_at: datetime, reason: str = "device_limit_exceeded", user_id: str = None):
+    """Insert a blacklisted token record into the database for persistence and audit trail"""
+    try:
+        existing = db.query(BlacklistedToken).filter(BlacklistedToken.jti == jti).first()
+        if existing:
+            return True
+            
+        blacklisted = BlacklistedToken(
+            jti=jti,
+            token_type=token_type,
+            user_id=int(user_id) if user_id else None,
+            reason=reason,
+            expires_at=expires_at
+        )
+        db.add(blacklisted)
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to blacklist token {jti} in DB: {str(e)}")
+        return False
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -87,23 +113,76 @@ async def login(
     device_id = None
     if device_info and device_info.device_id:
         device_data = device_info.model_dump(exclude_none=True)
+        logger.info(f"DEVICE_DEBUG: device_id={device_info.device_id}, device_type={device_info.device_type}, browser={device_info.browser}")
         
-        # Check if device already exists
+        # Check if device already exists AND is still active
         existing_device = auth_service.device_repo.get_device_by_device_id(
             user.id, device_info.device_id
         )
         
-        if existing_device:
+        # Only treat as existing if the device is active (not revoked)
+        if existing_device and existing_device.is_active:
             device_id = device_info.device_id
+            logger.info(f"DEVICE_DEBUG: Existing ACTIVE device found {existing_device.id}, updating last_used")
             auth_service.device_repo.update_device_last_used(existing_device.id)
         else:
             # Check if user exceeds max devices
             active_devices = auth_service.device_repo.get_active_device_count(user.id)
+            logger.info(f"DEVICE_DEBUG: New device login. Active device count={active_devices}, MAX_ACTIVE_DEVICES={settings.MAX_ACTIVE_DEVICES}")
             if active_devices >= settings.MAX_ACTIVE_DEVICES:
-                # Revoke oldest device
-                revoked = auth_service.device_repo.revoke_old_devices(user.id, settings.MAX_ACTIVE_DEVICES - 1)
-                logger.info(f"Revoked {revoked} old devices for user: {user.email}")
+                logger.info("DEVICE_DEBUG: Limit exceeded! Proceeding to revoke oldest devices...")
+                from app.models.refresh_token import RefreshToken
+                
+                # Get all active devices sorted by last_used (oldest first)
+                all_active_devices = auth_service.device_repo.get_user_devices(user.id, active_only=True)
+                all_active_devices.sort(key=lambda x: x.last_used or datetime.min.replace(tzinfo=timezone.utc))
+                
+                # Determine how many to revoke (we keep MAX_ACTIVE_DEVICES - 1, 1 slot goes to new device)
+                keep_count = max(settings.MAX_ACTIVE_DEVICES - 1, 0)
+                devices_to_revoke = all_active_devices[:-keep_count] if keep_count > 0 else all_active_devices
+                
+                # Blacklist all tokens and revoke devices that exceed the limit
+                now = datetime.now(timezone.utc)
+                for device in devices_to_revoke:
+                    if device.device_id:
+                        # Get all active refresh tokens for this device
+                        device_tokens = db.query(RefreshToken).filter(
+                            RefreshToken.user_id == user.id,
+                            RefreshToken.device_id == device.device_id,
+                            RefreshToken.is_active == True
+                        ).all()
+                        
+                        for token_record in device_tokens:
+                            # Blacklist associated access token in Redis and DB
+                            if token_record.access_token_jti and token_record.access_token_expires_at:
+                                remaining_seconds = max(int((token_record.access_token_expires_at - now).total_seconds()), 0)
+                                remaining_minutes = max(remaining_seconds // 60, 1)
+                                token_blacklist.blacklist_access_token(token_record.access_token_jti, remaining_minutes)
+                                # Also persist in DB for audit trail
+                                _blacklist_token_in_db(
+                                    db, token_record.access_token_jti, "access",
+                                    token_record.access_token_expires_at, "device_limit_exceeded", str(user.id)
+                                )
+                                
+                            # Blacklist refresh token in Redis and DB
+                            if token_record.expires_at:
+                                token_blacklist.blacklist_refresh_token(token_record.token_id, token_record.expires_at)
+                                # Also persist in DB for audit trail
+                                _blacklist_token_in_db(
+                                    db, token_record.token_id, "refresh",
+                                    token_record.expires_at, "device_limit_exceeded", str(user.id)
+                                )
+                        
+                        # Revoke all refresh tokens for this device in DB
+                        auth_service.token_repo.revoke_device_tokens(user.id, device.device_id)
+                        
+                        # Deactivate the device record
+                        device.is_active = False
+                        logger.info(f"Revoked device {device.device_id} for user: {user.email}, tokens blacklisted")
+                
+                db.commit()
             
+            # Create the new device
             new_device = auth_service.device_repo.create_device(user.id, device_data)
             device_id = device_info.device_id
     
