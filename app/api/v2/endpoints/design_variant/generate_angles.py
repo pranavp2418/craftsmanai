@@ -9,14 +9,7 @@ from app.models.user import User
 from app.schemas.design_variant import DesignVariantAngleGenerationRequest
 from app.services.design_service import DesignService
 from app.services.design_variant_service import DesignVariantService
-from app.tasks.angle_variant_tasks import generate_remaining_variant_angles
-
-
-ANGLE_PROMPTS = {
-    "side_view",
-    "top_view",
-    "three_quarter_view",
-}
+from app.tasks.angle_variant_tasks import generate_remaining_variant_angles, ANGLE_VIEWS
 
 router = APIRouter()
 
@@ -70,7 +63,7 @@ def generate_variant_angles(
     for metal in payload.metals:
         metal_data = existing_angles.get(metal)
         if isinstance(metal_data, dict) and all(
-            angle in metal_data for angle in ANGLE_PROMPTS
+            angle in metal_data for angle in ANGLE_VIEWS
         ):
             already_existing.append(metal)
 
@@ -130,5 +123,5 @@ def generate_variant_angles(
         "metals": missing_metals,
         "already_existing": already_existing,
         "sse_channel": channel,
-        "angles_to_generate": ["side_view", "top_view", "three_quarter_view"],
+        "angles_to_generate": list(ANGLE_VIEWS),
     }
