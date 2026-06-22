@@ -26,7 +26,9 @@ async def get_dashboard_stats(
     
     # Total retailers - count all users except superusers
     total_retailers_result = await db.execute(
-        select(func.count(User.id)).where(User.is_superuser == False)
+        select(func.count(User.id)).where(User.is_superuser == False,
+        User.is_verfied == True
+        )
     )
     total_retailers = total_retailers_result.scalar() or 0
     
@@ -42,20 +44,26 @@ async def get_dashboard_stats(
     )
     total_customers = total_customers_result.scalar() or 0
     
-    # Active requests - requests that are not completed
+    # Active requests - requests that are not completed (excluding deleted/archived)
     active_requests_result = await db.execute(
-        select(func.count(Design.id)).where(Design.status != DesignStatus.COMPLETED)
+        select(func.count(Design.id)).where(
+            Design.status != DesignStatus.COMPLETED,
+            Design.is_deleted == False,
+            Design.is_archived == False
+        )
     )
     active_requests = active_requests_result.scalar() or 0
     
-    # Pending approvals - requests waiting for action
+    # Pending approvals - requests waiting for action (excluding deleted/archived)
     # This includes: SHARED, APPROVED
     pending_approvals_result = await db.execute(
         select(func.count(Design.id)).where(
             Design.status.in_([
                 DesignStatus.SHARED,
                 DesignStatus.APPROVED
-            ])
+            ]),
+            Design.is_deleted == False,
+            Design.is_archived == False
         )
     )
     pending_approvals = pending_approvals_result.scalar() or 0
@@ -66,4 +74,4 @@ async def get_dashboard_stats(
         "totalCustomers": total_customers,
         "activeRequests": active_requests,
         "pendingApprovals": pending_approvals
-    }
+    }

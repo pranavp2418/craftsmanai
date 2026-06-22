@@ -128,6 +128,10 @@ async def get_monitoring_requests(
     # --------------------------------------------------
     #  BASE QUERY
     # --------------------------------------------------
+    # Always exclude deleted/archived designs
+    base_filters = [Design.is_deleted == False, Design.is_archived == False]
+    base_filters.extend(filters)
+
     base_query = (
         select(
             Design.id,
@@ -145,7 +149,7 @@ async def get_monitoring_requests(
         .outerjoin(DesignShare, DesignVariant.id == DesignShare.design_variant_id)
         .outerjoin(CustomerAlias, DesignShare.customer_id == CustomerAlias.id)
         .outerjoin(RetailerAlias, Design.user_id == RetailerAlias.id)
-        .where(*filters)
+        .where(*base_filters)
         .group_by(
             Design.id,
             Design.design_code,
@@ -166,7 +170,7 @@ async def get_monitoring_requests(
         .outerjoin(DesignShare, DesignVariant.id == DesignShare.design_variant_id)
         .outerjoin(CustomerAlias, DesignShare.customer_id == CustomerAlias.id)
         .outerjoin(RetailerAlias, Design.user_id == RetailerAlias.id)
-        .where(*filters)
+        .where(*base_filters)
     )
     total_result = await db.execute(count_query)
     total_items = total_result.scalar() or 0

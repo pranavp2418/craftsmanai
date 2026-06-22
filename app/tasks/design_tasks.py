@@ -157,13 +157,14 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                 if prompt_metal:
                     input_metal = prompt_metal
                     logger.info("User prompt explicitly specified metal='%s' for design_id=%s", input_metal, design_id)
-                    # If it's a single non-jewelry graphic but user requested a metal, append the non-jewelry metal instruction
-                    # using the user's requested metal instead of default gold.
+                    # Apply the "convert to plain solid metal (NO stones)" instruction ONLY when the
+                    # reference is genuinely NON-jewelry (a logo / graphic / artwork), using the user's
+                    # requested metal instead of the default gold. For a real JEWELRY input the metal is
+                    # just a recolour and the render prompt keeps every stone — appending the non-jewelry
+                    # instruction here previously WIPED the diamonds off iced pieces (the de-gem bug).
                     _nonjewelry = [c for c in _classified if not c.get("is_jewelry", True)]
-                    if not _nonjewelry:
-                        if len(_refs) == 1:
-                            _internal += build_non_jewelry_metal_instruction(input_metal)
-                    elif len(_refs) == 1:
+                    _jewelry = [c for c in _classified if c.get("is_jewelry", True)]
+                    if _nonjewelry and not _jewelry and len(_refs) == 1:
                         _internal += build_non_jewelry_metal_instruction(input_metal)
                 else:
                     _jewelry = [c for c in _classified if c.get("is_jewelry", True)]
@@ -212,12 +213,14 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
 
         else:
             # ── Fallback: prompt-only generation (no reference image) ─
-            generated_item = openai_service.generate_image_from_prompt(prompt)
-            image_bytes, content_type = _extract_generated_image_data(generated_item)
-            _validate_image_bytes(image_bytes, content_type)
+            generated_item = openai_service.generate_image_from_prompt(
+                prompt, jewellery_type=(design.jewellery_type or "")
+            )
+            final_image_bytes, content_type = _extract_generated_image_data(generated_item)
+            _validate_image_bytes(final_image_bytes, content_type)
 
             bucket_path = f"generated/base/{design.design_code}"
-            generated_image_url = upload_image_to_supabase(image_bytes, bucket_path)
+            generated_image_url = upload_image_to_supabase(final_image_bytes, bucket_path)
 
         variant_service = DesignVariantService(db)
         variant = variant_service.create_initial_variant(
@@ -377,11 +380,18 @@ def refine_design_variant_image(
                     parent_metal = list(parent_variant.metal_variations_json.keys())[0]
 
         # Generate refined image via OpenAI using the resolved reference images
+        # generated_item = openai_service.generate_base_image(
+        #     reference_image_source,
+        #     combined_prompt,
+        #     jewellery_type=jewellery_type,
+        #     metal_tone=parent_metal
+        # Generate refined image via OpenAI using the resolved reference images.
+        # Force mode="refine": this is ALWAYS a refine of an existing variant, so do NOT rely on
+        # keyword auto-detection (prompts like "make the bail hinged" have no edit keyword and were
+        # being misclassified as a fresh generation — which forced default yellow gold and dropped
+        # the reference's real metal colour / design fidelity).
         generated_item = openai_service.generate_base_image(
-            reference_image_source,
-            combined_prompt,
-            jewellery_type=jewellery_type,
-            metal_tone=parent_metal
+            reference_image_source, combined_prompt, jewellery_type=jewellery_type, mode="refine"
         )
         image_bytes, content_type = _extract_generated_image_data(generated_item)
         _validate_image_bytes(image_bytes, content_type)

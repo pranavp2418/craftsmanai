@@ -6,7 +6,7 @@ from app.models.design import Design, DesignStatus
 from app.models.order import ManufacturerQuote, ManufacturerQuoteStatus
 from app.repositories.design import DesignRepository
 from app.repositories.manufacturer_quote import ManufacturerQuoteRepository
-from app.repositories.activity_log import OrderActivityLogRepository
+from app.repositories.activity_log import OrderActivityLogRepository, DesignActivityLogRepository
 from app.repositories.order import OrderRepository
 from app.repositories.manufacturer_variant_share import DesignVariantManufacturerShareRepository
 from app.models.design import ManufacturerShareStatus
@@ -18,6 +18,7 @@ class ManufacturerQuoteService:
         self.db = db
         self.quote_repo = ManufacturerQuoteRepository(db)
         self.activity_repo = OrderActivityLogRepository(db)
+        self.design_activity_repo = DesignActivityLogRepository(db)
         self.order_repo = OrderRepository(db)
         self.variant_share_repo = DesignVariantManufacturerShareRepository(db)
         self.notification_service = NotificationService(db)
@@ -130,6 +131,26 @@ class ManufacturerQuoteService:
             message=message or f"Quote {status.value}",
             metadata={"quote_id": quote.id, "status": status.value},
         )
+
+        # Also log to DesignActivityLog for admin dashboard visibility
+        order = quote.order or self.order_repo.get_by_id(quote.order_id)
+        if order and order.design_id:
+            design_action = {
+                ManufacturerQuoteStatus.APPROVED: "MANUFACTURER_APPROVED",
+                ManufacturerQuoteStatus.REJECTED: "MANUFACTURER_REJECTED",
+            }.get(status, "QUOTE_STATUS_CHANGED")
+            manufacturer_name = quote.manufacturer.name if quote.manufacturer else f"Manufacturer #{quote.manufacturer_id}"
+            self.design_activity_repo.log(
+                design_id=order.design_id,
+                action_type=design_action,
+                message=message or f"Quote from {manufacturer_name} {status.value.lower()}",
+                metadata={
+                    "quote_id": quote.id,
+                    "order_id": quote.order_id,
+                    "manufacturer_id": quote.manufacturer_id,
+                    "status": status.value,
+                },
+            )
 
         # Restore real-time sync by notifying design owner on approval/rejection.
         order = quote.order or self.order_repo.get_by_id(quote.order_id)

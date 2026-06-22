@@ -259,6 +259,11 @@ def share_variant_with_manufacturer(
 
     # Update Design status to SENT_TO_MANUFACTURER
     from app.models.design import DesignStatus
-    design_service.update_design(design, status=DesignStatus.SENT_TO_MANUFACTURER)
+    design_service.update_design(
+        design,
+        status=DesignStatus.SENT_TO_MANUFACTURER,
+        user=current_user,
+        message=f"Design {design.design_code} sent to {len(payload.manufacturer_ids)} manufacturer(s) for quoting",
+    )
 
     return shares_response
