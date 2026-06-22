@@ -14,6 +14,7 @@ from app.models.user import User
 from app.models.subscription import SubscriptionPlan, UserSubscription, SubscriptionStatus, Payment, PaymentStatus, CancellationReason
 from app.schemas.subscription import UserSubscription as UserSubscriptionSchema
 from app.services.invoice_service import generate_and_store_invoice
+from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 stripe.api_key = settings.STRIPE_API_KEY
@@ -263,6 +264,46 @@ def verify_payment(
             db.add(user_sub)
 
             db.commit()
+
+            # Send in-app notifications
+            try:
+                notification_service = NotificationService(db)
+                retailer_user = db.query(User).filter(User.id == payment.user_id).first()
+                if retailer_user:
+                    # Notify retailer
+                    notification_service.send_notification(
+                        user_id=retailer_user.id,
+                        type="subscription",
+                        title="Subscription Successful",
+                        message=f"You have successfully subscribed to the {plan.name} plan.",
+                        source="subscription",
+                        reference_id=retailer_user.id,
+                        data={
+                            "plan_name": plan.name,
+                            "amount": float(payment.amount) if payment.amount else 0.0,
+                        }
+                    )
+                    
+                    # Notify admins
+                    admins = db.query(User).filter(User.is_superuser == True).all()
+                    for admin in admins:
+                        notification_service.send_notification(
+                            user_id=admin.id,
+                            type="subscription",
+                            title="New Subscription Purchased",
+                            message=f"Retailer {retailer_user.full_name or retailer_user.email} has successfully subscribed to the {plan.name} plan.",
+                            source="subscription",
+                            reference_id=retailer_user.id,
+                            data={
+                                "retailer_id": retailer_user.id,
+                                "retailer_name": retailer_user.full_name or retailer_user.email,
+                                "plan_name": plan.name,
+                                "amount": float(payment.amount) if payment.amount else 0.0,
+                            }
+                        )
+            except Exception as e:
+                logger.error(f"Failed to send subscription notifications: {str(e)}", exc_info=True)
+
             return {
                 "status": "success",
                 "message": "Payment verified and subscription created",
