@@ -1,5 +1,7 @@
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, field_validator
 from typing import Optional
+
+from app.schemas.validations import normalize_phone_number
 
 
 class UserProfileResponse(BaseModel):
@@ -27,6 +29,13 @@ class UserProfileUpdate(BaseModel):
     whatsapp_number: Optional[str] = Field(None, max_length=20)
     username: Optional[str] = Field(None, max_length=100)
     business_name: Optional[str] = Field(None, max_length=255)
+    
+    @field_validator('whatsapp_number')
+    @classmethod
+    def validate_whatsapp_number(cls, v):
+        if v is None or v == '':
+            return v
+        return normalize_phone_number(v, validate=True)
     
 
 class AppearanceSettingsUpdate(BaseModel):

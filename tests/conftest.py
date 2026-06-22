@@ -77,7 +77,7 @@ def test_user_data():
         "username": "testuser",
         "full_name": "Test User",
         "password": "TestPass123!",
-        "whatsapp_number": "+1234567890"
+        "whatsapp_number": "+919876543210"
     }
 
 
@@ -103,7 +103,7 @@ def create_test_user(db_session):
             "full_name": "Test User",
             "password": "TestPass123!",
             "is_verified": False,  # Unverified by default
-            "whatsapp_number": "+1234567890"
+            "whatsapp_number": "+919876543210"
         }
         user_data.update(kwargs)
         
@@ -144,7 +144,7 @@ def create_verified_user(db_session):
             "full_name": "Verified User",
             "password": "TestPass123!",
             "is_verified": True,  # Verified
-            "whatsapp_number": "+1234567890"
+            "whatsapp_number": "+919876543210"
         }
         user_data.update(kwargs)
         

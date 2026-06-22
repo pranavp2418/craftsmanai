@@ -1,9 +1,8 @@
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from datetime import datetime
-import re
 
-from app.schemas.validations import NormalizedEmailStr
+from app.schemas.validations import NormalizedEmailStr, normalize_phone_number
 
 
 class DeviceInfo(BaseModel):
@@ -44,14 +43,7 @@ class SignupRequest(BaseModel):
     @field_validator('whatsapp_number')
     @classmethod
     def validate_whatsapp_number(cls, v):
-        # Remove any spaces or special characters
-        cleaned = re.sub(r'[^\d+]', '', v)
-        if not cleaned:
-            raise ValueError('WhatsApp number is required')
-        # Check if it starts with + and has 10-15 digits
-        if not re.match(r'^\+\d{10,15}$', cleaned):
-            raise ValueError('WhatsApp number must be in format +CCXXXXXXXXXX (10-15 digits)')
-        return cleaned
+        return normalize_phone_number(v, validate=True)
 
 
 class SignUpResponse(BaseModel):
