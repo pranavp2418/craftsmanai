@@ -129,3 +129,6 @@ run_tests.py
 
 # Development rules
 DEVELOPMENT_RULES.md
+.env.bak*
+.env.*.bak
+*.bak
