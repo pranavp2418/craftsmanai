@@ -962,6 +962,9 @@ def interpret_refinement(params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             headers={"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"},
             json={
                 "model": "gemini-2.5-flash",
+                # temperature=0 so the SAME refine request yields the SAME normalized_prompt /
+                # intent every run (default ~1.0 made identical refines drift run-to-run).
+                "temperature": 0,
                 "messages": [
                     {"role": "system", "content": REFINEMENT_INTERPRETER_SYSTEM},
                     {"role": "user", "content": user_content},
@@ -1073,6 +1076,7 @@ def qa_refinement_check(params: Dict[str, Any]) -> Dict[str, Any]:
 
     intent = params.get("intent") or {}
     previous_ref_url = params.get("previousRefUrl")
+    previous_b64 = params.get("previousB64")
     new_image_b64 = params.get("newImageB64")
     new_data_url = f"data:image/png;base64,{new_image_b64}" if new_image_b64 else None
 
@@ -1081,15 +1085,22 @@ def qa_refinement_check(params: Dict[str, Any]) -> Dict[str, Any]:
         "text": f"Compare the PREVIOUS render (image 1) with the NEW render (image 2).\nThe user requested this change:\n\"{intent.get('normalized_prompt') or intent.get('raw_user_prompt')}\"\n\nTarget component(s): {', '.join(intent.get('target_components') or [])}\nAttribute to change: {intent.get('attribute_to_change')}\nFrom: {intent.get('from_state') or '(unspecified)'} → To: {intent.get('to_state') or '(unspecified)'}\n\nRun these visual checks against the NEW render:\n" + "\n".join([f"- {c}" for c in intent.get('qa_checks') or []]) + "\n\nAlso verify:\n- the requested change is VISIBLY applied (not subtle, not absent)\n- every non-target component is unchanged from the previous render\n- nothing was added or removed that the user did not ask for\n- the output remains a premium CAD-style jewelry render\n\nCall the function tool with your verdict.",
     }]
 
-    if previous_ref_url:
-        resolved_prev_url = previous_ref_url
-        if not previous_ref_url.startswith("http"):
-            resolved_prev_url = file_to_data_url(previous_ref_url)
-        if resolved_prev_url:
-            user_content.insert(0, {"type": "image_url", "image_url": {"url": resolved_prev_url}})
-            
+    # Attach the PREVIOUS render — prefer raw base64 (reliable), fall back to URL / local file.
+    prev_data_url = None
+    if previous_b64:
+        prev_data_url = f"data:image/png;base64,{previous_b64}"
+    elif previous_ref_url:
+        prev_data_url = previous_ref_url if previous_ref_url.startswith("http") else file_to_data_url(previous_ref_url)
+    if prev_data_url:
+        user_content.insert(0, {"type": "image_url", "image_url": {"url": prev_data_url}})
+
     if new_data_url:
         user_content.append({"type": "image_url", "image_url": {"url": new_data_url}})
+
+    # If the PREVIOUS render could NOT be attached, this comparison QA cannot fairly judge — skip it
+    # (fail-open, NO retry) instead of falsely failing and triggering a wasteful re-generation.
+    if not prev_data_url:
+        return {"passed": True, "reason": "qa_skipped_no_previous", "failed_checks": [], "retry_recommended": False}
 
     tools = [{
         "type": "function",
@@ -1116,6 +1127,118 @@ def qa_refinement_check(params: Dict[str, Any]) -> Dict[str, Any]:
             headers={"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"},
             json={
                 "model": "gemini-2.5-flash",
+                "messages": [
+                    {"role": "system", "content": "You are a strict jewelry-render QA inspector. You only call the emit_qa_verdict tool."},
+                    {"role": "user", "content": user_content},
+                ],
+                "tools": tools,
+                "tool_choice": {"type": "function", "function": {"name": "emit_qa_verdict"}},
+            },
+            timeout=30,
+        )
+        if not resp.ok:
+            return {"passed": True, "reason": "qa_gateway_error", "failed_checks": [], "retry_recommended": False}
+        j = resp.json()
+        args = j.get("choices", [{}])[0].get("message", {}).get("tool_calls", [{}])[0].get("function", {}).get("arguments")
+        if not args:
+            return {"passed": True, "reason": "qa_no_tool_call", "failed_checks": [], "retry_recommended": False}
+        verdict = args if isinstance(args, dict) else json.loads(args)
+        return {
+            "passed": bool(verdict.get("passed")),
+            "reason": verdict.get("reason") or "",
+            "failed_checks": verdict.get("failed_checks") or [],
+            "retry_recommended": bool(verdict.get("retry_recommended")),
+        }
+    except Exception:
+        return {"passed": True, "reason": "qa_exception", "failed_checks": [], "retry_recommended": False}
+
+
+def qa_initial_check(params: Dict[str, Any]) -> Dict[str, Any]:
+    """QA for an INITIAL generation (no previous reference): verify the rendered image matches the
+    user's request. Returns {passed, reason, failed_checks, retry_recommended}. Fail-open (passed)
+    on missing key / any error so it never blocks a generation."""
+    gemini_api_key = os.getenv("GEMINI_API_KEY")
+    if not gemini_api_key:
+        return {"passed": True, "reason": "qa_skipped_no_key", "failed_checks": [], "retry_recommended": False}
+
+    request = params.get("request") or ""
+    item_type = params.get("itemType") or "jewelry"
+    new_image_b64 = params.get("newImageB64")
+    ref_b64 = params.get("referenceB64")
+    new_data_url = f"data:image/png;base64,{new_image_b64}" if new_image_b64 else None
+
+    if ref_b64:
+        # IMAGE-INPUT generation: the DESIGN comes from the reference (image 1); the request only
+        # says HOW to render it. The QA MUST see the reference, or it wrongly flags the reference's
+        # own subject as an "unrequested addition" and triggers a useless (damaging) retry.
+        instruction = (
+            f"The user provided a REFERENCE image (image 1) and asked:\n\"\"\"{request}\"\"\"\n\n"
+            f"Intended piece type: {item_type}. The GENERATED result is image 2.\n\n"
+            "The result's overall DESIGN is meant to come FROM the reference (image 1); the request only "
+            "describes HOW to render it as jewelry (metal, edges, size, added text, etc.).\n"
+            "Confirm about the result (image 2):\n"
+            "- the requested METAL / EDGES / changes from the request are applied\n"
+            "- the reference's main design is preserved (recognisably the same subject/shape)\n"
+            "- any letters/names/numbers in the request are present and spelled EXACTLY right\n"
+            "- it is a clean CAD-style jewelry render on a pure white background (no scene/props/hands)\n\n"
+            "IMPORTANT: do NOT flag design elements that come from the REFERENCE image as 'unrequested "
+            "additions' — they are EXPECTED. Call emit_qa_verdict; set retry_recommended=true ONLY for a "
+            "clear mismatch with the request (wrong metal colour, a requested feature missing, garbled/"
+            "misspelled text, or wrong piece type)."
+        )
+        user_content = [
+            {"type": "text", "text": instruction},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{ref_b64}"}},
+        ]
+        if new_data_url:
+            user_content.append({"type": "image_url", "image_url": {"url": new_data_url}})
+    else:
+        user_content = [{
+            "type": "text",
+            "text": (
+                f"A jewelry image was generated from this request:\n\"\"\"{request}\"\"\"\n\n"
+                f"Intended piece type: {item_type}.\n\n"
+                "Check the generated image against the request and confirm ALL of these:\n"
+                "- it depicts the correct jewelry TYPE\n"
+                "- any letters / names / numbers requested are present and spelled EXACTLY right\n"
+                "- the requested METAL colour is correct (e.g. rose gold is pink, white gold is silvery)\n"
+                "- requested stones/diamonds are present (and none invented if none were requested)\n"
+                "- it is a clean CAD-style jewelry render on a pure white background (no scene/props/hands)\n"
+                "- nothing MAJOR from the request is missing, and nothing major was added that wasn't asked for\n\n"
+                "Call emit_qa_verdict. Set retry_recommended=true ONLY for a CLEAR, fixable mismatch "
+                "(wrong/misspelled text, wrong metal colour, a clearly missing requested element, or wrong "
+                "piece type). Ignore minor styling differences."
+            ),
+        }]
+        if new_data_url:
+            user_content.append({"type": "image_url", "image_url": {"url": new_data_url}})
+
+    tools = [{
+        "type": "function",
+        "function": {
+            "name": "emit_qa_verdict",
+            "description": "Emit the QA verdict.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "passed": {"type": "boolean"},
+                    "reason": {"type": "string"},
+                    "failed_checks": {"type": "array", "items": {"type": "string"}},
+                    "retry_recommended": {"type": "boolean"},
+                },
+                "required": ["passed", "reason", "failed_checks", "retry_recommended"],
+            },
+        },
+    }]
+
+    try:
+        resp = requests.post(
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            headers={"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "gemini-2.5-flash",
+                "temperature": 0,
                 "messages": [
                     {"role": "system", "content": "You are a strict jewelry-render QA inspector. You only call the emit_qa_verdict tool."},
                     {"role": "user", "content": user_content},
@@ -2431,7 +2554,7 @@ def generate_with_openai_image(
                     "prompt": truncated_prompt,
                     "n": "1",
                     "size": "1024x1024",
-                    "quality": "medium",
+                    "quality": "high",
                     "background": "opaque",
                 }
                 response = requests.post(
@@ -2454,7 +2577,7 @@ def generate_with_openai_image(
                         "prompt": truncated_prompt,
                         "n": 1,
                         "size": "1024x1024",
-                        "quality": "medium",
+                        "quality": "high",
                         "background": "opaque",
                     },
                     timeout=(15, 300),
@@ -3131,6 +3254,21 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
 
 
 def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[str, Any]], metal_tone: str, has_images: bool, image_count: int = 0) -> str:
+    """Initial-generation prompt — delegates to the config-registry builder (app.services.prompts).
+
+    Per-jewellery profiles + a shared common core replace the old monolithic logic so
+    conflicting/duplicate instructions can't stack. On ANY error this falls back to the
+    legacy builder below, so image generation never breaks.
+    """
+    try:
+        from app.services.prompts.initial import build_initial_prompt
+        return build_initial_prompt(user_prompt, parsed_data, metal_tone, has_images, image_count)
+    except Exception as _e:  # pragma: no cover - safety net
+        logger.warning("[prompt-registry] initial builder failed (%s) — using legacy builder", _e)
+        return _legacy_build_concise_initial_prompt(user_prompt, parsed_data, metal_tone, has_images, image_count)
+
+
+def _legacy_build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[str, Any]], metal_tone: str, has_images: bool, image_count: int = 0) -> str:
     """Build a short, focused prompt for initial generation — ultra-minimal like ChatGPT.
 
     Key insight: gpt-image-2 does BEST with minimal instructions. ChatGPT sends very
@@ -3332,7 +3470,27 @@ def _user_wants_metal_change(user_prompt: str) -> bool:
     ])
 
 
-def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[Dict[str, Any]], attempt: int, forced_case: Optional[str] = None, ref_metal: Optional[str] = None) -> str:
+def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[Dict[str, Any]], attempt: int, forced_case: Optional[str] = None, ref_metal: Optional[str] = None, image_count: int = 1) -> str:
+    """Refinement prompt — delegates to the config-registry builder (app.services.prompts.refine).
+
+    Handles both client refine cases (text-only update; combine-with-extra-image) on top of the
+    shared COMMON_SYSTEM_PROMPT. On ANY error this falls back to the legacy builder below, so
+    image generation never breaks.
+    """
+    try:
+        from app.services.prompts.refine import build_refine_prompt
+        return build_refine_prompt(
+            user_prompt, refinement_intent, attempt,
+            forced_case=forced_case, ref_metal=ref_metal, image_count=image_count,
+        )
+    except Exception as _e:  # pragma: no cover - safety net
+        logger.warning("[prompt-registry] refine builder failed (%s) — using legacy builder", _e)
+        return _legacy_build_concise_refine_prompt(
+            user_prompt, refinement_intent, attempt, forced_case=forced_case, ref_metal=ref_metal,
+        )
+
+
+def _legacy_build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[Dict[str, Any]], attempt: int, forced_case: Optional[str] = None, ref_metal: Optional[str] = None) -> str:
     """Build a short, focused prompt for refinement — ultra-minimal like ChatGPT.
 
     Key insight: ChatGPT sends almost NO wrapping for edits. When a user says
@@ -3610,6 +3768,10 @@ def generate_with_fallback(
     resolved_image_urls = resolve_image_urls(image_source, image_urls)
     is_refine = selected_mode == "refine"
 
+    # Keep the ORIGINAL raw request (before enrichment) so the initial-QA checks the output against
+    # what the USER actually asked — not the verbose enriched paragraph (which would over-strict it).
+    original_request = (user_prompt or "")
+
     # Text-only generation: enrich the terse prompt with domain knowledge (like ChatGPT does
     # internally) so culturally/technically specific designs (e.g. "dos pesos coin", a named symbol
     # or font) render correctly instead of being garbled. Skipped when there's a reference image
@@ -3684,7 +3846,7 @@ def generate_with_fallback(
     # model fixes the exact details that drifted from the reference.
     def compose_prompt(attempt: int, correction_notes: str = "") -> str:
         if is_refine:
-            base = _build_concise_refine_prompt(user_prompt, refinement_intent, attempt, forced_case=forced_case, ref_metal=ref_metal)
+            base = _build_concise_refine_prompt(user_prompt, refinement_intent, attempt, forced_case=forced_case, ref_metal=ref_metal, image_count=len(resolved_image_urls or []))
         else:
             base = _build_concise_initial_prompt(user_prompt, parsed_data, metal_tone, bool(resolved_image_urls), len(resolved_image_urls or []))
         if correction_notes:
@@ -3694,10 +3856,19 @@ def generate_with_fallback(
             )
         return base
 
-    # Attempt budget — keep renders fast (<1:30 target). Only allow a 2nd full generation for a
-    # SPELLING fix on text/name changes (a wrong name is unacceptable); everything else is a single
-    # generation. The Gemini refinement-QA no longer forces a full re-render (it doubled render time).
-    any_check = needs_spelling_check
+    # Attempt budget — keep renders fast. Allow ONE corrective re-generation (cap = 1 retry, so
+    # max 2 attempts) when there is something to verify:
+    #   * a SPELLING fix on text/name changes (a wrong name is unacceptable), OR
+    #   * a VISUAL QA pass on any refine that has an interpreted intent (general / combine edits),
+    #     so the most common refines are no longer a single un-checked stochastic shot.
+    # The retry is TARGETED: the QA's failed checks are fed back into the next prompt (below).
+    # Worst case is ~2x render time; everything that passes the first check costs only the
+    # (cheap) QA call on top of one generation.
+    needs_visual_qa = bool(is_refine and refinement_intent)
+    # Initial-generation auto-QA: no previous reference, so check the OUTPUT against the user's raw
+    # request (correct type / text spelling / metal / stones / clean render) and retry once.
+    needs_initial_qa = bool((not is_refine) and os.getenv("GEMINI_API_KEY") and original_request)
+    any_check = needs_spelling_check or needs_visual_qa or needs_initial_qa
     max_qa_attempts = 2 if any_check else 1
     previous_ref_url = resolved_image_urls[0] if (is_refine and resolved_image_urls) else None
     final_b64 = None
@@ -3739,11 +3910,31 @@ def generate_with_fallback(
             qa_result = qa_refinement_check({
                 "intent": refinement_intent,
                 "previousRefUrl": previous_ref_url,
+                "previousB64": input_b64,
                 "newImageB64": b64,
             })
             logger.info("[refinement_qa attempt %d] %s", qa_attempt, qa_result)
             if qa_result.get("passed") or not qa_result.get("retry_recommended"):
                 break
+            # Targeted retry: feed the SPECIFIC failed checks back into the next prompt so the
+            # re-generation fixes exactly what QA flagged, instead of being a blind re-roll.
+            failed = qa_result.get("failed_checks") or []
+            correction_notes = "; ".join(failed[:6]) if failed else (qa_result.get("reason") or "")
+            continue
+
+        # 3b) Initial-generation QA via Gemini (no previous reference — check output vs the request).
+        if needs_initial_qa:
+            qa_result = qa_initial_check({
+                "request": original_request,
+                "itemType": (parsed_data or {}).get("item_type") or infer_item_type_from_prompt(original_request),
+                "newImageB64": b64,
+                "referenceB64": input_b64 if has_reference_image else None,
+            })
+            logger.info("[initial_qa attempt %d] %s", qa_attempt, qa_result)
+            if qa_result.get("passed") or not qa_result.get("retry_recommended"):
+                break
+            failed = qa_result.get("failed_checks") or []
+            correction_notes = "; ".join(failed[:6]) if failed else (qa_result.get("reason") or "")
             continue
 
         # All active checks passed → accept.
