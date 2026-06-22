@@ -358,24 +358,17 @@ def refine_design_variant_image(
         parent_variant_img = parent_variant.base_design_image_url if parent_variant else None
 
         if reference_images:
-            # Ensure the parent variant's image is always the first (primary) image in the reference list,
-            # acting as the master visual truth.
-            if parent_variant_img:
-                if parent_variant_img in reference_images:
-                    # Remove it and put it at the front
-                    imgs = [img for img in reference_images if img != parent_variant_img]
-                    reference_image_source = [parent_variant_img] + imgs
-                else:
-                    # Prepend it to the user uploaded references
-                    reference_image_source = [parent_variant_img] + reference_images
-            else:
-                reference_image_source = reference_images
-        else:
-            if not parent_variant_img:
-                raise ValueError(
-                    f"Parent variant {parent_variant_id} has no base_design_image_url"
-                )
+            # Trust the order the endpoint resolved: the FIRST image is the intended primary
+            # reference (selected metal variant > explicit URL > parent base), followed by any
+            # user-uploaded reference images. Do NOT forcibly re-prepend the parent base — that
+            # overrode a user's selected metal variant with the base metal.
+            reference_image_source = list(reference_images)
+        elif parent_variant_img:
             reference_image_source = [parent_variant_img]
+        else:
+            raise ValueError(
+                f"Parent variant {parent_variant_id} has no base_design_image_url"
+            )
 
 
         # Look up jewellery_type from the design
@@ -426,16 +419,32 @@ def refine_design_variant_image(
         if not variant:
             raise ValueError(f"Variant {variant_id} not found for image update")
 
-        # Detect the refined image's metal color (vision) so the UI default-selects the
-        # right swatch and registers the base under ONLY that metal (others regenerate).
+        # Resolve the refined image's metal for the UI swatch. Trust the actual output detection;
+        # but if it fails/returns nothing, do NOT blindly default to "gold" (that mislabeled white /
+        # rose pieces). Fall back to: the user's requested metal -> the SOURCE image's metal (a refine
+        # keeps the source metal unless changed) -> "gold" as the absolute last resort.
+        import base64 as _b64
+        from app.services.openai_service import detect_metal_color, extract_metal_from_prompt
         try:
-            import base64 as _b64
-            from app.services.openai_service import detect_metal_color
-            refined_metal = detect_metal_color(_b64.b64encode(image_bytes).decode("utf-8"))
+            detected = detect_metal_color(_b64.b64encode(image_bytes).decode("utf-8"))
         except Exception as _rm_err:
             logger.warning("Refine metal detection failed for variant=%s: %s", variant_id, _rm_err)
-            refined_metal = "gold"
-        logger.info("Refined image metal detected as '%s' for variant_id=%s", refined_metal, variant_id)
+            detected = None
+        refined_metal = (detected or "").strip().lower() or None
+        if not refined_metal:
+            refined_metal = extract_metal_from_prompt(prompt)
+        if not refined_metal and reference_image_source:
+            try:
+                from app.services.openai_service import download_reference_images
+                _src = reference_image_source[0] if isinstance(reference_image_source, list) else reference_image_source
+                _src_blobs = download_reference_images([_src])
+                if _src_blobs:
+                    _src_metal = detect_metal_color(_b64.b64encode(_src_blobs[0]).decode("utf-8"))
+                    refined_metal = (_src_metal or "").strip().lower() or None
+            except Exception as _se:
+                logger.warning("Source-metal fallback failed for variant=%s: %s", variant_id, _se)
+        refined_metal = refined_metal or "gold"
+        logger.info("Refined image metal resolved as '%s' for variant_id=%s", refined_metal, variant_id)
 
         # Update the variant: new base image + detected metal + clean metal map (only base).
         from app.repositories.design_variant import DesignVariantRepository

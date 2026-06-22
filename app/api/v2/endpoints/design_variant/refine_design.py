@@ -105,11 +105,14 @@ async def refine_design_variant(
     )
 
     # Resolve reference images for AI:
-    # The parent variant's image MUST be the first (primary) image in refinement, serving as the master visual truth.
+    # The RESOLVED SOURCE image (selected metal variant > explicit URL > parent base) MUST be the
+    # first (primary) image — so refining a specific metal variant edits THAT exact image, not the
+    # base metal. (Previously this always used the parent base, which dropped the selected metal.)
     ai_reference_images = []
-    if parent_variant.base_design_image_url:
-        ai_reference_images.append(parent_variant.base_design_image_url)
-    
+    primary_reference = resolved_source_image_url or parent_variant.base_design_image_url
+    if primary_reference:
+        ai_reference_images.append(primary_reference)
+
     # Append any user-provided reference images as secondary resources
     if reference_urls:
         ai_reference_images.extend(reference_urls)
