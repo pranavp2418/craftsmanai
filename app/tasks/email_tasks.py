@@ -913,6 +913,7 @@ Interest: {interest or "Not provided"}
             subject=email_subject,
             html_content=html_content,
             text_content=text_content,
+            from_email=settings.ZEPTOMAIL_FROM_EMAIL,
         )
 
         if not result["success"]:

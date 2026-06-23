@@ -1,5 +1,5 @@
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from sqlalchemy.orm import Session
 from app.core.dependencies import get_db, get_current_user
 from app.schemas.user_profile import ChangePasswordRequest
@@ -9,6 +9,7 @@ from app.core.security import verify_password, get_password_hash, create_access_
 from app.core.token_blacklist import token_blacklist
 from app.core.config import settings
 from app.repositories.user import RefreshTokenRepository
+from app.core.rate_limiter import rate_limiter, get_rate_limit_key
 from jose import jwt
 import logging
 
@@ -21,6 +22,7 @@ router = APIRouter()
 def change_password(
     *,
     db: Session = Depends(get_db),
+    request: Request,
     password_data: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
     response: Response
@@ -34,6 +36,22 @@ def change_password(
     - The refresh token is set as an HTTP-only cookie
     - The new access token is returned in the response body
     """
+    # Check if password change is locked due to too many failed attempts
+    password_change_key = get_rate_limit_key(request, f"password_change:{current_user.id}")
+    
+    is_rate_limited = rate_limiter.is_rate_limited(
+        password_change_key,
+        f"5/{settings.ACCOUNT_LOCKOUT_MINUTES} minutes",
+        bypass_mode_check=True
+    )
+    
+    if is_rate_limited:
+        logger.warning(f"Password change attempt for locked user: {current_user.email}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Too many failed password change attempts. Please try again in {settings.ACCOUNT_LOCKOUT_MINUTES} minutes.",
+        )
+    
     if password_data.new_password != password_data.confirm_new_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -41,6 +59,15 @@ def change_password(
         )
 
     if not verify_password(password_data.current_password, current_user.hashed_password):
+        # Increment failed attempt counter
+        rate_limiter.is_allowed(
+            password_change_key,
+            "5",
+            settings.ACCOUNT_LOCKOUT_MINUTES * 60,
+            bypass_mode_check=True
+        )
+        
+        logger.warning(f"Password change failed - incorrect current password for user: {current_user.email}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect current password"
@@ -144,6 +171,9 @@ def change_password(
         path="/"
     )
 
+    # Reset failed attempts on successful password change
+    # Note: We don't have a direct reset method, but the lockout will expire naturally
+    
     logger.info(f"Password changed successfully for user: {current_user.email}, all devices logged out")
 
     return {

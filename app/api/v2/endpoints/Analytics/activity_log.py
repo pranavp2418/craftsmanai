@@ -1,18 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api import deps
-from app.models.design import Design, DesignShare, DesignShareStatus, DesignVariant, DesignVariantManufacturerShare, ManufacturerShareStatus
-from app.models.manufacturer import Manufacturer
-from app.models.order import Order
+from app.api.deps import get_db, get_current_active_user
 from app.models.user import User
+from app.schemas.analytics import ActivityLogFilter
+from app.services.analytics_service import AnalyticsService
 
 router = APIRouter()
 
@@ -23,120 +20,36 @@ class RecentActivityItem(BaseModel):
     manufacturer: Optional[str] = None
     date: datetime
     status: str
-    actor_type: Literal["manufacturer", "customer"]
+    actor_type: str
 
 
 class RecentActivityResponse(BaseModel):
     items: List[RecentActivityItem]
     total_items: int
-    filter: str
-
-
-CUSTOMER_STATUS_LABELS = {
-    DesignShareStatus.PENDING: "Sent to Customer",
-    DesignShareStatus.ACCEPTED: "Customer Approved",
-    DesignShareStatus.REJECTED: "Customer Rejected",
-    DesignShareStatus.NEEDS_REFINEMENT: "Needs Refinement",
-}
-
-MANUFACTURER_STATUS_LABELS = {
-    ManufacturerShareStatus.PENDING: "Sent to Manufacturer",
-    ManufacturerShareStatus.QUOTED: "Quote Submitted",
-    ManufacturerShareStatus.ACCEPTED: "Manufacturer Accepted",
-    ManufacturerShareStatus.REJECTED: "Manufacturer Rejected",
-}
-
-
-def _design_label(design: Optional[Design]) -> str:
-    if not design:
-        return "Design"
-    return design.jewellery_type or design.name or "Design"
-
-
-def _request_id(design: Optional[Design], fallback_id: int) -> str:
-    if design and design.design_code:
-        return design.design_code
-    return f"REQ-{fallback_id}"
-
-
-def _normalize_filter(value: Optional[str]) -> Literal["manufacturer", "customer"]:
-    normalized = (value or "manufacturer").strip().lower()
-    if normalized == "customer":
-        return "customer"
-    return "manufacturer"
+    filter: Optional[str]
 
 
 @router.get("/activity-log", response_model=RecentActivityResponse)
 async def get_activity_log(
-    db: AsyncSession = Depends(deps.get_db),
-    admin: User = Depends(deps.get_current_active_user),
-    actor_type: Optional[str] = Query("manufacturer", description="Filter by manufacturer or customer"),
-) -> Dict[str, Any]:
-    """Return the five latest customer/manufacturer activity rows."""
-    normalized_filter = _normalize_filter(actor_type)
-    items: List[Dict[str, Any]] = []
-
-    # Filter based on whether user is team member or team owner/regular user
-    owner_id = admin.team_owner_id if admin.is_team_member and admin.team_owner_id else admin.id
-    design_filter = Design.user_id == owner_id
-
-    if normalized_filter == "customer":
-        customer_result = await db.execute(
-            select(DesignShare, Design, Manufacturer.name)
-            .join(DesignShare.design_variant)
-            .join(DesignVariant.design)
-            .outerjoin(DesignShare.order)
-            .outerjoin(Order.manufacturer)
-            .where(design_filter)
-            .order_by(DesignShare.created_at.desc())
-        )
-
-        for share, design, manufacturer_name in customer_result.all():
-            created_at = share.reviewed_at or share.created_at
-            if created_at is None:
-                continue
-            items.append(
-                {
-                    "request_id": _request_id(design, share.id),
-                    "type": _design_label(design),
-                    "manufacturer": manufacturer_name,
-                    "date": created_at,
-                    "status": CUSTOMER_STATUS_LABELS.get(share.status, "Customer Update"),
-                    "actor_type": "customer",
-                }
-            )
-
-    if normalized_filter == "manufacturer":
-        manufacturer_result = await db.execute(
-            select(DesignVariantManufacturerShare, Design, Manufacturer.name)
-            .join(DesignVariantManufacturerShare.design_variant)
-            .join(DesignVariant.design)
-            .join(DesignVariantManufacturerShare.manufacturer)
-            .where(design_filter)
-            .order_by(DesignVariantManufacturerShare.created_at.desc())
-        )
-
-        for share, design, manufacturer_name in manufacturer_result.all():
-            created_at = share.created_at
-            if created_at is None:
-                continue
-            items.append(
-                {
-                    "request_id": _request_id(design, share.id),
-                    "type": _design_label(design),
-                    "manufacturer": manufacturer_name,
-                    "date": created_at,
-                    "status": MANUFACTURER_STATUS_LABELS.get(share.status, "Manufacturer Update"),
-                    "actor_type": "manufacturer",
-                }
-            )
-
-    items.sort(key=lambda item: item["date"], reverse=True)
-    total_items = len(items)
-    items = items[:5]
-
-    return {
-        "items": items,
-        "total_items": total_items,
-        "filter": normalized_filter,
-    }
+    db=Depends(get_db),
+    admin: User = Depends(get_current_active_user),
+    actor_type: Optional[str] = Query(
+        default=None,
+        description="Filter by actor type: 'manufacturer' or 'customer' (case-insensitive). If not provided, returns all activity."
+    ),
+    page: int = Query(default=1, ge=1, description="Page number"),
+    page_size: int = Query(default=10, ge=1, le=100, description="Items per page"),
+) -> RecentActivityResponse:
+    """
+    Return the five latest customer/manufacturer activity rows.
+    
+    Validates:
+    - User is active and not a superuser (RBAC)
+    - actor_type parameter is either 'manufacturer' or 'customer'
+    - User has access to the data (team member filtering)
+    
+    Returns proper 422 validation errors for invalid filter payloads.
+    """
+    service = AnalyticsService(db, admin)
+    filter_data = ActivityLogFilter(actor_type=actor_type, page=page, page_size=page_size)
+    return await service.get_activity_log(filter_data)

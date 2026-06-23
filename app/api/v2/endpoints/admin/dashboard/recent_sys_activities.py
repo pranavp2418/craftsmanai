@@ -2,7 +2,7 @@ from math import ceil
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, cast, String, desc, or_, and_, union
+from sqlalchemy import func, cast, String, desc, or_, and_, union, Integer
 from sqlalchemy.orm import selectinload
 from app.api import deps
 from app.models.user import User
@@ -81,16 +81,39 @@ async def get_activity_logs(
         Design, DesignActivityLog.design_id == Design.id
     ).outerjoin(
         User, DesignActivityLog.user_id == User.id
+    ).outerjoin(
+        Customer,
+        and_(
+            DesignActivityLog.action_type.in_(CUSTOMER_ACTION_TYPES),
+            cast(func.json_extract_path_text(DesignActivityLog.metadata_json, 'customer_id'), Integer) == Customer.id
+        )
+    ).outerjoin(
+        Manufacturer,
+        and_(
+            DesignActivityLog.action_type.in_(MANUFACTURER_ACTION_TYPES),
+            cast(func.json_extract_path_text(DesignActivityLog.metadata_json, 'manufacturer_id'), Integer) == Manufacturer.id
+        )
     ).where(*filters)
 
-    # Search filter
+    # Search filter - searches across all major response fields
     if search:
         search_term = f"%{search}%"
         query = query.where(
             or_(
+                # Reference ID (design code or design id)
                 Design.design_code.ilike(search_term),
+                cast(DesignActivityLog.design_id, String).ilike(search_term),
+                # Action type
                 DesignActivityLog.action_type.ilike(search_term),
-                DesignActivityLog.message.ilike(search_term)
+                # Message
+                DesignActivityLog.message.ilike(search_term),
+                # Actor name - Admin/Retailer (User)
+                User.full_name.ilike(search_term),
+                User.email.ilike(search_term),
+                # Actor name - Customer
+                Customer.full_name.ilike(search_term),
+                # Actor name - Manufacturer
+                Manufacturer.name.ilike(search_term),
             )
         )
     
@@ -104,15 +127,38 @@ async def get_activity_logs(
         Design, DesignActivityLog.design_id == Design.id
     ).outerjoin(
         User, DesignActivityLog.user_id == User.id
+    ).outerjoin(
+        Customer,
+        and_(
+            DesignActivityLog.action_type.in_(CUSTOMER_ACTION_TYPES),
+            cast(func.json_extract_path_text(DesignActivityLog.metadata_json, 'customer_id'), Integer) == Customer.id
+        )
+    ).outerjoin(
+        Manufacturer,
+        and_(
+            DesignActivityLog.action_type.in_(MANUFACTURER_ACTION_TYPES),
+            cast(func.json_extract_path_text(DesignActivityLog.metadata_json, 'manufacturer_id'), Integer) == Manufacturer.id
+        )
     ).where(*filters)
 
     if search:
         search_term = f"%{search}%"
         count_query = count_query.where(
             or_(
+                # Reference ID (design code or design id)
                 Design.design_code.ilike(search_term),
+                cast(DesignActivityLog.design_id, String).ilike(search_term),
+                # Action type
                 DesignActivityLog.action_type.ilike(search_term),
-                DesignActivityLog.message.ilike(search_term)
+                # Message
+                DesignActivityLog.message.ilike(search_term),
+                # Actor name - Admin/Retailer (User)
+                User.full_name.ilike(search_term),
+                User.email.ilike(search_term),
+                # Actor name - Customer
+                Customer.full_name.ilike(search_term),
+                # Actor name - Manufacturer
+                Manufacturer.name.ilike(search_term),
             )
         )
 
