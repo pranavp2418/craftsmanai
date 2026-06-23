@@ -222,6 +222,13 @@ class DeviceRepository:
             and_(UserDevice.user_id == user_id, UserDevice.is_active == True)
         ).count()
 
+    def get_oldest_devices(self, user_id: int, count: int) -> List[UserDevice]:
+        """Get the oldest devices for a user that should be revoked"""
+        devices = self.get_user_devices(user_id, active_only=True)
+        # Sort by last_used (oldest first)
+        devices.sort(key=lambda x: x.last_used or datetime.min.replace(tzinfo=timezone.utc))
+        return devices[:count]
+
     def revoke_old_devices(self, user_id: int, max_devices: int) -> int:
         """Revoke oldest devices if exceeding max limit"""
         devices = self.get_user_devices(user_id, active_only=True)

@@ -20,7 +20,7 @@ class TestAuthentication:
         user_data = {
             "email": unique_email,
             "password": "TestPass123!",
-            "whatsapp_number": "+1234567890"
+            "whatsapp_number": "+919876543210"
         }
         response = client.post("/api/v2/auth/signup", json=user_data)
         
@@ -36,7 +36,7 @@ class TestAuthentication:
         user_data = {
             "email": f"dup_verified_{suffix}@example.com",
             "password": "TestPass123!",
-            "whatsapp_number": "+1234567890"
+            "whatsapp_number": "+919876543210"
         }
         # First registration
         client.post("/api/v2/auth/signup", json=user_data)
@@ -70,7 +70,7 @@ class TestAuthentication:
         user_data = {
             "email": f"dup_unverified_{suffix}@example.com",
             "password": "TestPass123!",
-            "whatsapp_number": "+1234567890"
+            "whatsapp_number": "+919876543210"
         }
         # First registration (creates unverified user)
         first_response = client.post("/api/v2/auth/signup", json=user_data)
@@ -204,7 +204,7 @@ class TestAuthentication:
             "username": unique_username,
             "full_name": "Test User",
             "password": "TestPass123!",
-            "whatsapp_number": "+1234567890"
+            "whatsapp_number": "+919876543210"
         }
         signup_response = client.post("/api/v2/auth/signup", json=signup_data)
         assert signup_response.status_code == 201
@@ -372,7 +372,7 @@ class TestAuthenticationSecurity:
         signup_data = {
             "email": unique_email,
             "password": "TestPass123!",
-            "whatsapp_number": "+1234567890"
+            "whatsapp_number": "+919876543210"
         }
         
         # Step 1: Signup
@@ -402,7 +402,7 @@ class TestAuthenticationSecurity:
             "username": unique_username,
             "full_name": "Test User",
             "password": "TestPass123!",
-            "whatsapp_number": "+1234567890"
+            "whatsapp_number": "+919876543210"
         }
         signup_response = client.post("/api/v2/auth/signup", json=signup_data)
         assert signup_response.status_code == 201
@@ -466,7 +466,7 @@ class TestAuthenticationSecurity:
             "username": unique_username,
             "full_name": "Test User",
             "password": "TestPass123!",
-            "whatsapp_number": "+1234567890"
+            "whatsapp_number": "+919876543210"
         }
         signup_response = client.post("/api/v2/auth/signup", json=signup_data)
         assert signup_response.status_code == 201

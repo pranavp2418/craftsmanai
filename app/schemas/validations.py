@@ -2,6 +2,7 @@ import json
 import re
 from typing import Annotated, Iterable, Optional, Set, Type
 
+import phonenumbers
 from email_validator import EmailNotValidError, validate_email
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -58,23 +59,30 @@ def normalize_phone_number(phone_number: Optional[str], *, validate: bool = Fals
         return None
 
     phone_text = phone_number.strip()
+    
     if validate:
-        if not re.fullmatch(r"\+[\d\s\-()]{3,20}", phone_text):
+        try:
+            parsed_number = phonenumbers.parse(phone_text, None)
+            if not phonenumbers.is_valid_number(parsed_number):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Invalid phone number",
+                )
+        except phonenumbers.NumberParseException:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Invalid phone number format",
             )
 
-    normalized_phone = re.sub(r"[\s\-()]", "", phone_text)
-    
-    if validate:
-        if len(normalized_phone) < 10 or len(normalized_phone) > 15:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Phone number must be between 10 and 15 digits (including country code)",
-            )
-
-    return normalized_phone
+    # Normalize to E.164 format (e.g., +919876543210)
+    try:
+        parsed_number = phonenumbers.parse(phone_text, None)
+        normalized_phone = phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.E164)
+        return normalized_phone
+    except phonenumbers.NumberParseException:
+        # If parsing fails during normalization, return cleaned version
+        normalized_phone = re.sub(r"[\s\-()]", "", phone_text)
+        return normalized_phone
 
 
 def find_contact_conflict(
