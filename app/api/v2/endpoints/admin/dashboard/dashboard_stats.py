@@ -27,7 +27,7 @@ async def get_dashboard_stats(
     # Total retailers - count all users except superusers
     total_retailers_result = await db.execute(
         select(func.count(User.id)).where(User.is_superuser == False,
-        User.is_verfied == True
+        User.is_verified == True
         )
     )
     total_retailers = total_retailers_result.scalar() or 0

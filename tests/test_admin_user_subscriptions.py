@@ -270,6 +270,49 @@ class TestUserSubscriptionsEndpoint:
             _cleanup_user(admin_email)
             _cleanup_plan(plan.id)
 
+    def test_status_filter_multiple_statuses(self, client: TestClient):
+        """?status=ACTIVE,CANCELLED or multiple status params should return matching subscriptions."""
+        admin_email = "usub_admin_mstatus@example.com"
+        retailer_a_email = "usub_ret_m_active@example.com"
+        retailer_c_email = "usub_ret_m_cancelled@example.com"
+        retailer_e_email = "usub_ret_m_expired@example.com"
+        plan = _create_plan("Multiple Status Filter Plan")
+        try:
+            admin = _create_user(admin_email, "usub_admin_mstatus", is_admin=True)
+            retailer_a = _create_user(retailer_a_email, "usub_ret_m_active")
+            retailer_c = _create_user(retailer_c_email, "usub_ret_m_cancelled")
+            retailer_e = _create_user(retailer_e_email, "usub_ret_m_expired")
+            _add_subscription(retailer_a.id, plan.id, status=SubscriptionStatus.ACTIVE)
+            _add_subscription(retailer_c.id, plan.id, status=SubscriptionStatus.CANCELLED)
+            _add_subscription(retailer_e.id, plan.id, status=SubscriptionStatus.EXPIRED)
+
+            headers = _bearer(admin)
+            # Test comma-separated string
+            resp = client.get(BASE_URL + "?status=ACTIVE,CANCELLED", headers=headers)
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["success"] is True
+            statuses = {record["status"] for record in body["data"]}
+            assert "ACTIVE" in statuses
+            assert "CANCELLED" in statuses
+            assert "EXPIRED" not in statuses
+
+            # Test multiple status query params
+            resp2 = client.get(BASE_URL + "?status=ACTIVE&status=EXPIRED", headers=headers)
+            assert resp2.status_code == 200
+            body2 = resp2.json()
+            assert body2["success"] is True
+            statuses2 = {record["status"] for record in body2["data"]}
+            assert "ACTIVE" in statuses2
+            assert "EXPIRED" in statuses2
+            assert "CANCELLED" not in statuses2
+        finally:
+            _cleanup_user(retailer_a_email)
+            _cleanup_user(retailer_c_email)
+            _cleanup_user(retailer_e_email)
+            _cleanup_user(admin_email)
+            _cleanup_plan(plan.id)
+
     # ------------------------------------------------------------------
     # 4. Search filter – by email
     # ------------------------------------------------------------------
