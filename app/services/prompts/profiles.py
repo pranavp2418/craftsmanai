@@ -65,7 +65,8 @@ JEWELLERY_PROFILES = {
     # Hanging pieces — bail required, lettering-first.
     "pendant": _p("pendant", BAIL_ADD_IF_MISSING, TEXT_PRIMARY,
                   {MODULE_TEXT, MODULE_STONE, MODULE_SKETCH, MODULE_BACKING, MODULE_LAYERED}, front=False),
-    "necklace": _p("necklace", BAIL_ADD_IF_MISSING, TEXT_IF_DETECTED,
+    # Necklace = chain/nameplate. Client wants NO auto-bail here (only pendant/charm get a bail).
+    "necklace": _p("necklace", BAIL_NONE, TEXT_IF_DETECTED,
                    {MODULE_TEXT, MODULE_STONE, MODULE_LAYERED}, front=False),
 
     # Rings (signet / class rings are just rings — no separate profile).
@@ -108,8 +109,8 @@ def resolve_profile(item_type: str) -> JewelleryProfile:
     if any(k in t for k in ["pendant", "necklace", "charm"]):
         return JEWELLERY_PROFILES["pendant"] if ("pendant" in t or "charm" in t) else JEWELLERY_PROFILES["necklace"]
 
-    # Generic / blank / custom -> the product is predominantly pendants, but we do NOT force a
-    # bail onto a named custom object; the "custom" profile is bail-less and lettering-on-detect.
-    if t in ("", "jewelry", "jewellery", "custom", "custom object", "other"):
-        return JEWELLERY_PROFILES["pendant"]
+    # Generic / blank / custom / unknown -> the bail-LESS "custom" profile.
+    # We do NOT default to the pendant profile any more: that forced a bail onto rings and every
+    # ambiguous / "Custom" piece (the client's #1 complaint). A bail is added ONLY for an explicit
+    # pendant / necklace / charm matched above.
     return JEWELLERY_PROFILES["custom"]

@@ -196,9 +196,9 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             # Use the newly migrated Gemini high-fidelity pipeline (Primary + Fallback + QA Checks)
             generated_item = openai_service.generate_base_image(
                 image_source=reference_image_source,
-                user_prompt=prompt,
-                jewellery_type=design.jewellery_type or "pendant",
-                metal_tone=None
+                user_prompt=gen_prompt,
+                jewellery_type=design.jewellery_type or "",
+                metal_tone=input_metal,
             )
 
             # Retrieve the dynamically detected metal tone from the vision translator

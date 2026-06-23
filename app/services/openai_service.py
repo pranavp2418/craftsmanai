@@ -2507,6 +2507,51 @@ def generate_with_gemini_image(image_blobs, prompt_text: str) -> Optional[str]:
         return None
 
 
+def generate_primary_image(
+    image_urls: list[str],
+    prompt_text: str,
+    pre_downloaded_blobs: list[bytes] | None = None,
+    whiten_output: bool = True,
+) -> str:
+    """Primary jewelry image generator for MAIN generation, REFINEMENT and METAL-COLOUR change.
+
+    Routes to the provider in settings.IMAGE_PROVIDER:
+      * "gemini" -> gemini-2.5-flash-image (FAST, ~seconds). On any failure/empty result it
+        falls back to OpenAI gpt-image-2 so generation never breaks.
+      * "openai" -> gpt-image-2 (slow).
+    Side ANGLES intentionally still call generate_with_openai_image directly (OpenAI renders
+    angles better), so they are unaffected by this switch.
+
+    Gemini returns a raw render with no white-background post-process, so we apply the same
+    flood-fill whitening the OpenAI path uses (unless whiten_output is False for worn/lifestyle).
+    """
+    provider = (getattr(settings, "IMAGE_PROVIDER", "openai") or "openai").strip().lower()
+    if provider == "gemini":
+        blobs = pre_downloaded_blobs
+        if blobs is None and image_urls:
+            blobs = download_reference_images(image_urls)
+        g64 = None
+        try:
+            g64 = generate_with_gemini_image(blobs or [], prompt_text)
+        except Exception as _ge:
+            logger.warning("Gemini primary generation errored (%s) — falling back to OpenAI", _ge)
+        if g64:
+            if whiten_output:
+                try:
+                    g64 = base64.b64encode(
+                        _whiten_background(base64.b64decode(g64), tag="gemini_primary_white_bg")
+                    ).decode("utf-8")
+                except Exception as _w:
+                    logger.warning("Gemini output white-bg post-process skipped: %s", _w)
+            logger.info("Primary image generated via Gemini (gemini-2.5-flash-image)")
+            return g64
+        logger.warning("Gemini primary returned no image — falling back to OpenAI gpt-image-2")
+
+    return generate_with_openai_image(
+        image_urls, prompt_text, pre_downloaded_blobs=pre_downloaded_blobs, whiten_output=whiten_output,
+    )
+
+
 def generate_with_openai_image(
     image_urls: list[str],
     prompt_text: str,
@@ -3244,13 +3289,19 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
         return " Render as a pendant BAIL — the small top loop a chain passes through."
     if "body" in t:
         return " Render as wearable BODY JEWELRY suited to the design."
-    if any(k in t for k in ["pendant", "necklace", "charm"]):
+    if "pendant" in t or "charm" in t:
         return _PENDANT
+    if "necklace" in t:
+        return (" Render as a wearable NECKLACE / nameplate — the lettering/design as one connected, "
+                "wearable unit. Do NOT add a separate pendant bail/hook.")
     # Custom / unknown type the user typed in: render it as that exact named object — do NOT
     # force a pendant bail onto it. Only fall back to a pendant for a truly generic/blank type.
     if t and t not in ("jewelry", "jewellery", "custom", "custom object", "other"):
         return f" Render as a real, wearable {item_type} — the actual {item_type} form, not a pendant (no bail unless the {item_type} naturally hangs from a chain)."
-    return _PENDANT
+    # Generic / blank / 'custom' type -> NEUTRAL form, NO forced bail. (A bail on a ring / unknown
+    # piece was the client's #1 complaint.) A bail is added only for an explicit pendant/necklace/charm.
+    return (" Render as a clean, wearable jewelry piece in its natural form. Add a top bail/hook ONLY "
+            "if the piece is a pendant / charm / hanging piece; for any other form do NOT add a bail.")
 
 
 def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[str, Any]], metal_tone: str, has_images: bool, image_count: int = 0) -> str:
@@ -3814,6 +3865,23 @@ def generate_with_fallback(
     ref_blobs = download_reference_images(resolved_image_urls) if resolved_image_urls else None
     input_b64 = base64.b64encode(ref_blobs[0]).decode("utf-8") if ref_blobs else None
 
+    # BAIL-GUARD (initial, image-input): if the DECLARED type would add a pendant bail but the
+    # reference IMAGE is clearly a non-hanging piece (ring/bracelet/earring/grill/watch/anklet),
+    # trust the image and override the type so we never slap a bail onto a ring. This covers the
+    # case where the frontend sends the wrong/"Pendant"/blank type. Only the (cheap) cases that
+    # would otherwise add a bail trigger the vision call.
+    if not is_refine and has_reference_image and input_b64:
+        try:
+            from app.services.prompts.profiles import resolve_profile as _resolve_profile
+            _declared = ((parsed_data or {}).get("item_type") or "")
+            if _resolve_profile(_declared).bail_policy != "none":
+                _piece = (detect_jewelry_piece_type(input_b64) or "").strip().lower()
+                if _piece in ("ring", "bracelet", "earring", "grill", "watch", "anklet"):
+                    parsed_data = {**(parsed_data or {}), "item_type": _piece}
+                    logger.info("[bail-guard] declared type='%s' but reference image is a '%s' -> overriding, no bail", _declared, _piece)
+        except Exception as _bg_err:
+            logger.warning("[bail-guard] piece-type check failed: %s", _bg_err)
+
     # Detect the reference's letter casing (via OCR) so a name/number change keeps the
     # SAME case as the input image — not however the user typed it. Only when the user
     # didn't explicitly request a case.
@@ -3878,9 +3946,10 @@ def generate_with_fallback(
     for qa_attempt in range(1, max_qa_attempts + 1):
         prompt_text = compose_prompt(qa_attempt, correction_notes)
 
-        logger.info("[OpenAI gpt-image-2] Attempt %d/%d, mode=%s, prompt_len=%d, spelling=%s, fidelity=%s",
-                    qa_attempt, max_qa_attempts, selected_mode, len(prompt_text), needs_spelling_check, needs_fidelity_check)
-        b64 = generate_with_openai_image(resolved_image_urls, prompt_text, pre_downloaded_blobs=ref_blobs)
+        logger.info("[image-gen provider=%s] Attempt %d/%d, mode=%s, prompt_len=%d, spelling=%s, fidelity=%s",
+                    getattr(settings, "IMAGE_PROVIDER", "openai"), qa_attempt, max_qa_attempts, selected_mode,
+                    len(prompt_text), needs_spelling_check, needs_fidelity_check)
+        b64 = generate_primary_image(resolved_image_urls, prompt_text, pre_downloaded_blobs=ref_blobs)
         final_b64 = b64
 
         # Last attempt — accept whatever we have, no point checking further.

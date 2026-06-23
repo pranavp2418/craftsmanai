@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     # OpenAI / generative AI
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_IMAGE_MODEL: str = "gpt-image-1.5"
+    # Primary image generator for MAIN generation + REFINEMENT + METAL-COLOUR change.
+    # "gemini" -> gemini-2.5-flash-image (fast, ~seconds; falls back to OpenAI on failure).
+    # "openai" -> gpt-image-2 (slow, ~minutes). Side ANGLES always use OpenAI regardless.
+    IMAGE_PROVIDER: str = "gemini"
+    GEMINI_IMAGE_MODEL: str = "gemini-2.5-flash-image"
 
     # Logging
     LOG_LEVEL: str = "INFO"
