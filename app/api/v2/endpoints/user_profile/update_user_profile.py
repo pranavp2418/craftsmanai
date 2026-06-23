@@ -56,7 +56,13 @@ def update_user_profile(
         current_user.whatsapp_number = profile_data.whatsapp_number.strip()
     
     if profile_data.business_name is not None:
-        current_user.business_name = profile_data.business_name.strip()
+        stripped = profile_data.business_name.strip()
+        if not stripped:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Business name cannot be empty"
+            )
+        current_user.business_name = stripped
 
     db.commit()
     db.refresh(current_user)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
-from typing import Optional
-from pydantic import BaseModel
+from typing import Any, Optional
+from pydantic import BaseModel, model_validator
 
 
 class NotificationSettingUpdateRequest(BaseModel):
@@ -10,6 +10,17 @@ class NotificationSettingUpdateRequest(BaseModel):
     design_approval_alerts: Optional[bool] = None
     manufacturer_updates: Optional[bool] = None
     quote_reminders: Optional[bool] = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def reject_null_values(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            null_fields = [key for key, value in data.items() if value is None]
+            if null_fields:
+                raise ValueError(
+                    f"The following fields cannot be null: {', '.join(null_fields)}"
+                )
+        return data
 
 
 class NotificationSettingResponse(BaseModel):
