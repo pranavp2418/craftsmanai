@@ -19,7 +19,10 @@ Design rules:
 """
 
 from .profiles import JewelleryProfile, JEWELLERY_PROFILES, resolve_profile
-from .common import COMMON_SYSTEM_PROMPT, PRIORITY_HEADER, OUTPUT_CONTRACT, metal_lock_clause
+from .common import (
+    COMMON_SYSTEM_PROMPT, MASTER_INITIAL, MASTER_REFINE,
+    PRIORITY_HEADER, OUTPUT_CONTRACT, metal_lock_clause, normalize_retailer_language,
+)
 from .initial import build_initial_prompt
 from .refine import build_refine_prompt
 

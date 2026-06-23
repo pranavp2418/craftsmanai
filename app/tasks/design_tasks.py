@@ -191,12 +191,25 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             # The user-facing `prompt` itself is saved/displayed; `gen_prompt` goes to the model.
             gen_prompt = (prompt or "") + _internal
 
+            # PARSE-FIRST (Lovable-style): convert the request + reference image into a STRUCTURED
+            # design state (source_kind / intent / item_type / metal / normalized note) so the prompt
+            # builder routes to a focused template instead of building from raw user language.
+            # Uses the user-facing `prompt` (not the internal additions). Fail-open inside.
+            parsed_state = None
+            try:
+                from app.services.parse_request_service import parse_request
+                _ref_list = reference_image_source if isinstance(reference_image_source, list) else ([reference_image_source] if reference_image_source else [])
+                parsed_state = parse_request(prompt or "", image_urls=_ref_list, item_type_hint=design.jewellery_type or "")
+            except Exception as _pe:
+                logger.warning("parse_request failed for design_id=%s: %s", design_id, _pe)
+
             # Use the newly migrated Gemini high-fidelity pipeline (Primary + Fallback + QA Checks)
             generated_item = openai_service.generate_base_image(
                 image_source=reference_image_source,
                 user_prompt=gen_prompt,
                 jewellery_type=design.jewellery_type or "",
                 metal_tone=input_metal,
+                parsed_data=parsed_state,
             )
 
             final_image_bytes, content_type = _extract_generated_image_data(generated_item)

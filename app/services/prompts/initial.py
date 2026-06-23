@@ -1,25 +1,20 @@
-"""Initial-generation prompt assembler (config-registry driven).
+"""Initial-generation prompt assembler (parse-first, intent-routed — Lovable-style).
 
 `build_initial_prompt(...)` has the SAME signature as the old
 `openai_service._build_concise_initial_prompt`, so it is a drop-in replacement.
 
-Structure (the "common system prompt + user prompt" model the client asked for):
-  * COMMON_SYSTEM_PROMPT  -> the shared, adjustable "system" layer (one place to tune).
+Structure:
+  * COMMON_SYSTEM_PROMPT  -> the shared, adjustable "system" layer.
+  * INTENT-DRIVEN focused directive -> chosen from parsedData.intent / source_kind
+    (render_as_is, image_enhancement_only, convert_to_jewelry, sketch_to_render, modify_existing,
+    text_to_render). This is the "router → one focused template per job" idea from the Lovable
+    prototype: build from the parsed structured state, not raw user language.
   * a short type/form line -> only what the jewellery type structurally needs (e.g. pendant bail).
-  * USER REQUEST           -> the client's OWN prompt, verbatim and DOMINANT — it drives the render.
+  * USER REQUEST           -> the client's OWN prompt, dominant; plus normalized retailer directives.
   * opt-in modules         -> attached only for text-only renders, gated by the type's profile.
 
-Behaviours / fixes:
-  * IMAGE inputs stay SHORT (proven gpt-image-2 insight). Preservation + "diamonds stay
-    diamonds" now live in COMMON_SYSTEM_PROMPT, so the per-image text is lean and the user's
-    request is front-and-centre.
-  * Pendant bail is ONE coherent instruction (no "identical vs add bail" contradiction).
-  * METAL: no default "light yellow gold" note is forced onto image inputs (it only applies
-    when yellow gold is actually the effective metal) — this stops white/rose pieces drifting.
-  * Capability rule-blocks attach ONLY when the type's profile allows AND they are detected.
-
-All rule TEXT and detection helpers are read lazily from openai_service (single source of
-truth); this module imports nothing from it at import time (no circular imports).
+All rule TEXT and detection helpers are read lazily from openai_service (single source of truth);
+this module imports nothing from it at import time (no circular imports).
 """
 
 from __future__ import annotations
@@ -33,7 +28,10 @@ from .profiles import (
     BAIL_ADD_IF_MISSING, BAIL_PRESERVE,
     TEXT_PRIMARY, TEXT_IF_DETECTED,
 )
-from .common import COMMON_SYSTEM_PROMPT, light_gold_note, diamond_cut_clause, metal_conversion_clause
+from .common import (
+    COMMON_SYSTEM_PROMPT, light_gold_note, diamond_cut_clause, metal_conversion_clause,
+    normalize_retailer_language,
+)
 
 
 _USER_METAL_WORDS = ["white gold", "rose gold", "yellow gold", "platinum", "silver", "10k", "14k", "18k"]
@@ -44,6 +42,24 @@ _TEXT_WORDS = ["name", "initial", "letter", "number", "word", "text", "monogram"
 def _has_text_intent(user_prompt: str) -> bool:
     p = (user_prompt or "").lower()
     return bool(re.search(r"[0-9]", user_prompt or "")) or any(w in p for w in _TEXT_WORDS)
+
+
+def _intent_directive(intent: str, source_kind: str, item_type: str, has_user_prompt: bool) -> str:
+    """A single focused instruction chosen from the parsed intent (Lovable-style job routing)."""
+    if intent == "render_as_is" or (source_kind == "jewelry_reference" and not has_user_prompt):
+        return (" Reproduce this EXACT piece as a clean CAD render — do NOT redesign, 'improve', enlarge stones, "
+                "simplify, or add anything. Same shape, same every stone, same metal, same lettering.")
+    if intent == "image_enhancement_only":
+        return (" ENHANCEMENT ONLY (this is NOT a redesign): keep the design 100% identical and only make it a "
+                "cleaner, sharper, more premium CAD render.")
+    if intent == "convert_to_jewelry" or source_kind == "non_jewelry_reference":
+        return (f" CONVERT THIS IMAGE INTO A WEARABLE {item_type.upper()}: keep the subject's overall shape, outline, "
+                "proportions and negative space, but render it as REAL 3D metal jewelry (not a flat graphic). Map any "
+                "coloured regions to appropriate metal / enamel / gemstone equivalents.")
+    if intent == "sketch_to_render" or source_kind == "sketch":
+        return (" This is a hand-drawn SKETCH — treat the drawn lines as the intended design and produce a clean, "
+                "realistic, manufacturable CAD render of that design. Do NOT copy pencil strokes, shading or paper.")
+    return ""  # modify_existing / default -> handled by the normal USER REQUEST
 
 
 def build_initial_prompt(
@@ -57,20 +73,23 @@ def build_initial_prompt(
     # Lazy import — guarantees no circular import and a single source of truth for rule text.
     from app.services import openai_service as svc
 
-    item_type = (parsed_data or {}).get("item_type") or svc.infer_item_type_from_prompt(user_prompt) or "jewelry"
+    parsed = parsed_data or {}
+    item_type = parsed.get("item_type") or svc.infer_item_type_from_prompt(user_prompt) or "jewelry"
     profile = resolve_profile(item_type)
     lower = (user_prompt or "").lower()
     user_named_metal = any(m in lower for m in _USER_METAL_WORDS)
+    intent = (parsed.get("intent") or "").strip().lower()
+    source_kind = (parsed.get("source_kind") or "").strip().lower()
 
     if has_images:
-        return _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, user_named_metal)
-    return _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone, user_named_metal)
+        return _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, user_named_metal, intent, source_kind)
+    return _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone, user_named_metal, intent)
 
 
 # ---------------------------------------------------------------------------
 # IMAGE-INPUT branch — kept intentionally SHORT; user request is dominant.
 # ---------------------------------------------------------------------------
-def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, user_named_metal) -> str:
+def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, user_named_metal, intent="", source_kind="") -> str:
     keep_ref_angle = not svc._user_wants_front(user_prompt)
     angle_phrase = (
         "keeping the SAME camera angle as the reference image" if keep_ref_angle
@@ -92,7 +111,11 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
     else:
         form_line = f"Render this reference as a {item_type}, {angle_phrase}.{svc._type_form_clause(item_type, user_prompt)}"
 
-    # USER REQUEST — the client's own prompt, dominant and verbatim.
+    # Intent-driven focused directive (from the parse-first structured state).
+    intent_directive = _intent_directive(intent, source_kind, item_type, bool(user_prompt))
+
+    # USER REQUEST — the client's own prompt, dominant and verbatim, + normalized retailer directives.
+    retail = normalize_retailer_language(user_prompt)
     if svc._is_metal_only_change(user_prompt):
         mp = svc._detected_metal_phrase(user_prompt) or "the requested metal"
         user_request = (
@@ -110,7 +133,6 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
     else:
         gold_note = ""
 
-    # Sketch: short note (not the full rule block, to keep the image prompt minimal).
     sketch_note = ""
     if profile.allows(MODULE_SKETCH) and any(w in lower for w in _SKETCH_WORDS):
         sketch_note = (
@@ -132,16 +154,21 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
             "COMBINE them into ONE unified piece — do NOT output them separately or side by side."
         )
 
-    # "diamond cut" = a metal finish (not diamonds); and if the user named a metal, convert the
-    # reference's colours to solid metal (fixes coloured-logo -> solid-gold conversions).
+    # "diamond cut" = a metal finish (not diamonds); convert a coloured logo/graphic to solid metal
+    # when a metal is named OR the intent is convert_to_jewelry.
     dcut = diamond_cut_clause(user_prompt)
-    metal_convert = metal_conversion_clause(svc._detected_metal_phrase(user_prompt)) if user_named_metal else ""
+    if user_named_metal:
+        metal_convert = metal_conversion_clause(svc._detected_metal_phrase(user_prompt))
+    elif intent == "convert_to_jewelry" or source_kind == "non_jewelry_reference":
+        metal_convert = metal_conversion_clause("yellow gold")  # default solid metal for a logo conversion
+    else:
+        metal_convert = ""
 
     return f"""{COMMON_SYSTEM_PROMPT}
 
-{form_line}
+{form_line}{intent_directive}
 
-{user_request}{sketch_note}{variations_block}{merge_block}{metal_convert}{dcut}{gold_note}
+{user_request}{retail}{sketch_note}{variations_block}{merge_block}{metal_convert}{dcut}{gold_note}
 
 One image only."""
 
@@ -149,8 +176,7 @@ One image only."""
 # ---------------------------------------------------------------------------
 # TEXT-ONLY branch — fuller, but capability modules are profile-gated.
 # ---------------------------------------------------------------------------
-def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone, user_named_metal) -> str:
-    # Metal: user-named metal drives it; otherwise the profile default.
+def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone, user_named_metal, intent="") -> str:
     effective_metal = "" if user_named_metal else profile.default_metal
     metal_phrase = f" in {effective_metal}" if effective_metal else ""
     if effective_metal:
@@ -175,7 +201,6 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
             "only by the requested variation."
         )
 
-    # Profile-gated capability modules (this is the per-type differentiation).
     include_stone = profile.allows(MODULE_STONE)
     include_text = profile.allows(MODULE_TEXT) and (
         profile.text_policy == TEXT_PRIMARY or (profile.text_policy == TEXT_IF_DETECTED and _has_text_intent(user_prompt))
@@ -192,13 +217,14 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
 
     gold_note = light_gold_note(effective_metal)
     dcut = diamond_cut_clause(user_prompt)
+    retail = normalize_retailer_language(user_prompt)
     body = user_prompt if user_prompt else f"a simple plain {item_type}"
 
     return f"""{COMMON_SYSTEM_PROMPT}
 
 Create a {item_type}{metal_phrase}, front-facing and centered.{type_line}{plain_note}
 
-USER REQUEST (design exactly and only what this describes): {body}{font_style_block}{layered_block}{variations_block}
+USER REQUEST (design exactly and only what this describes): {body}{retail}{font_style_block}{layered_block}{variations_block}
 
 {modules_block}{gold_note}{dcut}
 

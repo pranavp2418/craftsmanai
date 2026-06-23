@@ -4150,13 +4150,18 @@ class OpenAIService:
         jewellery_type: str = "",
         size: str = "1024x1024",
         mode: Optional[str] = None,
-        metal_tone: str = "yellow_gold"
+        metal_tone: str = "yellow_gold",
+        parsed_data: Optional[Dict[str, Any]] = None,
     ) -> OpenAIImageObject:
         """
         Generate base image using full Gemini pipeline (Primary + Fallback + QA checks).
 
         metal_tone defaults to yellow_gold but the caller should pass the metal DETECTED
         from the input image (e.g. 'silver') so a silver reference doesn't come out gold.
+
+        parsed_data: optional STRUCTURED design state (from parse_request_service) — carries
+        source_kind / intent / metal etc. so the prompt builder can route to a focused template.
+        Falls back to {"item_type": jewellery_type} when not supplied.
         """
         logger.info("Generating base image using Gemini Pipeline (metal_tone=%s)", metal_tone)
 
@@ -4168,10 +4173,17 @@ class OpenAIService:
             else:
                 selected_mode = "initial"
 
+        # Prefer the rich parsed_data; ensure item_type is populated from the jewellery_type hint.
+        _pd = dict(parsed_data) if parsed_data else None
+        if _pd is not None and not _pd.get("item_type") and jewellery_type:
+            _pd["item_type"] = jewellery_type
+        if _pd is None and jewellery_type:
+            _pd = {"item_type": jewellery_type}
+
         result = generate_with_fallback(
             image_source=image_source,
             user_prompt=user_prompt,
-            parsed_data={"item_type": jewellery_type} if jewellery_type else None,
+            parsed_data=_pd,
             metal_tone=metal_tone or "yellow_gold",
             mode=selected_mode
         )
