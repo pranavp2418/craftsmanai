@@ -9,18 +9,23 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from app.core.config import settings
 import logging
+from collections import defaultdict
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
+
+# In-memory fallback for login lockout when Redis is unavailable
+_login_lockout_memory_store: Dict[str, list] = defaultdict(list)
 
 # Lazy Redis connection for rate limiting
 _redis_client = None
 
-def get_redis_client():
+def get_redis_client(bypass_mode_check: bool = False):
     """Lazy load Redis client - skip in test/development mode"""
     global _redis_client
     
-    # In test or development mode, don't connect to Redis
-    if os.environ.get("TESTING") == "true" or settings.ENV in {"test", "development"}:
+    # In test or development mode, don't connect to Redis (unless bypass_mode_check is True)
+    if not bypass_mode_check and (os.environ.get("TESTING") == "true" or settings.ENV in {"test", "development"}):
         return None
     
     if _redis_client is None:
@@ -61,16 +66,16 @@ class RateLimiter:
     def __init__(self):
         self.redis = None  # Will be loaded lazily
 
-    def get_redis(self):
+    def get_redis(self, bypass_mode_check: bool = False):
         """Get Redis client, lazily loading if needed"""
-        if os.environ.get("TESTING") == "true" or settings.ENV in {"test", "development"}:
+        if not bypass_mode_check and (os.environ.get("TESTING") == "true" or settings.ENV in {"test", "development"}):
             return None
         
         if self.redis is None:
-            self.redis = get_redis_client()
+            self.redis = get_redis_client(bypass_mode_check=bypass_mode_check)
         return self.redis
 
-    def is_allowed(self, key: str, limit: str, window: int) -> tuple[bool, Dict[str, Any]]:
+    def is_allowed(self, key: str, limit: str, window: int, bypass_mode_check: bool = False) -> tuple[bool, Dict[str, Any]]:
         """
         Check if request is allowed based on rate limit
         
@@ -78,12 +83,13 @@ class RateLimiter:
             key: Redis key for rate limiting
             limit: Maximum requests allowed
             window: Time window in seconds
+            bypass_mode_check: If True, skip development/test mode bypass (for security features like login lockout)
             
         Returns:
             tuple of (is_allowed, info_dict)
         """
-        # Skip rate limiting in test/development mode
-        if os.environ.get("TESTING") == "true" or settings.ENV in {"test", "development"}:
+        # Skip rate limiting in test/development mode (unless bypass_mode_check is True)
+        if not bypass_mode_check and (os.environ.get("TESTING") == "true" or settings.ENV in {"test", "development"}):
             return True, {
                 "limit": limit,
                 "remaining": limit,
@@ -91,15 +97,19 @@ class RateLimiter:
                 "retry_after": 0
             }
         
-        redis = self.get_redis()
+        redis = self.get_redis(bypass_mode_check=bypass_mode_check)
         if redis is None:
-            # If Redis is unavailable, allow the request
-            return True, {
-                "limit": limit,
-                "remaining": limit,
-                "reset": int(time.time()) + window,
-                "retry_after": 0
-            }
+            # If Redis is unavailable, use in-memory fallback for login lockout
+            if bypass_mode_check:
+                return self._is_allowed_memory_fallback(key, limit, window)
+            else:
+                # If Redis is unavailable, allow the request
+                return True, {
+                    "limit": limit,
+                    "remaining": limit,
+                    "reset": int(time.time()) + window,
+                    "retry_after": 0
+                }
         
         try:
             current_time = int(time.time())
@@ -140,6 +150,9 @@ class RateLimiter:
             
         except Exception as e:
             logger.error(f"Rate limiter error: {str(e)}")
+            # Use memory fallback for login lockout if Redis fails
+            if bypass_mode_check:
+                return self._is_allowed_memory_fallback(key, limit, window)
             # Allow request if rate limiter fails
             return True, {"limit": limit, "remaining": 1, "reset": 0, "retry_after": 0}
 
@@ -199,17 +212,58 @@ class RateLimiter:
         return True
 
     def is_rate_limited(self, *args, **kwargs):
-        # Bypass rate limiting in development/test environments
-        if os.environ.get("TESTING") == "true" or os.environ.get("ENV") == "development" or settings.ENV in {"development", "test"}:
+        # Bypass rate limiting in development/test environments (unless bypass_mode_check is True)
+        bypass_mode_check = kwargs.get("bypass_mode_check", False)
+        if not bypass_mode_check and (os.environ.get("TESTING") == "true" or os.environ.get("ENV") == "development" or settings.ENV in {"development", "test"}):
             return False  # Never rate limited in tests
         
         rate_limit_str = kwargs.get("rate_limit_str")
         if rate_limit_str is None and len(args) > 1:
             rate_limit_str = args[1]
         limit, window = self.parse_rate_limit(rate_limit_str or "5/minute")
-        allowed, info = self.is_allowed(args[0], limit, window)
+        allowed, info = self.is_allowed(args[0], limit, window, bypass_mode_check=bypass_mode_check)
         
         return not allowed
+
+    def _is_allowed_memory_fallback(self, key: str, limit: str, window: int) -> tuple[bool, Dict[str, Any]]:
+        """
+        In-memory fallback for login lockout when Redis is unavailable
+        """
+        current_time = time.time()
+        window_start = current_time - window
+        
+        # Clean old entries
+        _login_lockout_memory_store[key] = [
+            timestamp for timestamp in _login_lockout_memory_store[key]
+            if timestamp > window_start
+        ]
+        
+        current_requests = len(_login_lockout_memory_store[key])
+        limit_int = int(limit)
+        
+        if current_requests >= limit_int:
+            # Get oldest request time for retry-after
+            oldest = min(_login_lockout_memory_store[key]) if _login_lockout_memory_store[key] else current_time
+            retry_after = max(int(oldest + window - current_time), 1)
+            
+            return False, {
+                "limit": limit,
+                "remaining": 0,
+                "reset": int(current_time + window),
+                "retry_after": retry_after
+            }
+        
+        # Add current request
+        _login_lockout_memory_store[key].append(current_time)
+        
+        remaining = limit_int - current_requests - 1
+        
+        return True, {
+            "limit": limit,
+            "remaining": remaining,
+            "reset": int(current_time + window),
+            "retry_after": 0
+        }
 
     def get_rate_limit_headers(self, key: str, rate_limit_str: str) -> Dict[str, str]:
         """

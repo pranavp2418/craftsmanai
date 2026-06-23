@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     RATE_LIMIT_REGISTER: str = "3/hour"
     RATE_LIMIT_PASSWORD_RESET: str = "3/hour"
     RATE_LIMIT_PAYMENT: str = "10/minute"
+    
+    # Account Lockout (Redis-based)
+    MAX_FAILED_LOGIN_ATTEMPTS: int = 5
+    ACCOUNT_LOCKOUT_MINUTES: int = 15
 
     # Database
     DATABASE_URL: str
