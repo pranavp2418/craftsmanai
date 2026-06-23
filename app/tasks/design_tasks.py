@@ -195,7 +195,7 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             generated_item = openai_service.generate_base_image(
                 image_source=reference_image_source,
                 user_prompt=gen_prompt,
-                jewellery_type=design.jewellery_type or "pendant",
+                jewellery_type=design.jewellery_type or "",
                 metal_tone=input_metal,
             )
 

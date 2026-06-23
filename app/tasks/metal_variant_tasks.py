@@ -21,7 +21,7 @@ from app.models.design import Design
 from app.models.design import DesignVariant
 from app.repositories.design_variant import DesignVariantRepository
 from app.repositories.activity_log import DesignActivityLogRepository
-from app.services.openai_service import openai_service, generate_with_openai_image, download_reference_images
+from app.services.openai_service import openai_service, generate_with_openai_image, generate_primary_image, download_reference_images
 from app.services.storage_service import _validate_image_bytes, upload_image_to_supabase
 from app.core.sse_manager import sse_manager
 from app.tasks.base import create_task
@@ -168,7 +168,8 @@ def generate_metal_variant_images(
             logger.info("Generating %s variant for variant_id=%s", metal, variant_id)
             try:
                 prompt = _build_metal_variant_prompt(metal, jewellery_type)
-                b64_json = generate_with_openai_image([base_image_url], prompt, pre_downloaded_blobs=cached_blobs)
+                # Metal-colour change uses the primary provider (Gemini by default) for speed.
+                b64_json = generate_primary_image([base_image_url], prompt, pre_downloaded_blobs=cached_blobs)
                 image_bytes = base64.b64decode(b64_json)
                 content_type = "image/png"
                 _validate_image_bytes(image_bytes, content_type)

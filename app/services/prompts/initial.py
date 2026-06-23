@@ -82,10 +82,12 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
     if is_pendant:
         # Bail is carved out of "preserve" right here, in ONE coherent instruction.
         form_line = (
-            f"Render this reference as a wearable PENDANT, {angle_phrase}. The pendant MUST have a bail/hook at the "
-            "very TOP — keep the reference's bail if it already has one, otherwise ADD a FLARED, FAN-SHAPED bail "
-            "(wider at the top, tapering down to a small loop) connected to the top-centre; the bail is REQUIRED, "
-            "never omit it. If a chain or cord is shown, remove it and show only the pendant (keep the bail)."
+            f"Render this reference as a wearable PENDANT, {angle_phrase}. The pendant must hang from EXACTLY ONE "
+            "bail/hook at the very top-centre. IMPORTANT: if the reference ALREADY has a bail, hook, loop, or any "
+            "top hanging element, KEEP that one as-is and do NOT add another — there must never be two bails or a "
+            "bail stacked on top of an existing one. ONLY if the reference has NO bail at all (e.g. a flat sketch) "
+            "add a single FLARED, FAN-SHAPED bail (wider at the top, tapering to a small loop) at the top-centre. "
+            "If a chain or cord is shown, remove it and show only the pendant with its single bail."
         )
     else:
         form_line = f"Render this reference as a {item_type}, {angle_phrase}.{svc._type_form_clause(item_type, user_prompt)}"
