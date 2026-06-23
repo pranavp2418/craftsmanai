@@ -74,7 +74,15 @@ def build_initial_prompt(
     from app.services import openai_service as svc
 
     parsed = parsed_data or {}
-    item_type = parsed.get("item_type") or svc.infer_item_type_from_prompt(user_prompt) or "jewelry"
+    item_type = parsed.get("item_type")
+    if not item_type:
+        inferred = svc.infer_item_type_from_prompt(user_prompt)
+        # infer's catch-all default is 'pendant'; do NOT auto-bail an UNKNOWN piece — only treat it as
+        # a pendant when the prompt actually names a hanging type, else stay neutral ('custom', no bail).
+        if inferred == "pendant" and not re.search(r"\b(pendant|necklace|charm|chain|bail)\b", (user_prompt or "").lower()):
+            item_type = "custom"
+        else:
+            item_type = inferred
     profile = resolve_profile(item_type)
     lower = (user_prompt or "").lower()
     user_named_metal = any(m in lower for m in _USER_METAL_WORDS)
