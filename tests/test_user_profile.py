@@ -208,3 +208,70 @@ class TestUserProfile:
             session.close()
         finally:
             cleanup_user_by_email(email)
+
+    def test_update_user_profile_xss_validation_fail(self, client: TestClient):
+        """Test that updating username, first_name, or last_name with XSS characters fails validation"""
+        email = "profile_xss@example.com"
+        try:
+            user = create_committed_user(
+                email=email,
+                username="xssuser",
+                full_name="Normal User"
+            )
+            
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+            
+            # XSS scripts in first_name/last_name
+            bad_data = {
+                "first_name": "<script>alert('XSS')</script>"
+            }
+            response = client.put("/api/v2/user-profile", json=bad_data, headers=headers)
+            assert response.status_code == 422
+            
+            # Special chars in username
+            bad_data_2 = {
+                "username": "user<script>"
+            }
+            response = client.put("/api/v2/user-profile", json=bad_data_2, headers=headers)
+            assert response.status_code == 422
+
+            # Text/script in whatsapp_number
+            bad_data_3 = {
+                "whatsapp_number": "&lt;script&gt;"
+            }
+            response = client.put("/api/v2/user-profile", json=bad_data_3, headers=headers)
+            assert response.status_code == 422
+        finally:
+            cleanup_user_by_email(email)
+
+    def test_update_user_profile_business_name_sanitized(self, client: TestClient):
+        """Test that XSS scripts in business_name are sanitized/escaped safely"""
+        email = "profile_sanitize@example.com"
+        try:
+            user = create_committed_user(
+                email=email,
+                username="sanitizeuser",
+                full_name="Normal User"
+            )
+            
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+            
+            update_data = {
+                "business_name": "<script>alert('XSS')</script>"
+            }
+            response = client.put("/api/v2/user-profile", json=update_data, headers=headers)
+            assert response.status_code == 200
+            
+            data = response.json()
+            # Verify that <script> is escaped to &lt;script&gt;
+            assert "&lt;script&gt;alert(&#x27;XSS&#x27;)&lt;/script&gt;" in data["business_name"]
+            
+            # Check DB directly
+            session = TestingSessionLocal()
+            db_user = session.query(User).filter(User.id == user.id).first()
+            assert "&lt;script&gt;alert(&#x27;XSS&#x27;)&lt;/script&gt;" in db_user.business_name
+            session.close()
+        finally:
+            cleanup_user_by_email(email)

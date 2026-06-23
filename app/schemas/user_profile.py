@@ -1,3 +1,5 @@
+import html
+import re
 from pydantic import BaseModel, Field, EmailStr, field_validator
 from typing import Optional
 
@@ -29,13 +31,35 @@ class UserProfileUpdate(BaseModel):
     whatsapp_number: Optional[str] = Field(None, max_length=20)
     username: Optional[str] = Field(None, max_length=100)
     business_name: Optional[str] = Field(None, max_length=255)
+
+    @field_validator('first_name', 'last_name', 'username')
+    @classmethod
+    def validate_names(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        val = v.strip()
+        if val == "":
+            return val
+        if not re.match(r"^[a-zA-Z0-9\s'\-_]+$", val):
+            raise ValueError("Only letters, numbers, spaces, and simple punctuation (-, _, ') are allowed.")
+        return val
+
+    @field_validator('business_name')
+    @classmethod
+    def sanitize_business_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return html.escape(v.strip())
     
     @field_validator('whatsapp_number')
     @classmethod
     def validate_whatsapp_number(cls, v):
         if v is None or v == '':
             return v
-        return normalize_phone_number(v, validate=True)
+        val = v.strip()
+        if not re.match(r"^\+?[0-9\s\-()]+$", val):
+            raise ValueError("Invalid phone number format: only digits, +, -, spaces, and parentheses are allowed.")
+        return normalize_phone_number(val, validate=True)
     
 
 class AppearanceSettingsUpdate(BaseModel):
