@@ -1082,7 +1082,7 @@ def qa_refinement_check(params: Dict[str, Any]) -> Dict[str, Any]:
 
     user_content = [{
         "type": "text",
-        "text": f"Compare the PREVIOUS render (image 1) with the NEW render (image 2).\nThe user requested this change:\n\"{intent.get('normalized_prompt') or intent.get('raw_user_prompt')}\"\n\nTarget component(s): {', '.join(intent.get('target_components') or [])}\nAttribute to change: {intent.get('attribute_to_change')}\nFrom: {intent.get('from_state') or '(unspecified)'} → To: {intent.get('to_state') or '(unspecified)'}\n\nRun these visual checks against the NEW render:\n" + "\n".join([f"- {c}" for c in intent.get('qa_checks') or []]) + "\n\nAlso verify:\n- the requested change is VISIBLY applied (not subtle, not absent)\n- every non-target component is unchanged from the previous render\n- nothing was added or removed that the user did not ask for\n- the output remains a premium CAD-style jewelry render\n\nCall the function tool with your verdict.",
+        "text": f"Compare the PREVIOUS render (image 1) with the NEW render (image 2).\nThe user requested this change:\n\"{intent.get('normalized_prompt') or intent.get('raw_user_prompt')}\"\n\nTarget component(s): {', '.join(intent.get('target_components') or [])}\nAttribute to change: {intent.get('attribute_to_change')}\nFrom: {intent.get('from_state') or '(unspecified)'} → To: {intent.get('to_state') or '(unspecified)'}\n\nRun these visual checks against the NEW render:\n" + "\n".join([f"- {c}" for c in intent.get('qa_checks') or []]) + "\n\nAlso verify:\n- the requested change is VISIBLY applied (not subtle, not absent)\n- every non-target component is unchanged from the previous render\n- nothing was added or removed that the user did not ask for\n- the output remains a premium CAD-style jewelry render\n\nIMPORTANT: the user EXPLICITLY requested the change above. The requested change — and any direct, necessary CONSEQUENCE of it (for example, removing the bail/hook means the piece will no longer have a top loop or attachment point; removing stones means bare metal) — is CORRECT and must NEVER be reported as a defect, a 'missing' element, or a manufacturability problem. Do NOT recommend a retry just because the requested removal/change leaves the piece looking different. Only set retry_recommended=true if the requested change was NOT actually applied, or if an UNRELATED part of the piece changed.\n\nCall the function tool with your verdict.",
     }]
 
     # Attach the PREVIOUS render — prefer raw base64 (reliable), fall back to URL / local file.
@@ -2465,6 +2465,26 @@ def download_reference_images(image_urls: list[str]) -> list[bytes]:
         except Exception as e:
             logger.warning("Failed to fetch reference image %s: %s", url[:80], e)
     return blobs
+
+
+def _images_near_identical(b64_a: str, b64_b: str, max_distance: int = 4) -> bool:
+    """True if two base64 PNG images are perceptually NEAR-IDENTICAL (i.e. a refine returned the
+    input essentially unchanged — the requested edit was dropped).
+
+    Uses a perceptual hash (phash), which is luminance/structure based — so it does NOT detect a
+    pure metal-COLOUR change (a recolour keeps the same structure). Callers MUST skip this guard
+    for colour-only edits. Fail-open: returns False (no false retry) if it cannot compare.
+    """
+    try:
+        from PIL import Image as _Image
+        ha = imagehash.phash(_Image.open(BytesIO(base64.b64decode(b64_a))).convert("RGB"))
+        hb = imagehash.phash(_Image.open(BytesIO(base64.b64decode(b64_b))).convert("RGB"))
+        dist = ha - hb
+        logger.info("[no-op guard] phash distance=%d (<=%d => near-identical, edit not applied)", dist, max_distance)
+        return dist <= max_distance
+    except Exception as _e:
+        logger.warning("[no-op guard] image compare failed: %s", _e)
+        return False
 
 
 def generate_with_gemini_image(image_blobs, prompt_text: str) -> Optional[str]:
@@ -3937,7 +3957,11 @@ def generate_with_fallback(
     # request (correct type / text spelling / metal / stones / clean render) and retry once.
     needs_initial_qa = bool((not is_refine) and os.getenv("GEMINI_API_KEY") and original_request)
     any_check = needs_spelling_check or needs_visual_qa or needs_initial_qa
-    max_qa_attempts = 2 if any_check else 1
+    # Refines (Gemini) are fast & cheap, and the model sometimes drops the edit (stochastic no-op).
+    # Allow up to 3 generations for a refine so a dropped edit gets escalated corrective re-rolls
+    # (driven by the no-op guard below) instead of a single un-verified shot.
+    _refine_cap = 3 if (is_refine and refinement_intent) else 2
+    max_qa_attempts = _refine_cap if any_check else 1
     previous_ref_url = resolved_image_urls[0] if (is_refine and resolved_image_urls) else None
     final_b64 = None
     qa_result = None
@@ -3955,6 +3979,20 @@ def generate_with_fallback(
         # Last attempt — accept whatever we have, no point checking further.
         if qa_attempt == max_qa_attempts:
             break
+
+        # 0) NO-OP GUARD (refine only): if the output is perceptually near-identical to the reference,
+        #    the model dropped the edit (Gemini stochastic no-op) — force an escalated retry NOW,
+        #    regardless of the soft vision QA (which is easily fooled by two near-identical images).
+        #    Skipped for metal-colour edits: phash is colour-blind, so a real recolour would look
+        #    'identical' and falsely trigger a retry.
+        if is_refine and input_b64 and not _user_wants_metal_change(user_prompt) and _images_near_identical(input_b64, b64):
+            logger.warning("[refine no-op guard attempt %d] output ~identical to reference — forcing escalated retry", qa_attempt)
+            correction_notes = (
+                "The previous attempt returned an image almost IDENTICAL to the reference and did NOT visibly apply "
+                "the requested change. Apply the requested change STRONGLY and OBVIOUSLY this time — redraw the target "
+                "area fully if needed; preserve only the parts the user did not ask to change."
+            )
+            continue
 
         # 1) Spelling verification (highest priority — fixes missing/extra/wrong letters).
         if needs_spelling_check:
@@ -4112,13 +4150,18 @@ class OpenAIService:
         jewellery_type: str = "",
         size: str = "1024x1024",
         mode: Optional[str] = None,
-        metal_tone: str = "yellow_gold"
+        metal_tone: str = "yellow_gold",
+        parsed_data: Optional[Dict[str, Any]] = None,
     ) -> OpenAIImageObject:
         """
         Generate base image using full Gemini pipeline (Primary + Fallback + QA checks).
 
         metal_tone defaults to yellow_gold but the caller should pass the metal DETECTED
         from the input image (e.g. 'silver') so a silver reference doesn't come out gold.
+
+        parsed_data: optional STRUCTURED design state (from parse_request_service) — carries
+        source_kind / intent / metal etc. so the prompt builder can route to a focused template.
+        Falls back to {"item_type": jewellery_type} when not supplied.
         """
         logger.info("Generating base image using Gemini Pipeline (metal_tone=%s)", metal_tone)
 
@@ -4130,10 +4173,17 @@ class OpenAIService:
             else:
                 selected_mode = "initial"
 
+        # Prefer the rich parsed_data; ensure item_type is populated from the jewellery_type hint.
+        _pd = dict(parsed_data) if parsed_data else None
+        if _pd is not None and not _pd.get("item_type") and jewellery_type:
+            _pd["item_type"] = jewellery_type
+        if _pd is None and jewellery_type:
+            _pd = {"item_type": jewellery_type}
+
         result = generate_with_fallback(
             image_source=image_source,
             user_prompt=user_prompt,
-            parsed_data={"item_type": jewellery_type} if jewellery_type else None,
+            parsed_data=_pd,
             metal_tone=metal_tone or "yellow_gold",
             mode=selected_mode
         )

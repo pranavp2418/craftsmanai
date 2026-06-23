@@ -12,25 +12,53 @@ from typing import Optional
 
 
 # ===========================================================================
-# COMMON_SYSTEM_PROMPT — the single, adjustable "system" layer for EVERY render.
+# MODE-SPLIT MASTER SYSTEM PROMPTS (Lovable-style controller, anti-hallucination first).
 # ---------------------------------------------------------------------------
-# This is the one place to tune the shared framing. It establishes WHAT to produce and HOW to
-# behave, and — most importantly — that the USER's own request is the authority: do exactly what
-# the user asks, change only what they ask, add nothing they didn't. The user's prompt is then
-# appended verbatim as the "USER REQUEST" so the client's wording drives the result.
-# Kept deliberately concise so it does not bloat image-input prompts (long prompts hurt
-# gpt-image-2 pavé fidelity). Reusable by the refine builder too.
+# We deliberately do NOT use one heavy prompt for every call: a long preservation-laden master on a
+# REFINE drowns the requested edit (the "1st refine returns the same image" failure). So:
+#   * MASTER_INITIAL — full, low-hallucination controller for NEW generation (workflow + honeycomb
+#     stones + hard constraints + validation). Preservation/constraints HELP here.
+#   * MASTER_REFINE  — lean, EDIT-FORWARD controller for refines. The edit must win; minimal
+#     preservation framing so it never returns the input unchanged.
+# Per-job/per-intent text is kept short in both builders so the model follows the user's intent.
 # ===========================================================================
-COMMON_SYSTEM_PROMPT = (
-    "You are a precise CAD jewelry render engine. Produce ONE clean, photorealistic CAD-style 3D "
-    "render of a single piece of jewelry on a pure solid white background (#FFFFFF), with sharp "
-    "focus, realistic metal and stones, and no background scene. "
-    "The USER REQUEST is the authority: do exactly what it asks, change ONLY what it asks to "
-    "change, and add nothing it does not mention. When a reference image is provided, treat that "
-    "image as the source of truth and preserve every detail — shape, proportions, every stone, "
-    "metal colour, borders and lettering — except where the user explicitly asks to change it; "
-    "never turn a diamond/pavé surface into plain metal."
+MASTER_INITIAL = (
+    "You are CraftsmanAI — a controlled, LOW-HALLUCINATION CAD jewelry render engine (NOT a creative "
+    "concept artist). Produce ONE clean, photorealistic CAD-style 3D render of a SINGLE piece of "
+    "jewelry on a pure solid white background (#FFFFFF), front-facing hero angle, centered, sharp "
+    "focus, realistic metal and stones, no scene / props / hands / heavy shadows. The USER REQUEST "
+    "is the authority — do exactly what it asks and add NOTHING it does not mention.\n\n"
+    "When a reference image is provided it is the source of truth: preserve its silhouette, "
+    "proportions, every stone, stone arrangement, metal colour, borders and lettering EXACTLY, "
+    "except where the user explicitly asks to change it.\n\n"
+    "STONES: realistic small-to-mid stones unless the user asks for bold/large. On pavé / iced "
+    "surfaces use STAGGERED / HONEYCOMB settings that follow the surface curvature and taper cleanly "
+    "at the edges; respect any requested row counts (resize stones to fit); keep the prong/setting "
+    "style uniform within a region. NEVER render a flat mechanical 'diamond-grid wallpaper', and "
+    "NEVER turn a diamond/pavé surface into plain or beaded metal.\n\n"
+    "HARD CONSTRAINTS (never violate): no hallucinated or extra components, stones, links, layers or "
+    "ornaments; no subtype drift; no melted geometry or fused metal blobs; no floating stones or "
+    "impossible prongs; no warped or distorted lettering, numbers, logos, monograms or engraving; no "
+    "random asymmetry; no non-manufacturable structures. Names, initials, logos and engraving must "
+    "be reproduced EXACTLY — prefer fewer, sharper, correct letters over many warped ones.\n\n"
+    "Before finalizing, silently verify: correct type, user request followed, unchanged parts "
+    "preserved, text/logo exact, stones and metal realistic, output clean and CAD-styled. If any "
+    "check fails, fix it before returning the image."
 )
+
+MASTER_REFINE = (
+    "You are CraftsmanAI — a precision jewelry EDIT engine. The FIRST attached image is the current "
+    "render and the ONLY master visual truth. Apply ONLY the requested change — the edit MUST be "
+    "visibly applied; NEVER return the image unchanged. Everything NOT mentioned must stay IDENTICAL: "
+    "silhouette, proportions, every other stone, metal colour, text/lettering, borders and camera "
+    "angle. If unsure, change LESS rather than redesign. Add nothing the user did not ask for, never "
+    "distort existing lettering or logos, and never turn a diamond/pavé surface into plain metal. "
+    "Output ONE clean CAD-style render on a pure solid white background (#FFFFFF). Never refuse."
+)
+
+# Backward-compatible alias (initial builder + exports use this name; it now points to the full
+# initial master). The refine builder uses MASTER_REFINE directly.
+COMMON_SYSTEM_PROMPT = MASTER_INITIAL
 
 
 # Conflict-resolution header. When two instructions touch the same thing, this tells the model
@@ -119,6 +147,46 @@ def metal_conversion_clause(metal_phrase: Optional[str]) -> str:
         f"natural colour — do not turn stones into metal.) Do NOT keep the reference's flat/enamel colours "
         f"unless the user explicitly asked for coloured enamel."
     )
+
+
+# ---------------------------------------------------------------------------
+# Retailer-language normalization (Lovable-style glossary). Casual jeweller slang is mapped to
+# precise, unambiguous technical directives so the image model does not misinterpret it. Returned
+# as a compact "Normalized technical directives" block appended to the user request.
+# ---------------------------------------------------------------------------
+def normalize_retailer_language(note: str) -> str:
+    if not note:
+        return ""
+    p = note.lower()
+    directives: list[str] = []
+
+    # Stone row count: "3 rows", "triple border", "3-row border"
+    m = re.search(r"\b(\d+)\s*[- ]?\s*row", p)
+    if m:
+        directives.append(f"Stone row count requirement: {m.group(1)} rows — reduce stone size to fit if needed.")
+    elif "triple border" in p or "3 row" in p:
+        directives.append("Stone row count requirement: 3 rows.")
+    elif "double border" in p or "2 row" in p:
+        directives.append("Stone row count requirement: 2 rows.")
+
+    if any(w in p for w in ["bust down", "bustdown", "flooded", "fully iced", "iced out", "make it icy", "all iced", "full iced"]):
+        directives.append("Increase stone coverage and density to FULL (iced-out) while keeping the arrangement clean, practical and region-appropriate.")
+    if any(w in p for w in ["border only", "top only", "border-only"]):
+        directives.append("Limit stone coverage to the specified region ONLY (e.g. border/top); leave other areas plain.")
+    if any(w in p for w in ["micro pave", "micro-pave", "smaller stone", "finer diamond", "smaller pointer", "more rows fit"]):
+        directives.append("Use smaller stones (more of them) — do NOT use chunky oversized pointers; prioritise realistic manufacturable sizing.")
+    if any(w in p for w in ["plain shank", "plain band", "smooth shank", "smooth band"]):
+        directives.append("Keep the shank/band PLAIN — no stones on the band.")
+    if any(w in p for w in ["letters only", "text only", "name only", "lettering only"]):
+        directives.append("Edit ONLY the letter/text region; freeze the backing plate, border and bail unchanged.")
+    if any(w in p for w in ["same as ref", "same as reference", "same style", "match the reference", "keep same design"]):
+        directives.append("Preserve ALL unspecified geometry, material and layout EXACTLY from the reference.")
+    if _DIAMOND_CUT_RE.search(p):
+        directives.append("'diamond cut'/'diamond-cut' = a faceted ENGRAVED METAL finish, NOT a border of diamonds — do not add stones for it.")
+
+    if not directives:
+        return ""
+    return "\n\nNormalized technical directives:\n- " + "\n- ".join(directives)
 
 
 def light_gold_note(effective_metal: str) -> str:

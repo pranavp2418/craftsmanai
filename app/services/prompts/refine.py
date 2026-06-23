@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from .common import COMMON_SYSTEM_PROMPT, metal_lock_clause, diamond_cut_clause, metal_conversion_clause
+from .common import MASTER_REFINE, metal_lock_clause, diamond_cut_clause, metal_conversion_clause
 
 
 def _text_replacement_block(svc, replacements, user_prompt, forced_case) -> str:
@@ -119,6 +119,17 @@ def build_refine_prompt(
     centering = "Front-facing, upright, and centered." if wants_front else "Keep the reference's camera angle; centered."
     layered_block = f"\n\n{svc.LAYERED_RULE}" if svc._user_wants_layered(user_prompt) else ""
 
+    # BAIL RE-DRIFT GUARD: the model tends to "complete" a pendant by re-adding a bail even when the
+    # reference has none (e.g. after a previous refine removed it). Unless THIS refine is about the
+    # bail, tell it to preserve the exact top/bail state of the reference.
+    _bail_in_prompt = any(w in (user_prompt or "").lower() for w in ["bail", "hook", "loop"])
+    bail_state = "" if _bail_in_prompt else (
+        " BAIL / TOP STATE (do NOT change unless asked): keep the top of the piece EXACTLY as in the reference. If "
+        "the reference has NO bail / hook / top loop, the piece MUST stay bail-less — do NOT add a bail, hook, loop, "
+        "crown-bail or any hanging element. If it already has a bail, keep that exact same bail. NEVER add or "
+        "re-create a bail the reference does not have."
+    )
+
     # ---------------- CASE 1: text / name / number update ----------------
     if replacements:
         replacement_block = _text_replacement_block(svc, replacements, user_prompt, forced_case)
@@ -139,9 +150,9 @@ def build_refine_prompt(
         else:
             intensity = ""
 
-        return f"""{COMMON_SYSTEM_PROMPT}
+        return f"""{MASTER_REFINE}
 
-USER REQUEST — TEXT CHANGE ONLY: {replacement_block} Keep the exact same design, backing plate, stones, shape, font style, borders, underlines/lines and metal colour unchanged — ONLY the text/number content changes.{residual_block}{metal_lock}{combine_block}{dcut}
+USER REQUEST — TEXT CHANGE ONLY: {replacement_block} Keep the exact same design, backing plate, stones, shape, font style, borders, underlines/lines and metal colour unchanged — ONLY the text/number content changes.{residual_block}{metal_lock}{combine_block}{bail_state}{dcut}
 
 {svc.BACKING_PLATE_RULE} If (and only if) the reference has a backing plate, re-cut it to follow the NEW text's shape, keeping the same border and layered look. If it has none, do not add one.
 
@@ -177,15 +188,18 @@ One image only."""
             )
 
     if attempt == 2:
-        intensity = " Ensure the requested change is clearly applied this time, while keeping everything else identical to the reference."
+        intensity = (" CRITICAL CORRECTION: the previous attempt returned a near-identical image and did NOT apply the "
+                     "requested change. You MUST visibly and obviously apply it now — redraw the target area fully if "
+                     "needed. Preserve only the parts the user did not ask to change.")
     elif attempt >= 3:
-        intensity = " FINAL attempt — the requested change MUST be clearly visible, with everything else kept identical to the reference."
+        intensity = (" FINAL attempt — the previous attempts FAILED to apply the change. The requested change MUST be "
+                     "clearly and unmistakably visible now; fully re-render the target area. Keep only the untouched parts identical.")
     else:
         intensity = ""
 
-    return f"""{COMMON_SYSTEM_PROMPT}
+    return f"""{MASTER_REFINE}
 
-USER REQUEST (apply exactly, change nothing else): {change_desc}{combine_block}{metal_lock}{metal_convert}{dcut}
+USER REQUEST (apply exactly, change nothing else): {change_desc}{combine_block}{metal_lock}{metal_convert}{bail_state}{dcut}
 
 {svc._font_clause(user_prompt, True)}{layered_block}
 
