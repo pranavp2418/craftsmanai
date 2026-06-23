@@ -177,9 +177,12 @@ One image only."""
             )
 
     if attempt == 2:
-        intensity = " Ensure the requested change is clearly applied this time, while keeping everything else identical to the reference."
+        intensity = (" CRITICAL CORRECTION: the previous attempt returned a near-identical image and did NOT apply the "
+                     "requested change. You MUST visibly and obviously apply it now — redraw the target area fully if "
+                     "needed. Preserve only the parts the user did not ask to change.")
     elif attempt >= 3:
-        intensity = " FINAL attempt — the requested change MUST be clearly visible, with everything else kept identical to the reference."
+        intensity = (" FINAL attempt — the previous attempts FAILED to apply the change. The requested change MUST be "
+                     "clearly and unmistakably visible now; fully re-render the target area. Keep only the untouched parts identical.")
     else:
         intensity = ""
 
