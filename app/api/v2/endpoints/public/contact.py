@@ -27,7 +27,7 @@ async def submit_contact_form(
     """
     try:
         # Check if email already exists in users table
-        existing_user_by_email = db.query(User).filter(User.email == contact_data.email).first()
+        existing_user_by_email = db.query(ContactSubmission).filter(ContactSubmission.email == contact_data.email).first()
         if existing_user_by_email:
             raise HTTPException(
                 status_code=409,
@@ -36,7 +36,7 @@ async def submit_contact_form(
 
         # Check if phone already exists in users table
         if contact_data.phone:
-            existing_user_by_phone = db.query(User).filter(User.whatsapp_number == contact_data.phone).first()
+            existing_user_by_phone = db.query(ContactSubmission).filter(ContactSubmission.phone == contact_data.phone).first()
             if existing_user_by_phone:
                 raise HTTPException(
                     status_code=409,
