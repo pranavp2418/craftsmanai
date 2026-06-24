@@ -91,7 +91,7 @@ class TestSubscriptionManagement:
             headers = {"Authorization": f"Bearer {token}"}
 
             plan_payload = {
-                "name": "Test Enterprise Plan",
+                "name": "Pro plan",
                 "description": "Premium features for large shops",
                 "price": 499.99,
                 "monthly_price": 499.99,
@@ -106,7 +106,7 @@ class TestSubscriptionManagement:
             assert res_create.status_code == 201
             plan_data = res_create.json()
             plan_id = plan_data["id"]
-            assert plan_data["name"] == "Test Enterprise Plan"
+            assert plan_data["name"] == "Pro plan"
             assert plan_data["monthly_renders"] == 5000
 
             # 3. Test GET /admin/subscription-plans/ (List plans)
@@ -123,12 +123,12 @@ class TestSubscriptionManagement:
 
             # 5. Test PUT /admin/subscription-plans/{plan_id} (Update plan)
             update_payload = {
-                "name": "Updated Test Enterprise Plan",
+                "name": "Pro",
                 "monthly_renders": 10000
             }
             res_update = client.put(f"/api/v2/admin/subscription-plans/{plan_id}", json=update_payload, headers=headers)
             assert res_update.status_code == 200
-            assert res_update.json()["name"] == "Updated Test Enterprise Plan"
+            assert res_update.json()["name"] == "Pro"
             assert res_update.json()["monthly_renders"] == 10000
 
             # 6. Add manual records using TestingSessionLocal for testing analytic/logs/payment endpoints
@@ -265,7 +265,7 @@ class TestSubscriptionManagement:
                 res_detail = client.get(f"/api/v2/admin/subscription-plans/get-user-detail?user_id={admin.id}", headers=headers)
                 assert res_detail.status_code == 200
                 detail_data = res_detail.json()
-                assert detail_data["plan_name"] == "Updated Test Enterprise Plan"
+                assert detail_data["plan_name"] == "Pro"
                 assert detail_data["payment_method"]["brand"] == "visa"
                 assert detail_data["payment_method"]["last4"] == "4242"
 
