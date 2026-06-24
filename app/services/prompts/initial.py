@@ -30,13 +30,27 @@ from .profiles import (
 )
 from .common import (
     COMMON_SYSTEM_PROMPT, light_gold_note, diamond_cut_clause, metal_conversion_clause,
-    normalize_retailer_language,
+    normalize_retailer_language, diamond_size_clause,
 )
 
 
 _USER_METAL_WORDS = ["white gold", "rose gold", "yellow gold", "platinum", "silver", "10k", "14k", "18k"]
 _SKETCH_WORDS = ["sketch", "drawing", "draw", "hand drawn", "hand-drawn", "pencil", "doodle"]
 _TEXT_WORDS = ["name", "initial", "letter", "number", "word", "text", "monogram", "spell", "says", "reads", "font"]
+# Stone intent — only add stones (and stone-priming modules) when the user ACTUALLY asks for them.
+_STONE_WORDS = [
+    "diamond", "stone", "gem", "gemstone", "iced", "ice out", "iced out", "ice-out", "icy",
+    "pave", "pavé", "crystal", " cz", "cubic zirconia", "zirconia", "moissanite", "vvs",
+    "bust down", "bustdown", "flooded", "baguette", "emerald", "ruby", "sapphire", "birthstone",
+    "encrusted", "studded", "bling", "brilliant cut", "set with stone", "stone set", "frozen",
+]
+
+
+def _wants_stones(user_prompt: str) -> bool:
+    """True only if the request actually calls for diamonds / gemstones. 'diamond cut' / 'diamond-cut'
+    is a metal FINISH (not stones) so it is stripped before the check."""
+    p = re.sub(r"diamond[\s-]*cut", "", (user_prompt or "").lower())
+    return any(w in p for w in _STONE_WORDS)
 
 
 def _has_text_intent(user_prompt: str) -> bool:
@@ -68,8 +82,13 @@ def build_initial_prompt(
     metal_tone: str,
     has_images: bool,
     image_count: int = 0,
+    font_template: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Build the initial-generation prompt. Drop-in for _build_concise_initial_prompt."""
+    """Build the initial-generation prompt. Drop-in for _build_concise_initial_prompt.
+
+    When ``font_template`` is provided (a glyph reference for a named font), a dedicated
+    letterform-tracing prompt is built so the model copies the EXACT font from the attached template.
+    """
     # Lazy import — guarantees no circular import and a single source of truth for rule text.
     from app.services import openai_service as svc
 
@@ -89,6 +108,8 @@ def build_initial_prompt(
     intent = (parsed.get("intent") or "").strip().lower()
     source_kind = (parsed.get("source_kind") or "").strip().lower()
 
+    if font_template:
+        return _assemble_font_template(svc, user_prompt, lower, item_type, profile, metal_tone, user_named_metal, font_template)
     if has_images:
         return _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, user_named_metal, intent, source_kind)
     return _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone, user_named_metal, intent)
@@ -165,6 +186,8 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
     # "diamond cut" = a metal finish (not diamonds); convert a coloured logo/graphic to solid metal
     # when a metal is named OR the intent is convert_to_jewelry.
     dcut = diamond_cut_clause(user_prompt)
+    # Diamond-size directive when the user asks for stones / iced on the reference (small-dense vs big).
+    stone_size = diamond_size_clause(user_prompt) if _wants_stones(user_prompt) else ""
     if user_named_metal:
         metal_convert = metal_conversion_clause(svc._detected_metal_phrase(user_prompt))
     elif intent == "convert_to_jewelry" or source_kind == "non_jewelry_reference":
@@ -176,7 +199,58 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
 
 {form_line}{intent_directive}
 
-{user_request}{retail}{sketch_note}{variations_block}{merge_block}{metal_convert}{dcut}{gold_note}
+{user_request}{retail}{sketch_note}{variations_block}{merge_block}{metal_convert}{dcut}{stone_size}{gold_note}
+
+One image only."""
+
+
+# ---------------------------------------------------------------------------
+# FONT-TEMPLATE branch — a glyph reference image guarantees the EXACT named font.
+# ---------------------------------------------------------------------------
+def _assemble_font_template(svc, user_prompt, lower, item_type, profile, metal_tone, user_named_metal, font_template) -> str:
+    """Prompt for the glyph-template case: an attached black-on-white image shows the EXACT font;
+    the model must TRACE those letterforms and build them as a 3D piece per the user's design."""
+    text = (font_template or {}).get("text") or ""
+    font = (font_template or {}).get("font") or ""
+    effective_metal = "" if user_named_metal else profile.default_metal
+    metal_word = effective_metal or "the requested metal"
+    wants_stones = _wants_stones(user_prompt)
+
+    is_pendant = profile.bail_policy in (BAIL_ADD_IF_MISSING, BAIL_PRESERVE) and svc._is_pendant_like(item_type, user_prompt)
+    if is_pendant:
+        form_line = ("Build the templated lettering as a wearable PENDANT with EXACTLY ONE flared, fan-shaped "
+                     "bail at the top-centre for a chain (no chain/cord shown).")
+    else:
+        form_line = f"Build the templated lettering as a {item_type}.{svc._type_form_clause(item_type, user_prompt)}"
+
+    layered_block = f"\n\n{svc.LAYERED_RULE}" if svc._user_wants_layered(user_prompt) else ""
+    if wants_stones:
+        stone_note = f"\n\n{svc.SETTING_QUALITY}\n\n{svc.STONE_ARRANGEMENT_DEFAULT}{diamond_size_clause(user_prompt)}"
+    else:
+        stone_note = (f" Render it as PLAIN, solid, polished {metal_word} — NO diamonds, NO gemstones, NO pavé "
+                      "and NO stone settings (none were requested).")
+    gold_note = light_gold_note(effective_metal)
+    dcut = diamond_cut_clause(user_prompt)
+    retail = normalize_retailer_language(user_prompt)
+
+    template_instruction = (
+        f"LETTERING TEMPLATE (the attached image): it is a FLAT BLACK-ON-WHITE FONT TEMPLATE showing the "
+        f"EXACT letters and the EXACT font/letterform style to use — it is ONLY a font reference, NOT a "
+        f"finished piece and NOT artwork to copy as-is. Reproduce these EXACT letter shapes (the \"{font}\" "
+        f"font: same proportions, stroke style, spacing and character forms) and build them as a real 3D "
+        f"{metal_word} {item_type}. The lettering reads EXACTLY \"{text}\". The template's flat BLACK fill and "
+        f"white background are NOT the design — they only convey the letter shapes; render the actual piece in "
+        f"{metal_word}. Do NOT change the font, do NOT substitute another style, and do NOT add, drop, mirror, "
+        f"or reorder any character."
+    )
+
+    return f"""{COMMON_SYSTEM_PROMPT}
+
+{template_instruction}
+
+{form_line}{stone_note}
+
+USER REQUEST (apply these design details to the templated lettering; keep the font EXACTLY as the template): {user_prompt}{retail}{layered_block}{gold_note}{dcut}
 
 One image only."""
 
@@ -187,13 +261,20 @@ One image only."""
 def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone, user_named_metal, intent="") -> str:
     effective_metal = "" if user_named_metal else profile.default_metal
     metal_phrase = f" in {effective_metal}" if effective_metal else ""
-    if effective_metal:
-        plain_note = (
-            f" If the description does not mention diamonds or gemstones, render the piece as plain polished "
-            f"{effective_metal} with NO stones added."
-        )
+    wants_stones = _wants_stones(user_prompt)
+    metal_word = effective_metal or "metal"
+    if wants_stones:
+        # User asked for stones — no plain restriction; the stone modules below will guide them.
+        plain_note = ""
     else:
-        plain_note = " If the description does not mention diamonds or gemstones, do not add any stones."
+        # User did NOT ask for any stones — forbid them explicitly and prominently. (The image model
+        # otherwise tends to "ice" name pendants by default; this is the no-stones validation point.)
+        plain_note = (
+            f" IMPORTANT — NO STONES: the request does NOT mention diamonds or gemstones, so render the "
+            f"piece as PLAIN, solid, polished {metal_word} ONLY — a smooth clean metal finish with absolutely "
+            f"NO diamonds, NO gemstones, NO pavé, NO crystals, NO stone settings and NO 'iced' surfaces "
+            f"anywhere. Metal only."
+        )
 
     type_line = svc._type_form_clause(item_type, user_prompt)
     font_style_block = ""
@@ -209,7 +290,10 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
             "only by the requested variation."
         )
 
-    include_stone = profile.allows(MODULE_STONE)
+    # Stone-priming modules (SETTING_QUALITY / STONE_ARRANGEMENT_DEFAULT both describe diamonds) are
+    # added ONLY when the user actually wants stones — otherwise their presence makes the model add
+    # diamonds to a plain piece.
+    include_stone = profile.allows(MODULE_STONE) and wants_stones
     include_text = profile.allows(MODULE_TEXT) and (
         profile.text_policy == TEXT_PRIMARY or (profile.text_policy == TEXT_IF_DETECTED and _has_text_intent(user_prompt))
     )
@@ -218,6 +302,7 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
     if include_stone:
         mod_parts.append(svc.SETTING_QUALITY)
         mod_parts.append(svc.STONE_ARRANGEMENT_DEFAULT)
+        mod_parts.append(diamond_size_clause(user_prompt).strip())
     if include_text:
         mod_parts.append(svc.DOT_CONNECTION_RULE)
     mod_parts.append(svc.REALISM_DESCRIPTOR)  # common to every render
