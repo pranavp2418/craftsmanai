@@ -82,7 +82,12 @@ class Settings(BaseSettings):
     # "gemini" -> gemini-2.5-flash-image (fast, ~seconds; falls back to OpenAI on failure).
     # "openai" -> gpt-image-2 (slow, ~minutes). Side ANGLES always use OpenAI regardless.
     IMAGE_PROVIDER: str = "gemini"
-    GEMINI_IMAGE_MODEL: str = "gemini-3.1-flash-image"
+    # Max quality (client wants quality over cost): gemini-3-pro-image = "Nano Banana Pro" (most
+    # realistic). Switch to "gemini-3.1-flash-image" for a faster/cheaper option (still 2K).
+    GEMINI_IMAGE_MODEL: str = "gemini-3-pro-image"
+    # Output resolution for Gemini image gen ("1K" | "2K" | "4K"). Higher = better quality + more
+    # tokens/time. Empty = model default. 2K = 2816x1536 (4x the default pixels).
+    GEMINI_IMAGE_SIZE: str = "2K"
     # Text / vision ANALYSIS calls (parse gate, OCR, metal detect, spelling, classify, enrich).
     # "gemini" -> GEMINI_TEXT_MODEL via its OpenAI-compatible endpoint; "openai" -> gpt-4o-mini.
     TEXT_LLM_PROVIDER: str = "gemini"

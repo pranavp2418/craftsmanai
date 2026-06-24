@@ -189,6 +189,29 @@ def normalize_retailer_language(note: str) -> str:
     return "\n\nNormalized technical directives:\n- " + "\n- ".join(directives)
 
 
+_BIG_STONE_WORDS = ["big diamond", "large diamond", "bold diamond", "chunky", "oversized", "jumbo",
+                    "big stone", "large stone", "statement stone", "big rock", "large rock"]
+_SMALL_DENSE_WORDS = ["fully iced", "full iced", "iced out", "ice out", "iced-out", "bust down", "bustdown",
+                      "flooded", "frozen", "fully covered", "all iced", "micro", "pave", "pavé",
+                      "small diamond", "fine diamond", "tiny diamond", "small stone", "smaller stone", "icy"]
+
+
+def diamond_size_clause(user_prompt: str) -> str:
+    """Pick a DIAMOND-SIZE directive from the request. The image model otherwise defaults to a few big
+    chunky stones, which looks wrong — especially for 'iced/full' coverage, which should be MANY small
+    micro-pavé stones, not big ones. Big stones only when the user explicitly asks for big/bold."""
+    p = (user_prompt or "").lower()
+    if any(w in p for w in _BIG_STONE_WORDS):
+        return (" DIAMOND SIZE: use the LARGER, bold statement stones the user asked for (still clean, even and "
+                "well-set).")
+    if any(w in p for w in _SMALL_DENSE_WORDS):
+        return (" DIAMOND SIZE: use MANY SMALL round diamonds set densely (micro-pavé) for full, even coverage "
+                "that follows the surface — NOT a few big chunky stones; size the stones DOWN so they pack tightly "
+                "and uniformly.")
+    return (" DIAMOND SIZE: use realistic SMALL-to-MID round diamonds in clean, even rows — keep them modest and "
+            "uniform, NOT oversized chunky stones.")
+
+
 def light_gold_note(effective_metal: str) -> str:
     """Client default: plain yellow gold must render as a LIGHT, true 10K CAD shade.
 

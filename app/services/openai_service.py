@@ -1264,6 +1264,16 @@ def qa_initial_check(params: Dict[str, Any]) -> Dict[str, Any]:
         if new_data_url:
             user_content.append({"type": "image_url", "image_url": {"url": new_data_url}})
 
+    # When the lettering came from an exact FONT TEMPLATE, the font/style is guaranteed — the QA model
+    # cannot recognise a named font by sight and wrongly flags it as "wrong font", forcing useless
+    # retries. Tell it to ignore the font/style entirely (spelling is still checked).
+    if params.get("fontLocked"):
+        user_content.append({"type": "text", "text": (
+            "NOTE: the lettering FONT / letter STYLE is fixed by an exact font template and is GUARANTEED "
+            "correct — do NOT evaluate, compare, judge, or flag the font, typeface, or letter style in any "
+            "way. Only verify spelling, piece type, metal colour, stones and clean rendering."
+        )})
+
     tools = [{
         "type": "function",
         "function": {
@@ -2542,13 +2552,28 @@ def generate_with_gemini_image(image_blobs, prompt_text: str) -> Optional[str]:
     parts = [{"text": prompt_text}]
     for blob in (image_blobs or []):
         parts.append({"inline_data": {"mime_type": "image/png", "data": base64.b64encode(blob).decode("utf-8")}})
+    gen_config = {"responseModalities": ["TEXT", "IMAGE"]}
+    # Higher output resolution for better quality (config-driven). Sent as imageConfig.imageSize.
+    _size = getattr(settings, "GEMINI_IMAGE_SIZE", None)
+    if _size:
+        gen_config["imageConfig"] = {"imageSize": str(_size).upper()}
     try:
         resp = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={key}",
             headers={"Content-Type": "application/json"},
-            json={"contents": [{"parts": parts}], "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}},
-            timeout=(15, 300),
+            json={"contents": [{"parts": parts}], "generationConfig": gen_config},
+            timeout=(15, 420),
         )
+        # Some models reject imageConfig.imageSize — retry once without it rather than failing over.
+        if not resp.ok and "imageConfig" in gen_config and ("imageConfig" in resp.text or "imageSize" in resp.text or resp.status_code == 400):
+            logger.warning("Gemini imageConfig rejected (%s) — retrying at default resolution", resp.status_code)
+            gen_config.pop("imageConfig", None)
+            resp = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={key}",
+                headers={"Content-Type": "application/json"},
+                json={"contents": [{"parts": parts}], "generationConfig": gen_config},
+                timeout=(15, 420),
+            )
         if not resp.ok:
             logger.error("Gemini image fallback HTTP %d: %s", resp.status_code, resp.text[:200])
             return None
@@ -3334,8 +3359,21 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
         return " Render as a matching PAIR of CUFFLINKS with the standard swivel-bar backs."
     if "ring" in t:
         return " Present the design as the face/top of a wearable RING on a smooth polished band/shank."
-    if "bracelet" in t or "bangle" in t or ("cuff" in t and "link" not in t):
-        return " Render as a wearable BRACELET form."
+    if "bangle" in t:
+        return " Render as a wearable BANGLE — a rigid closed circular band worn over the hand (no clasp needed)."
+    if "cuff" in t and "link" not in t:
+        return " Render as a wearable open CUFF bracelet — a rigid C-shaped band with an open gap at the back (no clasp)."
+    if "bracelet" in t:
+        return (" Render as a wearable BRACELET laid out flat / gently open. It MUST be finished with a working "
+                "CLASP / lock closure at the two ends — e.g. a lobster-claw or box clasp with the matching end "
+                "link / jump ring — so it can actually fasten and be worn. Show the clasp clearly; it is an "
+                "openable strand, NOT a seamless closed loop.")
+    if "anklet" in t:
+        return (" Render as a wearable ANKLET (ankle chain) finished with a working CLASP / lock closure at the "
+                "ends so it can fasten — show the clasp clearly.")
+    if "chain" in t:
+        return (" Render as a wearable CHAIN with consistent link rhythm, finished with a working CLASP / lock "
+                "closure (e.g. a lobster clasp) at the ends so it can be worn.")
     if "brooch" in t:
         return " Render as a BROOCH with a hidden pin/clasp on the back."
     if "grill" in t:
@@ -3365,7 +3403,7 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
             "if the piece is a pendant / charm / hanging piece; for any other form do NOT add a bail.")
 
 
-def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[str, Any]], metal_tone: str, has_images: bool, image_count: int = 0) -> str:
+def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[str, Any]], metal_tone: str, has_images: bool, image_count: int = 0, font_template: Optional[Dict[str, Any]] = None) -> str:
     """Initial-generation prompt — delegates to the config-registry builder (app.services.prompts).
 
     Per-jewellery profiles + a shared common core replace the old monolithic logic so
@@ -3374,7 +3412,7 @@ def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[s
     """
     try:
         from app.services.prompts.initial import build_initial_prompt
-        return build_initial_prompt(user_prompt, parsed_data, metal_tone, has_images, image_count)
+        return build_initial_prompt(user_prompt, parsed_data, metal_tone, has_images, image_count, font_template=font_template)
     except Exception as _e:  # pragma: no cover - safety net
         logger.warning("[prompt-registry] initial builder failed (%s) — using legacy builder", _e)
         return _legacy_build_concise_initial_prompt(user_prompt, parsed_data, metal_tone, has_images, image_count)
@@ -3890,6 +3928,19 @@ def generate_with_fallback(
     if getattr(settings, "ENRICH_TEXT_PROMPT", False) and not has_reference_image and not is_refine and user_prompt:
         user_prompt = enrich_jewelry_prompt(user_prompt, (parsed_data or {}).get("item_type", ""))
 
+    # FONT-TEMPLATE: if the user named a font we have a glyph file for, render the EXACT lettering as
+    # a reference image so the model TRACES the precise letterforms (text-to-image can't reproduce a
+    # named font consistently from words alone — "har baar font alag"). This converts the text-only
+    # request into a glyph-guided generation. Uses original_request (the raw, un-enriched words).
+    font_template = None
+    if not has_reference_image and not is_refine and original_request:
+        try:
+            from app.services.font_template_service import build_font_template
+            font_template = build_font_template(original_request)
+        except Exception as _fe:
+            logger.warning("[font-template] build failed: %s", _fe)
+            font_template = None
+
     # Refinement intelligence — use Gemini to interpret the user prompt
     refinement_intent = refinement_intent_override
     if not refinement_intent and is_refine and user_prompt:
@@ -3923,6 +3974,9 @@ def generate_with_fallback(
     # Pre-download the reference ONCE (whitened) — reused for generation and the fidelity
     # comparison so we don't download twice.
     ref_blobs = download_reference_images(resolved_image_urls) if resolved_image_urls else None
+    # Font-template: use the rendered glyph image as the (only) reference blob for generation.
+    if font_template:
+        ref_blobs = [base64.b64decode(font_template["b64"])]
     input_b64 = base64.b64encode(ref_blobs[0]).decode("utf-8") if ref_blobs else None
 
     # BAIL-GUARD (initial, image-input): if the DECLARED type would add a pendant bail but the
@@ -3976,7 +4030,7 @@ def generate_with_fallback(
         if is_refine:
             base = _build_concise_refine_prompt(user_prompt, refinement_intent, attempt, forced_case=forced_case, ref_metal=ref_metal, image_count=len(resolved_image_urls or []))
         else:
-            base = _build_concise_initial_prompt(user_prompt, parsed_data, metal_tone, bool(resolved_image_urls), len(resolved_image_urls or []))
+            base = _build_concise_initial_prompt(user_prompt, parsed_data, metal_tone, bool(resolved_image_urls), len(resolved_image_urls or []), font_template=font_template)
         if correction_notes:
             base += (
                 "\n\nIMPORTANT — the previous attempt differed from the reference in these ways. FIX each one "
@@ -4076,6 +4130,7 @@ def generate_with_fallback(
                 "itemType": (parsed_data or {}).get("item_type") or infer_item_type_from_prompt(original_request),
                 "newImageB64": b64,
                 "referenceB64": input_b64 if has_reference_image else None,
+                "fontLocked": bool(font_template),
             })
             logger.info("[initial_qa attempt %d] %s", qa_attempt, qa_result)
             if qa_result.get("passed") or not qa_result.get("retry_recommended"):
