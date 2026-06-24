@@ -89,9 +89,10 @@ class Settings(BaseSettings):
     # "gemini" -> gemini-2.5-flash-image (fast, ~seconds; falls back to OpenAI on failure).
     # "openai" -> gpt-image-2 (slow, ~minutes). Side ANGLES always use OpenAI regardless.
     IMAGE_PROVIDER: str = "gemini"
-    # Max quality (client wants quality over cost): gemini-3-pro-image = "Nano Banana Pro" (most
-    # realistic). Switch to "gemini-3.1-flash-image" for a faster/cheaper option (still 2K).
-    GEMINI_IMAGE_MODEL: str = "gemini-3-pro-image"
+    # Image model: gemini-3.1-flash-image = "Nano Banana 2" (fast + good quality, supports 2K).
+    # Alternatives: "gemini-3-pro-image" (Nano Banana Pro — highest quality, slower/costlier),
+    # "gemini-2.5-flash-image" (older Nano Banana).
+    GEMINI_IMAGE_MODEL: str = "gemini-3.1-flash-image"
     # Output resolution for Gemini image gen ("1K" | "2K" | "4K"). Higher = better quality + more
     # tokens/time. Empty = model default. 2K = 2816x1536 (4x the default pixels).
     GEMINI_IMAGE_SIZE: str = "2K"
