@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     CELERY_ACCEPT_CONTENT: List[str] = ["json"]
     CELERY_TIMEZONE: str = "UTC"
     CELERY_ENABLE_UTC: bool = True
+    # Worker concurrency + memory safety. High-quality image tasks (pro+2K ~210MB, 4K ~356MB working
+    # set; child RSS incl. interpreter ~0.5-1GB). Server has 32GB RAM, so 4 concurrent is comfortably
+    # safe (4 * ~1GB = ~4GB, leaving plenty for API + Redis). Could go higher (6-8) for more throughput.
+    # max_memory_per_child is GENEROUS (~1.5GB) so children only recycle on a real leak, NOT after every
+    # task (a low value here causes constant child restarts = slow). max_tasks_per_child also recycles.
+    CELERY_WORKER_CONCURRENCY: int = 4
+    CELERY_MAX_MEMORY_PER_CHILD: int = 1500000  # KiB (~1.46GB); leak safety net, not a per-task killer
 
     # Environment
     ENVIRONMENT: str = "development"

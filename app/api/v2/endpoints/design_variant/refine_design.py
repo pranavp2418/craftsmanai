@@ -125,14 +125,13 @@ async def refine_design_variant(
     if primary_reference and primary_reference not in _original_inputs:
         ai_reference_images.append(primary_reference)
 
-    # Newly-uploaded reference images are COMBINE sources — attach them ONLY when the user's prompt
-    # actually asks to combine/add from another image. Otherwise (a plain edit like "remove bail")
-    # an auto-attached image must NOT hijack the edit by triggering a fresh combine/regeneration.
-    _combine_intent = any(w in (prompt_used or "").lower() for w in [
-        "combine", "incorporate", "merge", "from this", "from the image", "from second",
-        "from the second", "add the", "use this", "like this image", "from another",
-    ])
-    if reference_urls and _combine_intent:
+    # If the user uploaded reference image(s) in THIS refine, pass them ALL straight to the model
+    # together with the client's prompt — no keyword gating. The user attached them on purpose; the
+    # model decides how to use them per the prompt (merge / replace an element / take a style etc.).
+    # (We only skip any that exactly match the ORIGINAL design upload, which must never be a refine
+    # source.) NOTE: this assumes the frontend sends `files` ONLY when the user actually picks an
+    # image — it should not auto-attach an image on a plain text edit.
+    if reference_urls:
         ai_reference_images.extend([u for u in reference_urls if u not in _original_inputs])
 
     # Edge case: parent variant has no render at all — fall back to the original input.
@@ -145,8 +144,8 @@ async def refine_design_variant(
             ai_reference_images = None
 
     logger.info(
-        "[refine] variant=%s refs=%d combine_intent=%s uploaded_files=%d",
-        variant.id, len(ai_reference_images or []), _combine_intent, len(reference_urls or []),
+        "[refine] variant=%s refs=%d uploaded_files=%d",
+        variant.id, len(ai_reference_images or []), len(reference_urls or []),
     )
 
 

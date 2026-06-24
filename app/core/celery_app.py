@@ -38,4 +38,15 @@ celery_app.conf.update(
     task_soft_time_limit=25 * 60,  # 25 minutes
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
+
+    # CONCURRENCY + MEMORY SAFETY (critical): each high-quality image task (pro + 2K) peaks at
+    # ~210MB RAM (4K ~356MB). Without a cap, several simultaneous generations exhaust the server's
+    # RAM -> the OS OOM-killer kills the worker child mid-task -> the design is left stuck in
+    # GENERATING forever (no error). Capping concurrency makes simultaneous requests QUEUE and run a
+    # few at a time instead of all at once; max_memory_per_child recycles a bloated child after a task.
+    # Tune via env: CELERY_WORKER_CONCURRENCY (raise if the server has more RAM) and
+    # CELERY_MAX_MEMORY_PER_CHILD (KiB). NOTE: a `-c N` flag on the celery launch command OVERRIDES
+    # worker_concurrency — make the launch command's -c match this (or drop it to use this value).
+    worker_concurrency=getattr(settings, "CELERY_WORKER_CONCURRENCY", 2),
+    worker_max_memory_per_child=getattr(settings, "CELERY_MAX_MEMORY_PER_CHILD", 250000),  # KiB (~244MB)
 )
