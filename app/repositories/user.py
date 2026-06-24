@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
+import logging
 
 from app.models.user import User
 from app.models.user_device import UserDevice
@@ -11,6 +12,8 @@ from app.models.brand_setting import BrandSetting
 from app.core.security import get_password_hash, verify_password, hash_token, verify_token
 from app.core.config import settings
 
+
+logger = logging.getLogger(__name__)
 
 class UserRepository:
     def __init__(self, db: Session):

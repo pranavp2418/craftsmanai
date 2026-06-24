@@ -1,3 +1,4 @@
+from .audit_log import AuditLog
 from .user import User
 from .otp import OTP
 from .user_device import UserDevice
@@ -47,6 +48,7 @@ __all__ = [
     "SystemSettings",
     "SystemSettingsLog",
     "Invoice",
+    "AuditLog",
 
     "User",
     "OTP", 

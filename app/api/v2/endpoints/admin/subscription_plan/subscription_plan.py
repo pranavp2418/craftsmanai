@@ -1,7 +1,7 @@
 from typing import Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, or_
+from sqlalchemy import func, desc, or_, cast, String
 import uuid
 
 from app.core.dependencies import get_db, get_current_superuser as get_current_admin
@@ -109,7 +109,7 @@ def read_all_user_subscriptions(
     db: Session = Depends(get_db),
     skip: int = 0,
     limit: int = 100,
-    status: Optional[SubscriptionStatus] = None,
+    status: Optional[List[str]] = Query(None),
     search: Optional[str] = None,
     current_user: User = Depends(get_current_admin)
 ) -> Any:
@@ -120,72 +120,121 @@ def read_all_user_subscriptions(
     - status: Filter by subscription status (ACTIVE, CANCELLED, EXPIRED, TRIAL, PAUSED, PAST_DUE)
     - search: Search by retailer name, email, or business name
     """
-    # Build base query
-    query = (
-        db.query(
-            UserSubscription,
-            User.full_name,
-            User.email,
-            User.business_name,
-            SubscriptionPlan.name.label("plan_name")
-        )
-        .outerjoin(User, UserSubscription.user_id == User.id)
-        .outerjoin(SubscriptionPlan, UserSubscription.plan_id == SubscriptionPlan.id)
-    )
-    
-    # Apply status filter
-    if status:
-        query = query.filter(UserSubscription.status == status)
-    
-    # Apply search filter (search in retailer name, email, or business name)
-    if search:
-        search_term = f"%{search}%"
-        query = query.filter(
-            or_(
-                User.full_name.ilike(search_term),
-                User.email.ilike(search_term),
-                User.business_name.ilike(search_term)
+    try:
+        # Build base query for subscriptions
+        query = (
+            db.query(
+                UserSubscription,
+                User.full_name,
+                User.email,
+                User.business_name,
+                SubscriptionPlan.name.label("plan_name")
             )
+            .outerjoin(User, UserSubscription.user_id == User.id)
+            .outerjoin(SubscriptionPlan, UserSubscription.plan_id == SubscriptionPlan.id)
         )
-    
-    # Get total count with filters applied
-    total_count = query.count()
-    
-    if total_count == 0:
-        return {"success": True, "data": [], "total": 0}
-
-    rows = (
-        query
-        .order_by(desc(UserSubscription.created_at))
-        .offset(skip)
-        .limit(limit)
-        .all()
-    )
-    
-    data = []
-    for row in rows:
-        sub = row[0]
-        user_name = row[1]
-        user_email = row[2]
-        business_name = row[3]
-        plan_name = row[4]
         
-        data.append({
-            "id": sub.id,
-            "user_id": sub.user_id,
-            "user_name": user_name or user_email or "Unknown",
-            "email": user_email or "Unknown",
-            "business_name": business_name,
-            "plan_id": sub.plan_id,
-            "plan_name": plan_name or "Unknown Plan",
-            "status": sub.status,
-            "start_date": sub.start_date,
-            "end_date": sub.end_date,
-            "created_at": sub.created_at
-        })
+        # Apply status filter - convert string to enum if provided
+        status_list = []
+        if status:
+            try:
+                for s in status:
+                    if s:
+                        for part in s.split(','):
+                            part_stripped = part.strip()
+                            if part_stripped:
+                                # Validate against python enum to raise 400 for completely invalid strings
+                                valid_enum = SubscriptionStatus(part_stripped.upper())
+                                status_list.append(valid_enum.value)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid status value in: {status}. Valid values are: ACTIVE, CANCELLED, EXPIRED, TRIAL, PAUSED, PAST_DUE"
+                )
+        
+        if status_list:
+            query = query.filter(cast(UserSubscription.status, String).in_(status_list))
+        
+        # Apply search filter (search in retailer name, email, or business name)
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                or_(
+                    User.full_name.ilike(search_term),
+                    User.email.ilike(search_term),
+                    User.business_name.ilike(search_term)
+                )
+            )
+        
+        # Get total count with filters applied - use the same base query but just count
+        # Build a fresh query for counting that includes necessary joins
+        count_base = db.query(func.count(UserSubscription.id)).select_from(UserSubscription)
+        
+        # Join with User and SubscriptionPlan for search filter
+        if search:
+            count_base = count_base.outerjoin(User, UserSubscription.user_id == User.id)
+            count_base = count_base.outerjoin(SubscriptionPlan, UserSubscription.plan_id == SubscriptionPlan.id)
+        
+        # Apply same filters to count query
+        if status_list:
+            count_base = count_base.filter(cast(UserSubscription.status, String).in_(status_list))
+        if search:
+            count_base = count_base.filter(
+                or_(
+                    User.full_name.ilike(search_term),
+                    User.email.ilike(search_term),
+                    User.business_name.ilike(search_term)
+                )
+            )
+        
+        total_count = count_base.scalar() or 0
+        
+        if total_count == 0:
+            return {"success": True, "data": [], "total": 0}
 
-    return {
-        "success": True,
-        "data": data,
-        "total": total_count
-    }
+        rows = (
+            query
+            .order_by(desc(UserSubscription.created_at))
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+        
+        data = []
+        for row in rows:
+            sub = row[0]
+            user_name = row[1]
+            user_email = row[2]
+            business_name = row[3]
+            plan_name = row[4]
+            
+            data.append({
+                "id": str(sub.id),
+                "user_id": sub.user_id,
+                "user_name": user_name or user_email or "Unknown",
+                "email": user_email or "Unknown",
+                "business_name": business_name,
+                "plan_id": str(sub.plan_id) if sub.plan_id else None,
+                "plan_name": plan_name or "Unknown Plan",
+                "status": sub.status.value if hasattr(sub.status, 'value') else sub.status,
+                "start_date": sub.start_date.isoformat() if sub.start_date else None,
+                "end_date": sub.end_date.isoformat() if sub.end_date else None,
+                "created_at": sub.created_at.isoformat() if sub.created_at else None
+            })
+
+        return {
+            "success": True,
+            "data": data,
+            "total": total_count
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Log the error for debugging
+        import logging
+        logging.error(f"Error fetching user subscriptions: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred while fetching subscriptions: {str(e)}"
+        )

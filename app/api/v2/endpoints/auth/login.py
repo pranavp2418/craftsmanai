@@ -1,13 +1,12 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
 from typing import Any
 
 from app.core.database import get_db
-from app.core.rate_limiter import check_auth_rate_limit
+from app.core.rate_limiter import check_auth_rate_limit, rate_limiter, get_rate_limit_key
 from app.core.token_blacklist import token_blacklist
 from app.models.blacklisted_token import BlacklistedToken
-from datetime import timedelta
 from app.core.config import settings
 from app.core.device_fingerprint import get_device_info_from_request
 from app.schemas.auth import LoginRequest, LoginResponse, DeviceInfo
@@ -55,18 +54,49 @@ async def login(
     Handles device detection and max device limit enforcement.
     """
     
-    # Check rate limit
-    check_auth_rate_limit(request, "login")
+    # Note: Removed check_auth_rate_limit here because it bypasses in development mode
+    # The login lockout check below handles rate limiting per email
     
     auth_service = AuthService(db)
     
     # Auto-detect device info from request headers
     device_info = get_device_info_from_request(request)
     
+    # Check if account is locked (BEFORE authentication - blocks even correct password)
+    failed_key = get_rate_limit_key(request, f"login_failed:{login_data.email}")
+    logger.info(f"LOCKOUT_DEBUG: Checking lockout for key: {failed_key}, email: {login_data.email}")
+    
+    # Check if account is locked (without incrementing counter)
+    is_rate_limited = rate_limiter.is_rate_limited(
+        failed_key, 
+        f"{settings.MAX_FAILED_LOGIN_ATTEMPTS}/{settings.ACCOUNT_LOCKOUT_MINUTES} minutes",
+        bypass_mode_check=True
+    )
+    
+    logger.info(f"LOCKOUT_DEBUG: is_rate_limited={is_rate_limited}")
+    
+    if is_rate_limited:
+        # Account is locked due to too many failed attempts
+        logger.warning(f"Login attempt for locked account: {login_data.email}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Account is temporarily locked due to multiple failed login attempts. Please try again in {settings.ACCOUNT_LOCKOUT_MINUTES} minutes.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
     # Authenticate user
     user = auth_service.user_repo.authenticate_user(login_data.email, login_data.password)
     
     if not user:
+        # Increment failed attempt counter (use is_allowed directly to bypass dev mode check)
+        is_allowed, limit_info = rate_limiter.is_allowed(
+            failed_key, 
+            str(settings.MAX_FAILED_LOGIN_ATTEMPTS), 
+            settings.ACCOUNT_LOCKOUT_MINUTES * 60,
+            bypass_mode_check=True
+        )
+        
+        logger.info(f"LOCKOUT_DEBUG: Failed login #{settings.MAX_FAILED_LOGIN_ATTEMPTS - int(limit_info.get('remaining', 0))}, is_allowed={is_allowed}, remaining={limit_info.get('remaining', 0)}")
         logger.warning(f"Login failed for email: {login_data.email}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
