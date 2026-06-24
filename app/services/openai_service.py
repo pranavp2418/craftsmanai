@@ -3891,6 +3891,80 @@ def enrich_jewelry_prompt(user_prompt: str, item_type: str = "") -> str:
     return user_prompt
 
 
+def detect_jewelry_crop_box(image_b64: str) -> Optional[Dict[str, float]]:
+    """If a reference image has written TEXT / notes / dimensions / labels AROUND the jewelry (e.g. an
+    annotated spec sheet), return the bounding box {x,y,w,h} (0-1 fractions) of ONLY the main jewelry
+    piece so we can crop the text away. Returns None when there is no surrounding text (use full image).
+
+    The image model copies any text embedded in the reference no matter what the prompt says, so the
+    reliable way to keep annotation text OUT of the render is to physically crop it off the input."""
+    if not image_b64:
+        return None
+    instruction = (
+        "Look at this image. Does it contain written TEXT / notes / dimensions / measurements / labels / "
+        "captions / spec-sheet writing AROUND the jewelry (text that is NOT engraved on the piece itself)? "
+        "If YES, give the TIGHT bounding box of ONLY the main jewelry piece (exclude all that surrounding "
+        "text). If there are multiple pieces, give a box covering all the jewelry but none of the text. "
+        "Respond ONLY as JSON: {\"has_text\": true|false, \"box\": {\"x\":0.0,\"y\":0.0,\"w\":1.0,\"h\":1.0}} "
+        "where x,y is the top-left corner and w,h the width/height as fractions (0-1) of the image."
+    )
+    try:
+        resp = _analysis_post(
+            {
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": instruction},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+                ]}],
+                "response_format": {"type": "json_object"},
+                "max_tokens": 150,
+                "temperature": 0,
+            },
+            timeout=30,
+        )
+        if not resp.ok:
+            return None
+        content = resp.json().get("choices", [{}])[0].get("message", {}).get("content")
+        data = _json_from_content(content)
+        if not data.get("has_text"):
+            return None
+        box = data.get("box") or {}
+        if all(k in box for k in ("x", "y", "w", "h")):
+            return {k: float(box[k]) for k in ("x", "y", "w", "h")}
+    except Exception as e:
+        logger.warning("[ref-crop] bbox detect failed: %s", e)
+    return None
+
+
+def crop_reference_to_jewelry(image_bytes: bytes) -> bytes:
+    """Crop an annotated reference (spec sheet / notes around the piece) down to just the jewelry so the
+    model can't reproduce the surrounding text. Returns the original bytes when there's no text to strip
+    or anything goes wrong (fail-open)."""
+    try:
+        box = detect_jewelry_crop_box(base64.b64encode(image_bytes).decode("utf-8"))
+        if not box:
+            return image_bytes
+        import io
+        from PIL import Image
+        im = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        W, H = im.size
+        x, y = box["x"] * W, box["y"] * H
+        w, h = box["w"] * W, box["h"] * H
+        pad_x, pad_y = 0.03 * W, 0.03 * H
+        left = max(0, int(x - pad_x)); top = max(0, int(y - pad_y))
+        right = min(W, int(x + w + pad_x)); bottom = min(H, int(y + h + pad_y))
+        # sanity: ignore a degenerate / near-full box
+        if (right - left) < W * 0.15 or (bottom - top) < H * 0.15 or (right - left) * (bottom - top) > W * H * 0.97:
+            return image_bytes
+        buf = io.BytesIO()
+        im.crop((left, top, right, bottom)).save(buf, "PNG")
+        logger.info("[ref-crop] annotated reference cropped to jewelry box (%d,%d,%d,%d) of %dx%d", left, top, right, bottom, W, H)
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning("[ref-crop] crop failed: %s", e)
+        return image_bytes
+
+
 def generate_with_fallback(
     image_source: Optional[str],
     user_prompt: str,
@@ -3985,6 +4059,12 @@ def generate_with_fallback(
     # Font-template: use the rendered glyph image as the (only) reference blob for generation.
     if font_template:
         ref_blobs = [base64.b64decode(font_template["b64"])]
+    # ANNOTATED-REFERENCE CROP: a reference spec sheet / photo with notes, dimensions or labels around
+    # the piece makes the model reproduce that text in the render. The prompt alone can't stop it, so
+    # for INITIAL image inputs we physically crop the reference down to just the jewelry (text removed).
+    # Skipped for refines (those references are clean renders) and font templates (intentional text).
+    if not is_refine and not font_template and ref_blobs:
+        ref_blobs = [crop_reference_to_jewelry(b) for b in ref_blobs]
     input_b64 = base64.b64encode(ref_blobs[0]).decode("utf-8") if ref_blobs else None
 
     # BAIL-GUARD (initial, image-input): if the DECLARED type would add a pendant bail but the

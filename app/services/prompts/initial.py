@@ -61,8 +61,10 @@ def _has_text_intent(user_prompt: str) -> bool:
 def _intent_directive(intent: str, source_kind: str, item_type: str, has_user_prompt: bool) -> str:
     """A single focused instruction chosen from the parsed intent (Lovable-style job routing)."""
     if intent == "render_as_is" or (source_kind == "jewelry_reference" and not has_user_prompt):
-        return (" Reproduce this EXACT piece as a clean CAD render — do NOT redesign, 'improve', enlarge stones, "
-                "simplify, or add anything. Same shape, same every stone, same metal, same lettering.")
+        return (" Reproduce ONLY the EXACT jewelry PIECE as a clean CAD render — do NOT redesign, 'improve', "
+                "enlarge stones, simplify, or add anything. Same shape, same every stone, same metal, same "
+                "lettering ON the piece. Do NOT reproduce any surrounding notes, captions, dimensions, or text "
+                "that appear around the piece in the reference — only the piece itself.")
     if intent == "image_enhancement_only":
         return (" ENHANCEMENT ONLY (this is NOT a redesign): keep the design 100% identical and only make it a "
                 "cleaner, sharper, more premium CAD render.")
@@ -126,16 +128,29 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
     )
 
     is_pendant = profile.bail_policy in (BAIL_ADD_IF_MISSING, BAIL_PRESERVE) and svc._is_pendant_like(item_type, user_prompt)
+    # Pure reproduce of an EXISTING jewelry piece ("create the same pendant", a real photo / render) ->
+    # NEVER add or touch bails; just reproduce exactly. Bail-ADD logic is only for turning a NON-pendant
+    # (sketch / logo / graphic) INTO a pendant.
+    _pure_reproduce = intent in ("render_as_is", "image_enhancement_only") or source_kind == "jewelry_reference"
 
-    if is_pendant:
-        # Bail is carved out of "preserve" right here, in ONE coherent instruction.
+    if is_pendant and _pure_reproduce:
         form_line = (
-            f"Render this reference as a wearable PENDANT, {angle_phrase}. The pendant must hang from EXACTLY ONE "
-            "bail/hook at the very top-centre. IMPORTANT: if the reference ALREADY has a bail, hook, loop, or any "
-            "top hanging element, KEEP that one as-is and do NOT add another — there must never be two bails or a "
-            "bail stacked on top of an existing one. ONLY if the reference has NO bail at all (e.g. a flat sketch) "
-            "add a single FLARED, FAN-SHAPED bail (wider at the top, tapering to a small loop) at the top-centre. "
-            "If a chain or cord is shown, remove it and show only the pendant with its single bail."
+            f"Reproduce this reference PENDANT EXACTLY as shown, {angle_phrase}. Keep its EXISTING top / bail / "
+            "loop / hanging connection EXACTLY as it appears — same NUMBER of bails/loops, same shape, same "
+            "position. Do NOT add any new bail, hook or loop, do NOT duplicate or stack a bail on top of an "
+            "existing connection, and do NOT replace or enlarge it. If the piece already hangs from TWO points / "
+            "two loops, keep EXACTLY those two and add none. Reproduce the whole piece faithfully; you may drop "
+            "ONLY a long wearing chain/cord if one is threaded through."
+        )
+    elif is_pendant:
+        # Turning a sketch / logo / non-pendant into a wearable pendant -> a bail may need to be ADDED.
+        form_line = (
+            f"Render this reference as a wearable PENDANT, {angle_phrase}. PRESERVE THE TOP EXACTLY: keep any "
+            "bail / hook / loop AND any design element sitting above or around it (e.g. a topper, mask, crown, "
+            "figure, head, or motif above the bail) IDENTICAL in shape, size and position. Do NOT remove, hide, "
+            "shrink, or replace anything at the top. ONLY if the reference has NO bail or top loop at all (e.g. a "
+            "flat sketch / logo) add a SINGLE simple bail at the top-centre so it can hang. Never add a second "
+            "bail or stack one on an existing connection."
         )
     else:
         form_line = f"Render this reference as a {item_type}, {angle_phrase}.{svc._type_form_clause(item_type, user_prompt)}"
@@ -183,6 +198,19 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
             "COMBINE them into ONE unified piece — do NOT output them separately or side by side."
         )
 
+    # The reference may be a spec sheet / annotated photo with written notes, dimensions, callouts,
+    # arrows, watermarks etc. around the piece. Those are NOT part of the jewelry and must NEVER be
+    # rendered — output ONLY the clean piece. (Lettering that is physically ON the jewelry — a name,
+    # initials, engraving — is part of the design and IS kept.)
+    no_annotation_note = (
+        " OUTPUT THE JEWELRY ONLY — NO CAPTIONS / NOTES / NUMBERS: the final image must contain ONLY the "
+        "single jewelry piece on a pure white background and ABSOLUTELY NOTHING ELSE — NO paragraphs of text, "
+        "NO design notes, NO dimension numbers, NO measurements, NO labels, NO captions, NO arrows, NO "
+        "watermarks, NO spec-sheet text. If the reference is an annotated spec sheet or has ANY written "
+        "text/notes AROUND the piece, COMPLETELY EXCLUDE all of it and render ONLY the clean piece. Keep ONLY "
+        "lettering that is physically engraved or set ON the jewelry itself (e.g. a name/initials on the piece)."
+    )
+
     # "diamond cut" = a metal finish (not diamonds); convert a coloured logo/graphic to solid metal
     # when a metal is named OR the intent is convert_to_jewelry.
     dcut = diamond_cut_clause(user_prompt)
@@ -198,6 +226,7 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
     return f"""{COMMON_SYSTEM_PROMPT}
 
 {form_line}{intent_directive}
+{no_annotation_note}
 
 {user_request}{retail}{sketch_note}{variations_block}{merge_block}{metal_convert}{dcut}{stone_size}{gold_note}
 
