@@ -202,14 +202,18 @@ def diamond_size_clause(user_prompt: str) -> str:
     micro-pavé stones, not big ones. Big stones only when the user explicitly asks for big/bold."""
     p = (user_prompt or "").lower()
     if any(w in p for w in _BIG_STONE_WORDS):
-        return (" DIAMOND SIZE: use the LARGER, bold statement stones the user asked for (still clean, even and "
-                "well-set).")
+        return (" DIAMOND SIZE: use the LARGER, bold statement stones the user asked for — still cleanly and "
+                "EVENLY set, packed neatly with NO awkward gaps or bare-metal spaces between them.")
     if any(w in p for w in _SMALL_DENSE_WORDS):
-        return (" DIAMOND SIZE: use MANY SMALL round diamonds set densely (micro-pavé) for full, even coverage "
-                "that follows the surface — NOT a few big chunky stones; size the stones DOWN so they pack tightly "
-                "and uniformly.")
-    return (" DIAMOND SIZE: use realistic SMALL-to-MID round diamonds in clean, even rows — keep them modest and "
-            "uniform, NOT oversized chunky stones.")
+        return (" DIAMOND SIZE & COVERAGE: fill the iced area COMPLETELY with many SMALL round diamonds in a clean "
+                "micro-pavé — FULL, EVEN, GAP-FREE coverage with NO empty patches, NO bare-metal gaps and NO sparse "
+                "spots between stones. Use small stones (NOT big chunky ones); in tight, narrow, curved or corner "
+                "areas use proportionally SMALLER stones so every part stays neatly and fully filled right to the "
+                "edges. Every stone must be uniform, crisply set and well-defined — no messy, half-set, floating, "
+                "skipped or distorted stones anywhere, especially in the small areas.")
+    return (" DIAMOND SIZE: use realistic SMALL-to-MID round diamonds, cleanly and EVENLY set with full, gap-free "
+            "coverage of the intended area (no sparse patches, no bare-metal gaps between stones) — uniform and "
+            "modest, NOT oversized chunky stones.")
 
 
 def light_gold_note(effective_metal: str) -> str:

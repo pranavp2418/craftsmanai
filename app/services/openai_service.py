@@ -2943,13 +2943,17 @@ NO_DEGEM_RULE = (
     "or a smooth textured border — diamonds must stay diamonds, not become metal."
 )
 
-# Default stone arrangement when the model must ADD or DEFAULT stones (i.e. NOT defined by
-# the reference). Client-confirmed (2026-06-18): PARALLEL rows, NON-UNIFORM spacing/sizing.
+# Default stone arrangement when the model must ADD or DEFAULT stones (i.e. NOT defined by the
+# reference). Updated 2026-06-24: client now wants TIGHT, GAP-FREE packing — the old "non-uniform
+# spacing" wording was literally producing bare-metal gaps between stones. Keep an organic (non-grid)
+# look but pack the stones close together with no empty gaps.
 STONE_ARRANGEMENT_DEFAULT = (
     "DEFAULT STONE ARRANGEMENT (apply ONLY when stones are not already defined by the reference and you must add "
     "or default them): use small ROUND white diamonds laid out in PARALLEL rows that follow the form of the "
-    "piece, with natural, slightly NON-UNIFORM spacing and sizing — never a rigid, perfectly-uniform mechanical "
-    "grid. If the reference already shows a stone arrangement, REPLICATE that arrangement exactly instead of this default."
+    "piece, packed TIGHTLY together edge-to-edge with minimal metal showing between them and NO empty gaps, sparse "
+    "spots or bare-metal patches between stones. Keep the placement natural and organic (not a rigid, mechanical, "
+    "perfectly-uniform grid) but always FULLY and EVENLY filled with stones touching their neighbours. If the "
+    "reference already shows a stone arrangement, REPLICATE that arrangement exactly instead of this default."
 )
 
 # Camera angle — client-confirmed (2026-06-18): for IMAGE inputs keep the reference's angle;
@@ -3391,8 +3395,12 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
     if "pendant" in t or "charm" in t:
         return _PENDANT
     if "necklace" in t:
-        return (" Render as a wearable NECKLACE / nameplate — the lettering/design as one connected, "
-                "wearable unit. Do NOT add a separate pendant bail/hook.")
+        return (" Render as a wearable NECKLACE — a LARGE, neck-sized piece worn around the NECK, clearly BIGGER and "
+                "LONGER than a bracelet: the chain / strand forms a wide U-shape or oval that drapes around the "
+                "neckline, finished with a working CLASP at the back. If it is a plain chain necklace, show the full "
+                "neck-length chain with even links; if it carries a pendant, nameplate or centre motif, hang that as "
+                "the focal piece at the BOTTOM-CENTRE of the necklace. Do NOT render it small like a bracelet, do NOT "
+                "make a tight little wrist-sized loop, and do NOT show it as a flat standalone nameplate.")
     # Custom / unknown type the user typed in: render it as that exact named object — do NOT
     # force a pendant bail onto it. Only fall back to a pendant for a truly generic/blank type.
     if t and t not in ("jewelry", "jewellery", "custom", "custom object", "other"):
