@@ -1,7 +1,7 @@
 import csv
 from io import StringIO
 from typing import Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func, or_
 import uuid
@@ -17,10 +17,10 @@ router = APIRouter()
 def read_payment_history(
     *,
     db: Session = Depends(get_db),
-    skip: int = 0,
-    limit: int = 100,
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(20, ge=1, le=100, description="Number of records per page"),
     status: Optional[PaymentStatus] = None,
-    search: Optional[str] = None,
+    search: Optional[str] = Query(None, description="Search across invoice ID, retailer name / email / business name, and plan name"),
     current_user: User = Depends(get_current_admin)
 ) -> Any:
     """
@@ -67,10 +67,12 @@ def read_payment_history(
     if total_count == 0:
         return {"success": True, "data": [], "total": 0}
 
+    offset = (page - 1) * limit
+
     payments_data = (
         query
         .order_by(desc(Payment.created_at))
-        .offset(skip)
+        .offset(offset)
         .limit(limit)
         .all()
     )
@@ -98,7 +100,6 @@ def read_payment_history(
 
     from math import ceil
     total_pages = ceil(total_count / limit) if limit > 0 else 1
-    page = (skip // limit) + 1 if limit > 0 else 1
     has_next = page < total_pages
     has_prev = page > 1
 
