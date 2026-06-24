@@ -82,7 +82,15 @@ class Settings(BaseSettings):
     # "gemini" -> gemini-2.5-flash-image (fast, ~seconds; falls back to OpenAI on failure).
     # "openai" -> gpt-image-2 (slow, ~minutes). Side ANGLES always use OpenAI regardless.
     IMAGE_PROVIDER: str = "gemini"
-    GEMINI_IMAGE_MODEL: str = "gemini-2.5-flash-image"
+    GEMINI_IMAGE_MODEL: str = "gemini-3.1-flash-image"
+    # Text / vision ANALYSIS calls (parse gate, OCR, metal detect, spelling, classify, enrich).
+    # "gemini" -> GEMINI_TEXT_MODEL via its OpenAI-compatible endpoint; "openai" -> gpt-4o-mini.
+    TEXT_LLM_PROVIDER: str = "gemini"
+    GEMINI_TEXT_MODEL: str = "gemini-3.1-pro-preview"
+    # Prompt FIDELITY: when False (default) the user's TEXT-ONLY prompt is sent VERBATIM to the image
+    # model — never LLM-rewritten. Jewelry needs the client's exact words (named fonts like "Road Rage
+    # Font", colours, "2 layer" etc.) preserved; the old enrich step paraphrased and dropped them.
+    ENRICH_TEXT_PROMPT: bool = False
 
     # Logging
     LOG_LEVEL: str = "INFO"

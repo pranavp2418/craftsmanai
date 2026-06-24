@@ -484,6 +484,59 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
 _TEXT_CHANGE_LLM_CACHE: Dict[str, bool] = {}
 
 
+def _analysis_post(payload: dict, timeout: int = 30):
+    """Single router for all TEXT / VISION ANALYSIS chat-completions (text-vs-design gate, OCR,
+    metal detect, spelling check, reference classify, image-brief extract, prompt enrich, fidelity).
+
+    Routes to the provider in settings.TEXT_LLM_PROVIDER:
+      * "gemini" -> settings.GEMINI_TEXT_MODEL (default gemini-3.1-pro-preview) via Gemini's
+        OpenAI-COMPATIBLE endpoint — same request/response shape, so callers parse identically.
+      * "openai" (or no Gemini key) -> the payload's original OpenAI model (gpt-4o-mini / gpt-4o).
+    The payload is OpenAI-style (messages, response_format, tools, max_tokens, temperature); only
+    the model + endpoint + auth are swapped.
+    """
+    provider = (getattr(settings, "TEXT_LLM_PROVIDER", "openai") or "openai").strip().lower()
+    gkey = os.getenv("GEMINI_API_KEY") or getattr(settings, "GEMINI_API_KEY", None)
+    body = dict(payload)
+    if provider == "gemini" and gkey:
+        body["model"] = getattr(settings, "GEMINI_TEXT_MODEL", None) or "gemini-3.1-pro-preview"
+        # Gemini reasoning models (esp. *-pro) spend tokens on internal THINKING before answering, so a
+        # tiny max_tokens (e.g. 4 for the text/design gate) leaves nothing for the actual reply and
+        # returns an empty string. Floor it so the answer is always produced. The model stops once it
+        # has answered, so this is only a cap — it does not force longer or slower output.
+        body["max_tokens"] = max(int(body.get("max_tokens") or 0), 512)
+        return requests.post(
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            headers={"Authorization": f"Bearer {gkey}", "Content-Type": "application/json"},
+            json=body, timeout=timeout,
+        )
+    okey = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
+    return requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={"Authorization": f"Bearer {okey}", "Content-Type": "application/json"},
+        json=body, timeout=timeout,
+    )
+
+
+def _json_from_content(content: str) -> Dict[str, Any]:
+    """Parse a JSON object out of an LLM reply that may be wrapped in ```json fences or have
+    reasoning text before/after it (Gemini reasoning models often do this, which breaks a strict
+    json.loads with 'Extra data'). Returns {} if nothing parseable is found."""
+    if not content:
+        return {}
+    try:
+        return _json_from_content(content)
+    except Exception:
+        pass
+    m = re.search(r"\{.*\}", content, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except Exception:
+            pass
+    return {}
+
+
 def _llm_is_text_change(prompt: str) -> bool:
     """LLM intent gate: True ONLY if the refine changes the literal TEXT / LETTERING / NAME /
     NUMBERS written or engraved on the piece; False for any structural/design change (links,
@@ -502,10 +555,8 @@ def _llm_is_text_change(prompt: str) -> bool:
     api_key = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
     if api_key:
         try:
-            resp = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={
+            resp = _analysis_post(
+                {
                     "model": "gpt-4o-mini",
                     "temperature": 0,
                     "max_tokens": 4,
@@ -1289,10 +1340,8 @@ def _ocr_pendant_text(image_b64: str, expected_join: str) -> Optional[str]:
     openai_key = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
     if openai_key:
         try:
-            resp = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
-                json={
+            resp = _analysis_post(
+                {
                     "model": "gpt-4o-mini",
                     "messages": messages,
                     "response_format": {"type": "json_object"},
@@ -1304,7 +1353,7 @@ def _ocr_pendant_text(image_b64: str, expected_join: str) -> Optional[str]:
             if resp.ok:
                 content = resp.json().get("choices", [{}])[0].get("message", {}).get("content")
                 if content:
-                    parsed = json.loads(content)
+                    parsed = _json_from_content(content)
                     detected = (parsed.get("detected_text") or "").strip()
                     if detected:
                         return detected
@@ -1399,10 +1448,8 @@ def verify_design_fidelity(input_b64: str, output_b64: str, intended_change: str
         ]},
     ]
     try:
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
+        resp = _analysis_post(
+            {
                 "model": "gpt-4o-mini",
                 "messages": messages,
                 "response_format": {"type": "json_object"},
@@ -1416,7 +1463,7 @@ def verify_design_fidelity(input_b64: str, output_b64: str, intended_change: str
         content = resp.json().get("choices", [{}])[0].get("message", {}).get("content")
         if not content:
             return {"matches": True, "differences": []}
-        parsed = json.loads(content)
+        parsed = _json_from_content(content)
         diffs = parsed.get("differences") or []
         diffs = [str(d).strip() for d in diffs if str(d).strip()]
         matches = bool(parsed.get("matches")) and not diffs
@@ -1451,10 +1498,8 @@ def detect_metal_color(image_b64: str) -> str:
         ]},
     ]
     try:
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
+        resp = _analysis_post(
+            {
                 "model": "gpt-4o-mini",
                 "messages": messages,
                 "response_format": {"type": "json_object"},
@@ -1468,7 +1513,7 @@ def detect_metal_color(image_b64: str) -> str:
         content = resp.json().get("choices", [{}])[0].get("message", {}).get("content")
         if not content:
             return "gold"
-        metal = (json.loads(content).get("metal") or "").strip().lower()
+        metal = (_json_from_content(content).get("metal") or "").strip().lower()
         if metal in ("gold", "yellow_gold", "yellow gold"):
             return "gold"
         if metal in ("silver", "white_gold", "white gold", "platinum"):
@@ -1551,10 +1596,8 @@ def classify_reference_image(image_b64: str) -> Dict[str, Any]:
         ]},
     ]
     try:
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
+        resp = _analysis_post(
+            {
                 "model": "gpt-4o-mini",
                 "messages": messages,
                 "response_format": {"type": "json_object"},
@@ -1568,7 +1611,7 @@ def classify_reference_image(image_b64: str) -> Dict[str, Any]:
         content = resp.json().get("choices", [{}])[0].get("message", {}).get("content")
         if not content:
             return {"is_jewelry": True, "metal": "gold"}
-        data = json.loads(content)
+        data = _json_from_content(content)
         is_jewelry = bool(data.get("is_jewelry", True))
         metal = (data.get("metal") or "gold").strip().lower()
         if metal in ("yellow_gold", "yellow gold"):
@@ -1616,10 +1659,8 @@ def detect_jewelry_piece_type(image_b64: str) -> str:
     ]
     valid = {"ring", "pendant", "bracelet", "earring", "grill", "watch", "anklet"}
     try:
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
+        resp = _analysis_post(
+            {
                 "model": "gpt-4o-mini",
                 "messages": messages,
                 "response_format": {"type": "json_object"},
@@ -1633,7 +1674,7 @@ def detect_jewelry_piece_type(image_b64: str) -> str:
         content = resp.json().get("choices", [{}])[0].get("message", {}).get("content")
         if not content:
             return "pendant"
-        piece = (json.loads(content).get("piece") or "").strip().lower()
+        piece = (_json_from_content(content).get("piece") or "").strip().lower()
         if piece in ("grillz",):
             piece = "grill"
         return piece if piece in valid else "pendant"
@@ -1683,10 +1724,8 @@ def extract_image_instructions(image_b64: str) -> Tuple[Optional[str], Optional[
         ]},
     ]
     try:
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
+        resp = _analysis_post(
+            {
                 "model": "gpt-4o",
                 "messages": messages,
                 "response_format": {"type": "json_object"},
@@ -1700,7 +1739,7 @@ def extract_image_instructions(image_b64: str) -> Tuple[Optional[str], Optional[
         content = resp.json().get("choices", [{}])[0].get("message", {}).get("content")
         if not content:
             return None, None
-        data = json.loads(content)
+        data = _json_from_content(content)
         brief = (data.get("brief") or "").strip()
         font_style = (data.get("font_style") or "").strip()
         return (brief or None), (font_style or None)
@@ -2498,12 +2537,14 @@ def generate_with_gemini_image(image_blobs, prompt_text: str) -> Optional[str]:
     if not key:
         logger.warning("Gemini image fallback skipped: no GEMINI_API_KEY")
         return None
+    # Model is config-driven (settings.GEMINI_IMAGE_MODEL) so it can be changed without code edits.
+    _model = getattr(settings, "GEMINI_IMAGE_MODEL", None) or "gemini-2.5-flash-image"
     parts = [{"text": prompt_text}]
     for blob in (image_blobs or []):
         parts.append({"inline_data": {"mime_type": "image/png", "data": base64.b64encode(blob).decode("utf-8")}})
     try:
         resp = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=" + key,
+            f"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={key}",
             headers={"Content-Type": "application/json"},
             json={"contents": [{"parts": parts}], "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}},
             timeout=(15, 300),
@@ -2563,7 +2604,7 @@ def generate_primary_image(
                     ).decode("utf-8")
                 except Exception as _w:
                     logger.warning("Gemini output white-bg post-process skipped: %s", _w)
-            logger.info("Primary image generated via Gemini (gemini-2.5-flash-image)")
+            logger.info("Primary image generated via Gemini (%s)", getattr(settings, "GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"))
             return g64
         logger.warning("Gemini primary returned no image — falling back to OpenAI gpt-image-2")
 
@@ -3782,10 +3823,8 @@ def enrich_jewelry_prompt(user_prompt: str, item_type: str = "") -> str:
         "description, no preamble."
     )
     try:
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
+        resp = _analysis_post(
+            {
                 "model": "gpt-4o-mini",
                 "messages": [
                     {"role": "system", "content": sys_p},
@@ -3843,11 +3882,12 @@ def generate_with_fallback(
     # what the USER actually asked — not the verbose enriched paragraph (which would over-strict it).
     original_request = (user_prompt or "")
 
-    # Text-only generation: enrich the terse prompt with domain knowledge (like ChatGPT does
-    # internally) so culturally/technically specific designs (e.g. "dos pesos coin", a named symbol
-    # or font) render correctly instead of being garbled. Skipped when there's a reference image
-    # (those are copied faithfully) and for refines.
-    if not has_reference_image and not is_refine and user_prompt:
+    # PROMPT FIDELITY (default): the user's prompt is sent to the image model VERBATIM — NEVER
+    # LLM-rewritten. In jewelry the client's exact words matter (named fonts like "Road Rage Font",
+    # exact colours, "2 layer", quoted names), and the old enrich step paraphrased and DROPPED them
+    # (e.g. it removed the font name, which then defeated _font_style_clause / layered-rule detection
+    # that key off the literal words). Enrichment is now opt-in via settings.ENRICH_TEXT_PROMPT.
+    if getattr(settings, "ENRICH_TEXT_PROMPT", False) and not has_reference_image and not is_refine and user_prompt:
         user_prompt = enrich_jewelry_prompt(user_prompt, (parsed_data or {}).get("item_type", ""))
 
     # Refinement intelligence — use Gemini to interpret the user prompt
