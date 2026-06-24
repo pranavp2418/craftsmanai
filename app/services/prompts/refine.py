@@ -165,13 +165,17 @@ USER REQUEST — TEXT CHANGE ONLY: {replacement_block} Keep the exact same desig
 One image only."""
 
     # ---------------- CASE 2 / general refine ----------------
-    change_desc = user_prompt
-    if refinement_intent and refinement_intent.get("normalized_prompt"):
+    # PROMPT FIDELITY: the user's LITERAL refine words dominate, so named fonts, quoted text and exact
+    # colours survive (jewelry needs the client's exact request — never an LLM paraphrase). The
+    # LLM-interpreted normalized_prompt is used ONLY as a fallback when the user gave no usable words;
+    # a detected font-change directive is APPENDED, never used to replace the user's words.
+    # (refinement_intent's structured fields are still consumed by the QA step, just not here.)
+    change_desc = (user_prompt or "").strip()
+    if not change_desc and refinement_intent and refinement_intent.get("normalized_prompt"):
         change_desc = refinement_intent["normalized_prompt"]
-    else:
-        _font_dir = svc._font_change_directive(user_prompt)
-        if _font_dir:
-            change_desc = _font_dir
+    _font_dir = svc._font_change_directive(user_prompt)
+    if _font_dir and _font_dir not in change_desc:
+        change_desc = f"{change_desc} {_font_dir}".strip()
 
     # CASE 4 — empty refine (user gave only an uploaded image and/or style tags, no text edit).
     # Without this the USER REQUEST would be blank. Give a sensible default so the render is useful.
