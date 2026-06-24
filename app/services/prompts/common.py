@@ -225,7 +225,10 @@ def light_gold_note(effective_metal: str) -> str:
     m = (effective_metal or "").lower()
     if m and "gold" in m and "white" not in m and "rose" not in m:
         return (
-            " Render the gold as a LIGHT, soft, true 10K CAD-style gold shade (a lighter, realistic, slightly "
-            "matte gold) — NOT a bright, saturated, glossy yellow gold."
+            " GOLD COLOUR — IMPORTANT: render a TRUE YELLOW GOLD, a clean, slightly pale, soft yellow 10K/14K "
+            "tone with a SATIN / lightly-matte finish. It MUST read clearly as YELLOW gold — NOT orange, NOT "
+            "reddish, NOT a dark COPPER / bronze / brass tone, and NOT an over-bright, mirror-glossy, heavily "
+            "reflective surface. Keep the highlights soft and realistic; a calm, slightly matte yellow gold, "
+            "never a shiny copper look."
         )
     return ""

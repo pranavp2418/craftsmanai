@@ -33,6 +33,10 @@ PARSE_SYSTEM_PROMPT = (
     "(hand-drawn/CAD wireframe), cad_render, logo_text_asset (a name/letter/logo), "
     "screenshot_request (a chat/text request screenshot), mixed_reference (one base + one style/"
     "instruction image), text_only (no image), unknown.\n\n"
+    "ITEM_TYPE — use 'necklace' for ANY piece worn around the NECK: a chain necklace, a necklace with "
+    "a pendant/charm, or a nameplate necklace. Use 'chain' ONLY for a bare chain with no focal piece, "
+    "and 'pendant' ONLY for a standalone hanging charm by itself (not on a neck chain). When in doubt "
+    "between necklace and chain/pendant, prefer 'necklace'.\n\n"
     "INTENT: render_as_is (reproduce the piece cleanly — DEFAULT for a jewelry_reference with no "
     "modification note; do NOT redesign/improve/enlarge), modify_existing (same piece with "
     "specific changes), image_enhancement_only (same design but cleaner/sharper/metal-only), "
@@ -61,7 +65,7 @@ _PARSE_TOOL = [{
                     "logo_text_asset", "sketch", "cad_render", "mixed_reference", "text_only", "unknown",
                 ]},
                 "item_type": {"type": "string", "enum": [
-                    "ring", "pendant", "chain", "bracelet", "earring", "grill", "watch", "other",
+                    "ring", "pendant", "necklace", "chain", "bracelet", "earring", "grill", "watch", "other",
                 ]},
                 "render_class": {"type": "string", "description": "routing hint, e.g. flat_pendant, dimensional_pendant, solitaire_ring, signet_ring, band_ring, cuban_chain, tennis_chain, nameplate, stud_earring"},
                 "intent": {"type": "string", "enum": [
@@ -138,6 +142,12 @@ def parse_request(note: str, image_urls: Optional[List[str]] = None, item_type_h
         parsed.setdefault("source_kind", "unknown")
         if not parsed.get("item_type"):
             parsed["item_type"] = (item_type_hint or "").strip().lower() or "other"
+        # NECKLACE FIX: the model tends to downgrade a necklace to 'chain' (chain necklace) or 'pendant'
+        # (necklace + pendant), which then renders as a bare chain / lone pendant instead of a worn
+        # neck-form piece. If the user EXPLICITLY selected/typed 'necklace', honour it.
+        _hint = (item_type_hint or "").strip().lower()
+        if _hint == "necklace" or "necklace" in (note or "").lower():
+            parsed["item_type"] = "necklace"
         parsed.setdefault("intent", "render_as_is" if image_urls else "text_to_render")
         parsed.setdefault("normalized_note", note or "")
         parsed["_parsed"] = True

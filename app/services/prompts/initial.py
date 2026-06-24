@@ -258,7 +258,12 @@ def _assemble_font_template(svc, user_prompt, lower, item_type, profile, metal_t
     else:
         stone_note = (f" Render it as PLAIN, solid, polished {metal_word} — NO diamonds, NO gemstones, NO pavé "
                       "and NO stone settings (none were requested).")
-    gold_note = light_gold_note(effective_metal)
+    # Apply the gold-colour guidance whenever the piece is YELLOW gold — whether the USER named it
+    # ("yellow gold"/"gold") OR it's the profile default. (Previously, a user-named metal blanked
+    # effective_metal, so explicit "yellow gold" requests got NO gold-colour note -> copper/glossy look.)
+    _is_yellow_gold = (("yellow gold" in lower) or ("gold" in lower and "white" not in lower and "rose" not in lower)
+                       or ("gold" in (effective_metal or "") and "white" not in (effective_metal or "") and "rose" not in (effective_metal or "")))
+    gold_note = light_gold_note("yellow gold") if _is_yellow_gold else ""
     dcut = diamond_cut_clause(user_prompt)
     retail = normalize_retailer_language(user_prompt)
 
@@ -337,7 +342,12 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
     mod_parts.append(svc.REALISM_DESCRIPTOR)  # common to every render
     modules_block = "\n\n".join(mod_parts)
 
-    gold_note = light_gold_note(effective_metal)
+    # Apply the gold-colour guidance whenever the piece is YELLOW gold — whether the USER named it
+    # ("yellow gold"/"gold") OR it's the profile default. (Previously, a user-named metal blanked
+    # effective_metal, so explicit "yellow gold" requests got NO gold-colour note -> copper/glossy look.)
+    _is_yellow_gold = (("yellow gold" in lower) or ("gold" in lower and "white" not in lower and "rose" not in lower)
+                       or ("gold" in (effective_metal or "") and "white" not in (effective_metal or "") and "rose" not in (effective_metal or "")))
+    gold_note = light_gold_note("yellow gold") if _is_yellow_gold else ""
     dcut = diamond_cut_clause(user_prompt)
     retail = normalize_retailer_language(user_prompt)
     body = user_prompt if user_prompt else f"a simple plain {item_type}"
