@@ -22,6 +22,41 @@ def create_subscription_plan(
     """
     Create new subscription plan (Admin only ideally).
     """
+    # 1. Enforce allowed names (case-insensitive) and map them to their canonical tier
+    name_lower = plan_in.name.strip().lower() if plan_in.name else ""
+    category_map = {
+        "starter": "starter",
+        "starter plan": "starter",
+        "pro": "pro",
+        "pro plan": "pro",
+        "business": "business",
+        "business plan": "business"
+    }
+    if name_lower not in category_map:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Plan name must be one of: Starter, Pro, Business (or with 'plan' suffix)."
+        )
+    
+    canonical_tier = category_map[name_lower]
+
+    # 2. Check total plans count in database
+    existing_plans = db.query(SubscriptionPlan).all()
+    if len(existing_plans) >= 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum limit of 3 subscription plans has been reached."
+        )
+
+    # 3. Prevent duplicate plans for the same tier
+    for existing in existing_plans:
+        existing_lower = existing.name.strip().lower() if existing.name else ""
+        if existing_lower in category_map and category_map[existing_lower] == canonical_tier:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A subscription plan for the '{canonical_tier.capitalize()}' tier already exists."
+            )
+
     plan = SubscriptionPlan(
         name=plan_in.name,
         description=plan_in.description,

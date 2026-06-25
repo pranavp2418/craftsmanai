@@ -232,15 +232,24 @@ def verify_payment(
                 UserSubscription.is_queued == False
             ).order_by(UserSubscription.end_date.desc()).first()
 
-            if active_subscription:
-                # Deactivate the old active subscription immediately
-                active_subscription.status = SubscriptionStatus.EXPIRED
-                active_subscription.end_date = datetime.now(timezone.utc)
-                logger.info(f"Previous active subscription {active_subscription.id} marked as EXPIRED")
+            if active_subscription and active_subscription.end_date > datetime.now(timezone.utc):
+                # Queue the new subscription to start after the current active one expires
+                is_queued = True
+                activates_after_id = active_subscription.id
+                start_date = active_subscription.end_date
+                end_date = start_date + timedelta(days=duration)
+                logger.info(f"Subscription queued to activate after {active_subscription.id} on {start_date}")
+            else:
+                is_queued = False
+                activates_after_id = None
+                start_date = datetime.now(timezone.utc)
+                end_date = start_date + timedelta(days=duration)
 
-            # Activate immediately
-            start_date = datetime.now(timezone.utc)
-            end_date = start_date + timedelta(days=duration)
+                if active_subscription:
+                    # Deactivate the old active subscription immediately since it is expired/invalid
+                    active_subscription.status = SubscriptionStatus.EXPIRED
+                    active_subscription.end_date = datetime.now(timezone.utc)
+                    logger.info(f"Previous active subscription {active_subscription.id} marked as EXPIRED")
 
             user_sub = UserSubscription(
                 user_id=payment.user_id,
@@ -250,16 +259,20 @@ def verify_payment(
                 start_date=start_date,
                 end_date=end_date,
                 status=SubscriptionStatus.ACTIVE,
-                is_queued=False,
+                is_queued=is_queued,
+                activates_after_subscription_id=activates_after_id,
                 initial_monthly_renders=plan.monthly_renders if plan.monthly_renders != -1 else 999999,
                 used_monthly_renders=0
             )
 
-            # Update user's active plan (branding) immediately
-            db.query(User).filter(User.id == payment.user_id).update({
-                "subscription_plan": plan.name
-            })
-            logger.info(f"Subscription activated immediately. Plan: {plan.name}")
+            # Update user's active plan (branding) immediately only if NOT queued
+            if not is_queued:
+                db.query(User).filter(User.id == payment.user_id).update({
+                    "subscription_plan": plan.name
+                })
+                logger.info(f"Subscription activated immediately. Plan: {plan.name}")
+            else:
+                logger.info(f"Subscription queued. Plan: {plan.name}")
 
             db.add(user_sub)
 
