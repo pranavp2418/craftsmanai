@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, List
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, EmailStr
 
 from app.models.design import DesignStatus
 from app.schemas.manufacturer import ManufacturerResponse
@@ -17,6 +17,7 @@ class ManufacturerVariantShareRequest(BaseModel):
     """
 
     manufacturer_ids: list[int] = Field(..., min_length=1, description="List of IDs of the manufacturers to share with")
+    emails: Optional[Dict[str, List[str]]] = Field(default=None, description="Map of manufacturer_id to list of email addresses to send to")
 
 
 class ManufacturerVariantShareResponse(BaseModel):

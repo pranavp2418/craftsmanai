@@ -218,7 +218,11 @@ def share_design_variant(
             shared_metal=metal,
         )
     except ValueError as e:
-        if str(e) in ["Design is already shared with another customer.", "Design already rejected by customer"]:
+        if str(e) in [
+            "Design is already shared with another customer.",
+            "Design already rejected by customer",
+            "This design already has a shared variant.",
+        ]:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=str(e),

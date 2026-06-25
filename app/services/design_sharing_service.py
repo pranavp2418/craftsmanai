@@ -52,7 +52,15 @@ class DesignSharingService:
         if existing_shares:
             if existing_shares[0].status == DesignShareStatus.REJECTED:
                 raise ValueError("Design already rejected by customer")
+            # Security check: only return existing share if it's for the same customer
+            if customer_id is not None and existing_shares[0].customer_id != customer_id:
+                raise ValueError("This variant is already shared with another customer.")
             return existing_shares[0]
+
+        # Check if any variant of this design has already been shared
+        all_design_shares = self.share_repo.get_customer_shares_for_design(variant.design_id)
+        if all_design_shares:
+            raise ValueError("This design already has a shared variant.")
 
         share = self.share_repo.create_share(
             design_variant_id=design_variant_id,

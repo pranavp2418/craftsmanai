@@ -140,23 +140,25 @@ def resend_manufacturer_share_email(
             )
             return False
 
-        # ── 6. Pull the manufacturer's primary email ──────────────────
-        primary_email = None
-        if hasattr(manufacturer, "emails") and manufacturer.emails:
-            try:
-                emails_data = json.loads(manufacturer.emails)
-                if isinstance(emails_data, list) and len(emails_data) > 0:
-                    primary_email = (
-                        emails_data[0].get("email")
-                        if isinstance(emails_data[0], dict)
-                        else emails_data[0]
-                    )
-                elif isinstance(emails_data, dict):
-                    primary_email = emails_data.get("email")
-                else:
-                    primary_email = str(emails_data)
-            except (json.JSONDecodeError, TypeError, AttributeError):
-                primary_email = str(manufacturer.emails).split(",")[0].strip()
+        # ── 6. Use the stored email from the share record ──────────────
+        primary_email = share.sent_to_email
+        if not primary_email:
+            # Fallback to manufacturer's first email if not stored
+            if hasattr(manufacturer, "emails") and manufacturer.emails:
+                try:
+                    emails_data = json.loads(manufacturer.emails)
+                    if isinstance(emails_data, list) and len(emails_data) > 0:
+                        primary_email = (
+                            emails_data[0].get("email")
+                            if isinstance(emails_data[0], dict)
+                            else emails_data[0]
+                        )
+                    elif isinstance(emails_data, dict):
+                        primary_email = emails_data.get("email")
+                    else:
+                        primary_email = str(emails_data)
+                except (json.JSONDecodeError, TypeError, AttributeError):
+                    primary_email = str(manufacturer.emails).split(",")[0].strip()
 
         render_image_url = variant.base_design_image_url or ""
         jewelry_type = design.jewellery_type or "Custom Jewelry"

@@ -668,6 +668,172 @@ class TestCustomerEndpoints:
         finally:
             cleanup_user_by_email(email)
 
+    def test_share_different_variant_of_same_design_returns_conflict(self, client: TestClient):
+        """Test that sharing a different variant of an already-shared design returns 409 conflict"""
+        email = "design_variant_conflict@example.com"
+        try:
+            user = create_committed_user(email=email, username="designvarconflict", full_name="Retailer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            session = TestingSessionLocal()
+            try:
+                customer = Customer(
+                    created_by_user_id=user.id,
+                    full_name="Design Conflict Customer",
+                    emails='[{"label": "Work", "email": "design.conflict@example.com"}]',
+                    phone_number="+14155550200",
+                    tag="VIP Customer",
+                    location="New York",
+                    public_token="design_conflict_customer_token",
+                    is_active=True,
+                )
+                session.add(customer)
+                session.flush()
+
+                design = Design(
+                    user_id=user.id,
+                    created_by_user_id=user.id,
+                    design_code="DESIGNCONF-001",
+                    sequence_number=1,
+                    name="Design Conflict Test",
+                    jewellery_type="Ring",
+                    user_prompt="Test design-level sharing restriction",
+                    status="GENERATED",
+                )
+                session.add(design)
+                session.flush()
+
+                variant_a = DesignVariant(
+                    design_id=design.id,
+                    variant_name="Variant A",
+                    version_number=1,
+                    is_selected=True,
+                )
+                variant_b = DesignVariant(
+                    design_id=design.id,
+                    variant_name="Variant B",
+                    version_number=2,
+                    is_selected=False,
+                )
+                session.add(variant_a)
+                session.add(variant_b)
+                session.commit()
+
+                # First share Variant A - should succeed
+                with patch("app.tasks.email_tasks.send_customer_share_email"):
+                    response_a = client.post(
+                        f"/api/v2/design/variants/{variant_a.id}/share",
+                        json={
+                            "customer_id": customer.id,
+                            "comment": "Share variant A",
+                        },
+                        headers=headers,
+                    )
+                assert response_a.status_code == 201
+
+                # Second share Variant B of the same design - should fail with 409
+                with patch("app.tasks.email_tasks.send_customer_share_email"):
+                    response_b = client.post(
+                        f"/api/v2/design/variants/{variant_b.id}/share",
+                        json={
+                            "customer_id": customer.id,
+                            "comment": "Share variant B",
+                        },
+                        headers=headers,
+                    )
+                assert response_b.status_code == 409
+                assert "already has a shared variant" in response_b.json()["detail"].lower()
+            finally:
+                session.close()
+        finally:
+            cleanup_user_by_email(email)
+
+    def test_share_variant_with_different_customer_returns_conflict(self, client: TestClient):
+        """Test that sharing a variant with a different customer returns 409 conflict"""
+        email = "variant_share_conflict@example.com"
+        try:
+            user = create_committed_user(email=email, username="varshareconflict", full_name="Retailer Admin")
+            token = create_access_token(data={"sub": str(user.id), "email": user.email})
+            headers = {"Authorization": f"Bearer {token}"}
+
+            session = TestingSessionLocal()
+            try:
+                customer_a = Customer(
+                    created_by_user_id=user.id,
+                    full_name="Customer A",
+                    emails='[{"label": "Work", "email": "customer.a@example.com"}]',
+                    phone_number="+14155550100",
+                    tag="VIP Customer",
+                    location="New York",
+                    public_token="customer_a_token",
+                    is_active=True,
+                )
+                customer_b = Customer(
+                    created_by_user_id=user.id,
+                    full_name="Customer B",
+                    emails='[{"label": "Work", "email": "customer.b@example.com"}]',
+                    phone_number="+14155550101",
+                    tag="Regular Customer",
+                    location="Los Angeles",
+                    public_token="customer_b_token",
+                    is_active=True,
+                )
+                session.add(customer_a)
+                session.add(customer_b)
+                session.flush()
+
+                design = Design(
+                    user_id=user.id,
+                    created_by_user_id=user.id,
+                    design_code="CONFLICT-001",
+                    sequence_number=1,
+                    name="Conflict Test Design",
+                    jewellery_type="Ring",
+                    user_prompt="Test conflict sharing",
+                    status="GENERATED",
+                )
+                session.add(design)
+                session.flush()
+
+                variant = DesignVariant(
+                    design_id=design.id,
+                    variant_name="Variant Conflict",
+                    version_number=1,
+                    is_selected=True,
+                )
+                session.add(variant)
+                session.commit()
+
+                # First share with Customer A - should succeed
+                with patch("app.tasks.email_tasks.send_customer_share_email"):
+                    response_a = client.post(
+                        f"/api/v2/design/variants/{variant.id}/share",
+                        json={
+                            "customer_id": customer_a.id,
+                            "comment": "First share",
+                        },
+                        headers=headers,
+                    )
+                assert response_a.status_code == 201
+
+                # Second share with Customer B - should fail with 409
+                with patch("app.tasks.email_tasks.send_customer_share_email"):
+                    response_b = client.post(
+                        f"/api/v2/design/variants/{variant.id}/share",
+                        json={
+                            "customer_id": customer_b.id,
+                            "comment": "Second share to different customer",
+                        },
+                        headers=headers,
+                    )
+                assert response_b.status_code == 409
+                assert "already shared with another customer" in response_b.json()["detail"].lower()
+            finally:
+                session.close()
+        finally:
+            cleanup_user_by_email(email)
+
     def test_get_customer_design_shares_by_variant_includes_customer_details(self, client: TestClient):
         email = "customer_share_details@example.com"
         try:

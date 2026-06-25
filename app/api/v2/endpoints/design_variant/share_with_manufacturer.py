@@ -174,22 +174,68 @@ def share_variant_with_manufacturer(
 
         # Queue an email/SMS to the manufacturer with the preview link
         if manufacturer:
-            # Manufacturer emails may be stored as a string or json in `emails`
-            primary_email = None
-            if hasattr(manufacturer, 'emails') and manufacturer.emails:
-                import json
-                try:
-                    emails_data = json.loads(manufacturer.emails)
-                    if isinstance(emails_data, list) and len(emails_data) > 0:
-                        primary_email = emails_data[0].get("email") if isinstance(emails_data[0], dict) else emails_data[0]
-                    elif isinstance(emails_data, dict):
-                        primary_email = emails_data.get("email")
-                    else:
-                        primary_email = str(emails_data)
-                except (json.JSONDecodeError, TypeError, AttributeError):
-                    primary_email = str(manufacturer.emails).split(',')[0].strip()
+            # Get the list of emails to send to for this manufacturer
+            emails_to_send = []
             
-            if primary_email:
+            # Check if specific emails were provided in the payload
+            if payload.emails and str(m_id) in payload.emails:
+                requested_emails = payload.emails[str(m_id)]
+                # Validate that requested emails exist in manufacturer's email list
+                manufacturer_emails = []
+                if hasattr(manufacturer, 'emails') and manufacturer.emails:
+                    import json
+                    try:
+                        emails_data = json.loads(manufacturer.emails)
+                        if isinstance(emails_data, list):
+                            for item in emails_data:
+                                if isinstance(item, dict):
+                                    manufacturer_emails.append(item.get("email", "").lower())
+                                else:
+                                    manufacturer_emails.append(str(item).lower())
+                        elif isinstance(emails_data, dict):
+                            manufacturer_emails.append(emails_data.get("email", "").lower())
+                        else:
+                            manufacturer_emails.append(str(emails_data).lower())
+                    except (json.JSONDecodeError, TypeError, AttributeError):
+                        # Fallback: split by comma
+                        manufacturer_emails = [e.strip().lower() for e in str(manufacturer.emails).split(',') if e.strip()]
+                
+                # Validate and filter requested emails
+                for email in requested_emails:
+                    email_lower = email.lower()
+                    if email_lower in manufacturer_emails:
+                        emails_to_send.append(email)
+                    else:
+                        logger.warning(
+                            f"Email {email} not found in manufacturer {m_id}'s email list, skipping"
+                        )
+            
+            # If no specific emails provided or validated, use default (first email)
+            if not emails_to_send:
+                if hasattr(manufacturer, 'emails') and manufacturer.emails:
+                    import json
+                    try:
+                        emails_data = json.loads(manufacturer.emails)
+                        if isinstance(emails_data, list) and len(emails_data) > 0:
+                            primary_email = emails_data[0].get("email") if isinstance(emails_data[0], dict) else emails_data[0]
+                            emails_to_send.append(primary_email)
+                        elif isinstance(emails_data, dict):
+                            emails_to_send.append(emails_data.get("email"))
+                        else:
+                            emails_to_send.append(str(emails_data).split(',')[0].strip())
+                    except (json.JSONDecodeError, TypeError, AttributeError):
+                        primary = str(manufacturer.emails).split(',')[0].strip()
+                        if primary:
+                            emails_to_send.append(primary)
+            
+            # Store the primary email in the share record (first email in the list)
+            if emails_to_send:
+                share.sent_to_email = emails_to_send[0]
+                db.commit()
+                db.refresh(share)
+            
+            # Send emails to all validated emails
+            if emails_to_send:
                 # Get brand settings for retailer info
                 from app.repositories.brand_setting import BrandSettingRepository
                 brand_repo = BrandSettingRepository(db)
@@ -206,18 +252,20 @@ def share_variant_with_manufacturer(
                 if current_user.subscription_plan and current_user.subscription_plan.lower() == "pro":
                     brand_logo_url = brand_setting.logo_url if brand_setting else None
                 
-                send_manufacturer_share_email.delay(
-                    to_email=primary_email,
-                    manufacturer_name=manufacturer.name,
-                    preview_url=review_url,
-                    designer_name=current_user.full_name or current_user.username,
-                    retailer_name=retailer_name,
-                    render_image_url=render_image_url,
-                    design_code=design.design_code,
-                    jewelry_type=jewelry_type,
-                    metal=metal,
-                    brand_logo_url=brand_logo_url
-                )
+                # Send email to each recipient
+                for email in emails_to_send:
+                    send_manufacturer_share_email.delay(
+                        to_email=email,
+                        manufacturer_name=manufacturer.name,
+                        preview_url=review_url,
+                        designer_name=current_user.full_name or current_user.username,
+                        retailer_name=retailer_name,
+                        render_image_url=render_image_url,
+                        design_code=design.design_code,
+                        jewelry_type=jewelry_type,
+                        metal=metal,
+                        brand_logo_url=brand_logo_url
+                    )
                 
             if hasattr(manufacturer, 'phone_number') and manufacturer.phone_number:
                 # Get brand settings for retailer contact info

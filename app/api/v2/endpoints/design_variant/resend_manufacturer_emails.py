@@ -89,12 +89,17 @@ def resend_manufacturer_share_emails(
         )
 
     # ── 2. Load every manufacturer share for the variant ─────────────
-    shares = share_service.list_for_variant(variant.id)
+    all_shares = share_service.list_for_variant(variant.id)
+    
+    # Filter to only ACCEPTED shares for resend
+    shares = [share for share in all_shares if share.status == "ACCEPTED"]
+    
     if not shares:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=(
-                "No manufacturer shares found for this variant. "
+                "No accepted manufacturer shares found for this variant. "
+                "Only shares with ACCEPTED status can be resent. "
                 "Share the variant with a manufacturer first via "
                 "POST /api/v2/design-variant/variants/{variant_id}/share-with-manufacturer."
             ),

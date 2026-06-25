@@ -193,3 +193,186 @@ def test_share_with_manufacturer_returns_review_url_and_logs_metadata(
     assert log_entry is not None
     assert log_entry.action_type == "VARIANT_SHARED_WITH_MANUFACTURER"
     assert log_entry.metadata_json["review_url"] == expected_review_url
+
+
+def test_share_with_manufacturer_sends_to_specified_emails(
+    client: TestClient,
+    db_session: Session,
+    create_verified_user,
+):
+    """Test that sharing with a manufacturer sends to specified emails from payload."""
+    owner = create_verified_user(
+        email=f"owner_{uuid.uuid4().hex[:8]}@example.com",
+        username=f"owner_{uuid.uuid4().hex[:8]}",
+        full_name="Owner User",
+    )
+
+    design_repo = DesignRepository(db_session)
+    variant_repo = DesignVariantRepository(db_session)
+    manufacturer_repo = ManufacturerRepository(db_session)
+    from app.repositories.design_share import DesignShareRepository
+    share_repo = DesignShareRepository(db_session)
+
+    design = design_repo.create_design(
+        user_id=owner.id,
+        design_code=f"DES-{uuid.uuid4().hex[:10].upper()}",
+        sequence_number=1,
+        name="Test Design",
+        jewellery_type="ring",
+        user_prompt="Test",
+        status=DesignStatus.SHARED,
+    )
+    variant = variant_repo.create_variant(
+        design_id=design.id,
+        variant_name="Variant Test",
+        version_number=1,
+        base_design_image_url="https://example.com/variant.png",
+        is_selected=True,
+    )
+
+    # Share with customer first
+    share_repo.create_share(
+        design_variant_id=variant.id,
+        public_token=f"cust-{uuid.uuid4().hex}",
+        shared_metal="Gold",
+    )
+
+    # Create manufacturer with multiple emails
+    manufacturer = manufacturer_repo.create_manufacturer(
+        created_by_user_id=owner.id,
+        name="Multi Email Manufacturer",
+        public_token=f"m-{uuid.uuid4().hex}",
+        emails='[{"label":"Work","email":"work@example.com"},{"label":"Personal","email":"personal@example.com"}]',
+        phone_number="+15550001",
+        location="New York",
+    )
+
+    _override_user(client, owner)
+    _override_db(client, db_session)
+    try:
+        # Share with specific email selection
+        response = client.post(
+            f"/api/v2/design-variant/variants/{variant.id}/share-with-manufacturer",
+            json={
+                "manufacturer_ids": [manufacturer.id],
+                "emails": {
+                    str(manufacturer.id): ["work@example.com", "personal@example.com"]
+                }
+            },
+        )
+    finally:
+        client.app.dependency_overrides.clear()
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert len(payload) == 1
+    
+    # Verify the share was created with sent_to_email set
+    from app.models.design import DesignVariantManufacturerShare
+    share = db_session.query(DesignVariantManufacturerShare).filter(
+        DesignVariantManufacturerShare.id == payload[0]["id"]
+    ).first()
+    
+    assert share is not None
+    assert share.sent_to_email == "work@example.com"  # First email in the list
+
+
+def test_resend_only_sends_to_accepted_shares(
+    client: TestClient,
+    db_session: Session,
+    create_verified_user,
+):
+    """Test that resend API only sends to shares with ACCEPTED status."""
+    owner = create_verified_user(
+        email=f"owner_{uuid.uuid4().hex[:8]}@example.com",
+        username=f"owner_{uuid.uuid4().hex[:8]}",
+        full_name="Owner User",
+    )
+
+    design_repo = DesignRepository(db_session)
+    variant_repo = DesignVariantRepository(db_session)
+    manufacturer_repo = ManufacturerRepository(db_session)
+    from app.repositories.design_share import DesignShareRepository
+    share_repo = DesignShareRepository(db_session)
+
+    design = design_repo.create_design(
+        user_id=owner.id,
+        design_code=f"DES-{uuid.uuid4().hex[:10].upper()}",
+        sequence_number=1,
+        name="Test Design",
+        jewellery_type="ring",
+        user_prompt="Test",
+        status=DesignStatus.SHARED,
+    )
+    variant = variant_repo.create_variant(
+        design_id=design.id,
+        variant_name="Variant Test",
+        version_number=1,
+        base_design_image_url="https://example.com/variant.png",
+        is_selected=True,
+    )
+
+    # Share with customer first
+    share_repo.create_share(
+        design_variant_id=variant.id,
+        public_token=f"cust-{uuid.uuid4().hex}",
+        shared_metal="Gold",
+    )
+
+    # Create two manufacturers
+    manufacturer1 = manufacturer_repo.create_manufacturer(
+        created_by_user_id=owner.id,
+        name="Manufacturer 1",
+        public_token=f"m1-{uuid.uuid4().hex}",
+        emails='[{"label":"Work","email":"m1@example.com"}]',
+        phone_number="+15550001",
+        location="New York",
+    )
+    manufacturer2 = manufacturer_repo.create_manufacturer(
+        created_by_user_id=owner.id,
+        name="Manufacturer 2",
+        public_token=f"m2-{uuid.uuid4().hex}",
+        emails='[{"label":"Work","email":"m2@example.com"}]',
+        phone_number="+15550002",
+        location="Los Angeles",
+    )
+
+    # Create shares with different statuses
+    share_service = DesignVariantManufacturerShareService(db_session)
+    share1 = share_service.create_share(
+        design_variant_id=variant.id,
+        manufacturer_id=manufacturer1.id,
+        shared_metal="Gold",
+    )
+    share1.status = "ACCEPTED"
+    share1.sent_to_email = "m1@example.com"
+    
+    share2 = share_service.create_share(
+        design_variant_id=variant.id,
+        manufacturer_id=manufacturer2.id,
+        shared_metal="Gold",
+    )
+    share2.status = "PENDING"
+    share2.sent_to_email = "m2@example.com"
+    
+    db_session.commit()
+
+    _override_user(client, owner)
+    _override_db(client, db_session)
+    try:
+        response = client.post(
+            f"/api/v2/design-variant/variants/{variant.id}/resend-manufacturer-emails",
+        )
+    finally:
+        client.app.dependency_overrides.clear()
+
+    assert response.status_code == 202, response.text
+    payload = response.json()
+    
+    # Only the ACCEPTED share should be queued
+    assert payload["total_shares"] == 1  # Only 1 accepted share
+    assert payload["queued_count"] == 1
+    assert payload["skipped_count"] == 0
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["share_id"] == share1.id
+    assert payload["items"][0]["manufacturer_id"] == manufacturer1.id
