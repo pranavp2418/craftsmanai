@@ -105,7 +105,9 @@ class Settings(BaseSettings):
     CONTACT_NOTIFICATION_EMAIL: str = "abhishek@fonixtech.io"
     
     # Frontend URL
+    # FRONTEND_URL: str = "https://z296mjqz-3000.inc1.devtunnels.ms/"
     FRONTEND_URL: str = "https://craftmenai.txogavideo.in/"
+
 
     # Web Push VAPID Keys
     VAPID_PRIVATE_KEY: Optional[str] = None

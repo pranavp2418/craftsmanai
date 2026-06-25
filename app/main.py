@@ -84,7 +84,7 @@ fastapi_app.add_middleware(HybridRateLimitMiddleware)
 fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
-    # allow_origins=["http://192.168.1.83:3000","https://k6r4l6c7-3000.inc1.devtunnels.ms","https://nr201rgm-8000.inc1.devtunnels.ms","https://b38f2wvf-3000.inc1.devtunnels.ms","http://localhost:3000","https://gq7l179z-3000.inc1.devtunnels.ms","https://pq3ck368-8000.inc1.devtunnels.ms","https://2vrmpjhw-3000.inc1.devtunnels.ms"],
+    # allow_origins=["http://192.168.1.83:3000","http://192.168.1.90:3000","http://192.168.1.79:8000","https://k6r4l6c7-3000.inc1.devtunnels.ms","https://z296mjqz-3000.inc1.devtunnels.ms/","https://nr201rgm-8000.inc1.devtunnels.ms","https://b38f2wvf-3000.inc1.devtunnels.ms","http://localhost:3000","https://gq7l179z-3000.inc1.devtunnels.ms","https://pq3ck368-8000.inc1.devtunnels.ms","https://2vrmpjhw-3000.inc1.devtunnels.ms"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -93,7 +93,7 @@ fastapi_app.add_middleware(
 # Register REST API routes
 fastapi_app.include_router(api_router, prefix="/api/v2")
 
-# Serve static files (for push notification test page)
+# Serve static filer push notification test page)
 _static_dir = Path(__file__).parent / "static"
 if _static_dir.exists():
     fastapi_app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
