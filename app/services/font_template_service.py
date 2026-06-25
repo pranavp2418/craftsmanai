@@ -206,13 +206,33 @@ def render_text_template(text: str, font_path: str, canvas: Tuple[int, int] = (1
         return None
 
 
+# Generic style words the image model already renders well on its OWN. For these we do NOT force our
+# bundled TTF (it can look off and — for "iced" pieces — pave poorly as flat traced glyphs); we let the
+# model render the style natively, exactly like the Lovable prototype does for "cursive". The glyph
+# template is RESERVED for distinctive named fonts the model can't reliably reproduce (graffiti, bubble,
+# old english, road rage, baguette, brush...).
+_GENERIC_STYLE_FONTS = {
+    "cursive", "script", "handwriting", "handwritten", "signature", "block", "bold",
+    "sans serif", "sans-serif", "sans", "serif", "plain", "simple", "normal", "regular",
+}
+
+
 def build_font_template(prompt: str) -> Optional[Dict[str, str]]:
-    """If the prompt names a font we HAVE a file for AND we can find the text to render, return a
-    glyph template: {'b64': <png base64>, 'font': <name>, 'text': <text>}. Else None (caller falls
-    back to the text-description path)."""
+    """DISABLED (Lovable-style): we no longer force a bundled/hard-coded TTF glyph template onto the image
+    model. Forcing our own font files made the lettering look off and — for iced pieces — pave as flat
+    traced glyphs; Lovable uses NO font templates and lets the model render the requested font natively
+    from the prompt's font description. So this always returns None and the caller uses the normal
+    text-description path (the model renders the font itself). Re-enable per-call only if a future case
+    truly needs an exact bundled font."""
+    return None
+
+    # --- legacy glyph-template path (kept for reference, intentionally unreachable) ---
     font_name = extract_font_name(prompt)
     text = extract_text(prompt)
     if not font_name or not text:
+        return None
+    if font_name.strip().lower() in _GENERIC_STYLE_FONTS:
+        logger.info("[font-template] '%s' is a generic style — letting the model render it natively (no template)", font_name)
         return None
     font_path = find_font_file(font_name)
     if not font_path:

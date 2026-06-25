@@ -29,7 +29,7 @@ from .profiles import (
     TEXT_PRIMARY, TEXT_IF_DETECTED,
 )
 from .common import (
-    COMMON_SYSTEM_PROMPT, light_gold_note, diamond_cut_clause, metal_conversion_clause,
+    COMMON_SYSTEM_PROMPT, LEAN_IMAGE_MASTER, light_gold_note, diamond_cut_clause, metal_conversion_clause,
     normalize_retailer_language, diamond_size_clause,
 )
 
@@ -127,108 +127,47 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
         else "in a straight FRONT-FACING view"
     )
 
-    is_pendant = profile.bail_policy in (BAIL_ADD_IF_MISSING, BAIL_PRESERVE) and svc._is_pendant_like(item_type, user_prompt)
-    # Pure reproduce of an EXISTING jewelry piece ("create the same pendant", a real photo / render) ->
-    # NEVER add or touch bails; just reproduce exactly. Bail-ADD logic is only for turning a NON-pendant
-    # (sketch / logo / graphic) INTO a pendant.
-    _pure_reproduce = intent in ("render_as_is", "image_enhancement_only") or source_kind == "jewelry_reference"
-
-    if is_pendant and _pure_reproduce:
-        form_line = (
-            f"Reproduce this reference PENDANT EXACTLY as shown, {angle_phrase}. Keep its EXISTING top / bail / "
-            "loop / hanging connection EXACTLY as it appears — same NUMBER of bails/loops, same shape, same "
-            "position. Do NOT add any new bail, hook or loop, do NOT duplicate or stack a bail on top of an "
-            "existing connection, and do NOT replace or enlarge it. If the piece already hangs from TWO points / "
-            "two loops, keep EXACTLY those two and add none. Reproduce the whole piece faithfully; you may drop "
-            "ONLY a long wearing chain/cord if one is threaded through."
-        )
-    elif is_pendant:
-        # Turning a sketch / logo / non-pendant into a wearable pendant -> a bail may need to be ADDED.
-        form_line = (
-            f"Render this reference as a wearable PENDANT, {angle_phrase}. PRESERVE THE TOP EXACTLY: keep any "
-            "bail / hook / loop AND any design element sitting above or around it (e.g. a topper, mask, crown, "
-            "figure, head, or motif above the bail) IDENTICAL in shape, size and position. Do NOT remove, hide, "
-            "shrink, or replace anything at the top. ONLY if the reference has NO bail or top loop at all (e.g. a "
-            "flat sketch / logo) add a SINGLE simple bail at the top-centre so it can hang. Never add a second "
-            "bail or stack one on an existing connection."
-        )
-    else:
-        form_line = f"Render this reference as a {item_type}, {angle_phrase}.{svc._type_form_clause(item_type, user_prompt)}"
-
-    # Intent-driven focused directive (from the parse-first structured state).
-    intent_directive = _intent_directive(intent, source_kind, item_type, bool(user_prompt))
-
-    # USER REQUEST — the client's own prompt, dominant and verbatim, + normalized retailer directives.
+    # The client's own words are dominant. NO prompt -> a pure AS-IS reproduce (nothing added).
     retail = normalize_retailer_language(user_prompt)
     if svc._is_metal_only_change(user_prompt):
         mp = svc._detected_metal_phrase(user_prompt) or "the requested metal"
-        user_request = (
-            f"USER REQUEST: change ONLY the metal colour to {mp}. Keep the design and EVERY stone identical to the "
-            "reference image."
-        )
-    elif user_prompt:
-        user_request = f"USER REQUEST (apply exactly as written, change nothing else): {user_prompt}"
+        user_request = (f"\n\nUSER REQUEST: change ONLY the metal colour to {mp}. Keep the design and EVERY stone "
+                        "identical to the reference image.")
+    elif (user_prompt or "").strip():
+        user_request = f"\n\nUSER REQUEST (apply this to the reproduced piece, change NOTHING else): {user_prompt}{retail}"
     else:
-        user_request = "USER REQUEST: faithfully reproduce the reference piece exactly as it appears."
+        user_request = ""  # client wants it exactly AS-IS
 
-    # METAL FIX: only force the light-gold note when the user actually asked for (yellow) gold.
-    if "yellow gold" in lower or ("gold" in lower and "white" not in lower and "rose" not in lower):
-        gold_note = light_gold_note("yellow gold")
-    else:
-        gold_note = ""
-
-    sketch_note = ""
-    if profile.allows(MODULE_SKETCH) and any(w in lower for w in _SKETCH_WORDS):
-        sketch_note = (
-            " The reference is a sketch/drawing — interpret it as the intended design and render real, polished, "
-            "manufacturable jewelry (do not copy pencil strokes, shading, or paper)."
-        )
-
-    variations_block = ""
-    if svc._user_wants_variations(user_prompt):
-        variations_block = (
-            " MULTIPLE VARIATIONS: lay out the requested variations as a clean, evenly-spaced grid of separate "
-            "variants on the same pure-white background, all sharing the same base design and differing only by the "
-            "requested variation. (This is the ONLY case where more than one piece may appear.)"
-        )
+    # ONLY user-DRIVEN clarifiers below — never our-side extras (no forced bail, no default stone rules,
+    # no honeycomb, no gold-note: the image's own design/metal/bail is the truth).
+    # (The sketch / logo / jewelry-photo cases are now self-classified IN-PROMPT in the reproduce clause
+    # below, so the model routes them from the attached image itself — no separate text-gated clause.)
+    # Multi-image AUTHORITY (Lovable-style): the FIRST image is the master; others are support-only; never blend.
     merge_block = ""
     if image_count > 1:
-        merge_block = (
-            " MULTIPLE REFERENCE IMAGES: the attached images show different parts or views of the SAME single piece. "
-            "COMBINE them into ONE unified piece — do NOT output them separately or side by side."
-        )
-
-    # The reference may be a spec sheet / annotated photo with written notes, dimensions, callouts,
-    # arrows, watermarks etc. around the piece. Those are NOT part of the jewelry and must NEVER be
-    # rendered — output ONLY the clean piece. (Lettering that is physically ON the jewelry — a name,
-    # initials, engraving — is part of the design and IS kept.)
-    no_annotation_note = (
-        " OUTPUT THE JEWELRY ONLY — NO CAPTIONS / NOTES / NUMBERS: the final image must contain ONLY the "
-        "single jewelry piece on a pure white background and ABSOLUTELY NOTHING ELSE — NO paragraphs of text, "
-        "NO design notes, NO dimension numbers, NO measurements, NO labels, NO captions, NO arrows, NO "
-        "watermarks, NO spec-sheet text. If the reference is an annotated spec sheet or has ANY written "
-        "text/notes AROUND the piece, COMPLETELY EXCLUDE all of it and render ONLY the clean piece. Keep ONLY "
-        "lettering that is physically engraved or set ON the jewelry itself (e.g. a name/initials on the piece)."
-    )
-
-    # "diamond cut" = a metal finish (not diamonds); convert a coloured logo/graphic to solid metal
-    # when a metal is named OR the intent is convert_to_jewelry.
+        merge_block = (" MULTIPLE IMAGES: treat the FIRST image as the MASTER reference (its geometry, stones, metal "
+                       "and silhouette); use any other image ONLY for the specific part it clearly shows. Do NOT "
+                       "average or blend the images into a new hybrid design unless the request explicitly asks to "
+                       "combine them; if they conflict, the FIRST image wins.")
     dcut = diamond_cut_clause(user_prompt)
-    # Diamond-size directive when the user asks for stones / iced on the reference (small-dense vs big).
-    stone_size = diamond_size_clause(user_prompt) if _wants_stones(user_prompt) else ""
-    if user_named_metal:
-        metal_convert = metal_conversion_clause(svc._detected_metal_phrase(user_prompt))
-    elif intent == "convert_to_jewelry" or source_kind == "non_jewelry_reference":
-        metal_convert = metal_conversion_clause("yellow gold")  # default solid metal for a logo conversion
-    else:
-        metal_convert = ""
+    # Convert a flat coloured logo/graphic into solid metal ONLY when the user names ONE metal. Do NOT force
+    # a single metal for a TWO-TONE request ("rose gold mainly + top layer white gold") — naming just the
+    # first-detected metal overrode the user's words and rendered the whole piece one colour. For two-tone we
+    # add nothing here and let the user's VERBATIM prompt carry both metal colours.
+    metal_convert = (metal_conversion_clause(svc._detected_metal_phrase(user_prompt))
+                     if (user_named_metal and svc.extract_metal_from_prompt(user_prompt) != "two_tone") else "")
+    no_annotation_note = (
+        " OUTPUT THE JEWELRY ONLY — EXCLUDE ALL NOTE / SPEC TEXT: the reference may carry a written brief for the "
+        "jeweler — metal karat (e.g. '10KT'), measurements (e.g. '45mm', '3mm'), quality grades (e.g. 'VS/SI'), "
+        "prices, budgets, dates or notes. That text is an INSTRUCTION for you, NOT part of the design — do NOT "
+        "render ANY of it as metal, engraving or a plate. Build ONLY the actual jewelry DESIGN (the name, figure, "
+        "motif or shape itself); keep lettering ONLY when it is clearly the DESIGN (e.g. the name that goes on the "
+        "piece). The final image must show ONLY the single finished jewelry piece on a pure white background — no "
+        "notes, dimensions, labels, captions, arrows or watermarks.")
 
-    return f"""{COMMON_SYSTEM_PROMPT}
+    return f"""{LEAN_IMAGE_MASTER}
 
-{form_line}{intent_directive}
-{no_annotation_note}
-
-{user_request}{retail}{sketch_note}{variations_block}{merge_block}{metal_convert}{dcut}{stone_size}{gold_note}
+Reproduce this reference image as a clean, photorealistic CAD-style 3D jewelry render on a pure solid white background (#FFFFFF), {angle_phrase}, sharp focus. The reference is the SOURCE OF TRUTH — keep its EXACT design, silhouette, every stone and arrangement, metal colour, borders, lettering, negative space (cut-outs / gaps between elements) AND its own bail / hook / connection. Do NOT add, remove, simplify or 'improve' anything the user did not explicitly ask for — no default bail, no extra ornaments, no invented stones. If the reference is a real jewelry photo or CAD render, reproduce it 1:1. If it is a FLAT 2D design — a hand sketch, line-art, silhouette, logo, name or lettering on a plain background (NOT a photograph of an existing 3D piece) — do NOT output a flat copy: BUILD it as a real, wearable 3D metal jewelry piece, but keep its DESIGN EXACT. TRACE the design faithfully — the SAME letterforms (every stroke, curve, tail, loop and join, and the EXACT cursive / script / block style), the SAME silhouette, shapes, proportions, spacing, layout and negative space (open windows / gaps between letters). Do NOT restyle the font, redraw, swap, simplify, smear or improvise ANY character or shape — the design is the source of truth. ONLY give the design real raised 3D geometry (depth + side walls), set the faces with neat pavé diamonds when it reads as a name / charm / iced piece, and add a single bail at the very TOP — facing FORWARD (its loop visible from the front), ABOVE the design, NOT behind the piece or flat against the back — rendered in the requested metal.{merge_block}{user_request}{metal_convert}{dcut}{no_annotation_note}
 
 One image only."""
 
@@ -297,6 +236,30 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
     metal_phrase = f" in {effective_metal}" if effective_metal else ""
     wants_stones = _wants_stones(user_prompt)
     metal_word = effective_metal or "metal"
+
+    # FULLY-ICED NAME / TEXT pendant -> a LEAN, ICE-DOMINANT prompt. Validated empirically: the full builder
+    # stack (master + bail + font + note + modules, ~2800 chars) drowned the "fully iced" signal and the
+    # model reverted to its default OUTLINED-cursive look (diamond border + polished letter faces); a short
+    # prompt where the solid-diamond surface is the dominant theme fully-paves the letter faces, matching the
+    # Lovable output. So for iced name/text pieces we bypass the heavy stack entirely.
+    _iced = any(w in lower for w in ("fully iced", "iced out", "ice out", "iced-out", "bust down",
+                                     "bustdown", "flooded", "frozen", "fully covered", "all iced"))
+    if _iced and _has_text_intent(user_prompt):
+        metal_named = svc._detected_metal_phrase(user_prompt) or (effective_metal or "white gold")
+        bail_line = " Add ONE simple loop bail at the top for a chain." if profile.bail_policy != "none" else ""
+        return (
+            "You are CraftsmanAI, a precise CAD jewelry render engine. Produce ONE clean, photorealistic "
+            "CAD-style 3D render on a pure solid white (#FFFFFF) background, sharp focus.\n\n"
+            f"Create a fully ICED-OUT {item_type} in {metal_named}, built exactly from the design below."
+            f"{bail_line}\n\n"
+            "BUST-DOWN — 100% DIAMOND COVERAGE: every letter and every surface is a SOLID SHEET of small "
+            "micro-pavé diamonds. The diamonds fill the FULL WIDTH of every stroke, so each letter FACE is "
+            "entirely diamonds edge to edge; metal shows ONLY as the thin prong walls between touching "
+            "stones. If a two-layer / step-up is mentioned, that is for DEPTH only — BOTH layers are equally "
+            "fully iced. Render the lettering in the exact font/style the design describes.\n\n"
+            f"DESIGN: {user_prompt}\n\n"
+            "One clean image only."
+        )
     if wants_stones:
         # User asked for stones — no plain restriction; the stone modules below will guide them.
         plain_note = ""
@@ -315,7 +278,13 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
     _fs = svc._font_style_clause(user_prompt)
     if _fs:
         font_style_block = f"\n\n{_fs}"
-    layered_block = f"\n\n{svc.LAYERED_RULE}" if svc._user_wants_layered(user_prompt) else ""
+    # FULLY ICED detection (used to keep the iced path lean + Lovable-like).
+    _fully_iced = any(w in lower for w in ("fully iced", "iced out", "ice out", "iced-out", "bust down",
+                                           "bustdown", "flooded", "frozen", "fully covered", "all iced"))
+    # For an ICED piece, DROP our structural LAYERED_RULE entirely — Lovable gives NO step-up structural
+    # description; the user's own "2 layer / step-up" note + the iced clause (which covers BOTH tiers) handle
+    # it. Our extra "tiers / backing / ledge" framing biased the model toward outlined-metal letters.
+    layered_block = (f"\n\n{svc.LAYERED_RULE}" if (svc._user_wants_layered(user_prompt) and not _fully_iced) else "")
     variations_block = ""
     if svc._user_wants_variations(user_prompt):
         variations_block = (
@@ -332,14 +301,28 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
         profile.text_policy == TEXT_PRIMARY or (profile.text_policy == TEXT_IF_DETECTED and _has_text_intent(user_prompt))
     )
 
+    # When the piece is FULLY ICED, the strong diamond_size_clause (solid total coverage) is the authority;
+    # the "parallel rows" STONE_ARRANGEMENT_DEFAULT competes with it (suggests a directional outline pattern),
+    # so drop it for iced pieces and let the solid-coverage clause dominate. (_fully_iced computed above.)
+    # FULLY ICED: the coverage clause must LEAD (placed right after the type line, BEFORE the user request)
+    # so the "solid diamond surface" signal dominates — buried at the end it lost to the model's default
+    # outlined-cursive look (validated: a lean, ice-leading prompt fully-paves the letter faces). It is put
+    # in `iced_lead` (added to the return below), NOT in mod_parts. Non-iced: the usual stone modules.
+    iced_lead = ""
     mod_parts = []
     if include_stone:
-        mod_parts.append(svc.SETTING_QUALITY)
-        mod_parts.append(svc.STONE_ARRANGEMENT_DEFAULT)
-        mod_parts.append(diamond_size_clause(user_prompt).strip())
-    if include_text:
+        if _fully_iced:
+            iced_lead = diamond_size_clause(user_prompt)
+        else:
+            mod_parts.append(svc.SETTING_QUALITY)
+            mod_parts.append(svc.STONE_ARRANGEMENT_DEFAULT)
+            mod_parts.append(diamond_size_clause(user_prompt).strip())
+    # DOT_CONNECTION_RULE is about LETTERING (floating 'i'/'j' dots) — only relevant when the piece
+    # actually has text/letters, so gate it on real text intent. Skip it on fully-iced names to stay lean.
+    if include_text and _has_text_intent(user_prompt) and not _fully_iced:
         mod_parts.append(svc.DOT_CONNECTION_RULE)
-    mod_parts.append(svc.REALISM_DESCRIPTOR)  # common to every render
+    # (REALISM_DESCRIPTOR removed — its CAD-look essence is now folded into the lean MASTER_INITIAL, so a
+    # PLAIN piece gets no extra always-on module block at all.)
     modules_block = "\n\n".join(mod_parts)
 
     # Apply the gold-colour guidance whenever the piece is YELLOW gold — whether the USER named it
@@ -354,7 +337,7 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
 
     return f"""{COMMON_SYSTEM_PROMPT}
 
-Create a {item_type}{metal_phrase}, front-facing and centered.{type_line}{plain_note}
+Create a {item_type}{metal_phrase}, front-facing and centered.{type_line}{iced_lead}{plain_note}
 
 USER REQUEST (design exactly and only what this describes): {body}{retail}{font_style_block}{layered_block}{variations_block}
 

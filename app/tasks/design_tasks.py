@@ -99,119 +99,62 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                 event="design.generating",
             )
 
-            # Inspect the reference image(s) for: (a) the in-image brief / font, and
-            # (b) jewelry-vs-not classification per image, which drives the metal and whether
-            # this is a memorial photo pendant (person photo + a jewelry reference) or a
-            # non-jewelry logo (-> pure gold).
-            input_metal = "yellow_gold"
-            # Internal, generation-ONLY instructions (font / gold / memorial). These are
-            # appended to the prompt sent to the model but NOT to the user-facing prompt that
-            # gets saved + shown in the UI ("Design Prompt").
+            # SIMPLIFIED (basics-first): a first CREATE just sends the user's prompt + the image straight
+            # to the model. NO per-image classify, NO parse_request, NO metal-detection — those 3 LLM
+            # calls slowed every request and mis-routed it (a create became a 'refine', wrong type, the
+            # metal got second-guessed). Metal is read ONLY from the prompt text (cheap regex). If the
+            # user gave NO prompt at all, read the written brief (and any font) out of the image so there
+            # is something to generate from.
+            from app.services.openai_service import extract_image_instructions, extract_metal_from_prompt
+            input_metal = extract_metal_from_prompt(prompt) or "yellow_gold"
             _internal = ""
-            try:
-                from app.services.openai_service import (
-                    extract_image_instructions, classify_reference_image,
-                    NON_JEWELRY_GOLD_INSTRUCTION, MEMORIAL_PHOTO_PENDANT_INSTRUCTION,
-                    extract_metal_from_prompt, build_non_jewelry_metal_instruction,
-                )
-                _refs = reference_image_source if isinstance(reference_image_source, list) else [reference_image_source]
-                _refs = [u for u in _refs if u][:4]
+            # READ THE IN-IMAGE BRIEF when the client uploaded a design / spec-sheet and gave NO real design
+            # instruction — i.e. an EMPTY prompt OR a generic "make / same this" (they want the IMAGE built,
+            # not a specific change). This recovers the written brief (metal / size / name) the way Lovable's
+            # parse does, so e.g. a "Liv + heart" name design with a "10KT White Gold" note builds in white
+            # gold instead of being reproduced as the flat reference.
+            _lp = (prompt or "").strip().lower()
+            _generic_build = (not _lp) or (
+                len(_lp.split()) <= 6
+                and any(w in _lp for w in ("same", "this", "that", " it", "make this", "build"))
+                and not any(w in _lp for w in ("add", "remove", "change", "without", "instead",
+                                               "make it ", "turn it", "convert it"))
+            )
+            if _generic_build:
+                try:
+                    _refs = reference_image_source if isinstance(reference_image_source, list) else [reference_image_source]
+                    _u = next((u for u in _refs if u), None)
+                    if _u:
+                        _b64 = base64.b64encode(requests.get(_u, timeout=20).content).decode("utf-8")
+                        _brief, _font_style = extract_image_instructions(_b64)
+                        if _brief:
+                            prompt = _brief
+                            # pick up a metal named in the brief ("10KT White Gold") so we don't default to yellow
+                            input_metal = extract_metal_from_prompt(_brief) or input_metal
+                            logger.info("Read in-image brief for design_id=%s: %s", design_id, _brief[:200])
+                            try:
+                                design.user_prompt = _brief
+                                db.commit()
+                            except Exception:
+                                db.rollback()
+                        if _font_style:
+                            _internal += (
+                                f"\n\nFONT: render ALL lettering in this EXACT font style: {_font_style}. "
+                                "Keep the design, colours and everything else the same."
+                            )
+                except Exception as _be:
+                    logger.warning("in-image brief read failed for design_id=%s: %s", design_id, _be)
 
-                # Download + classify EACH reference (jewelry vs logo/graphic/person photo).
-                _first_b64 = None
-                _classified = []
-                for _u in _refs:
-                    try:
-                        _raw = requests.get(_u, timeout=20).content
-                        _b = base64.b64encode(_raw).decode("utf-8")
-                        if _first_b64 is None:
-                            _first_b64 = _b
-                        _classified.append(classify_reference_image(_b))
-                    except Exception as _ce:
-                        logger.warning("Reference classify/fetch failed (%s): %s", str(_u)[:60], _ce)
-                        _classified.append({"is_jewelry": True, "metal": "gold"})
-
-                # (a) Read the written brief + any requested font only if the text box is empty.
-                if not (prompt or "").strip() and _first_b64:
-                    _brief, _font_style = extract_image_instructions(_first_b64)
-                    if _brief:
-                        prompt = _brief
-                        logger.info("Extracted in-image brief for design_id=%s: %s", design_id, _brief[:250])
-                        try:
-                            design.user_prompt = _brief
-                            db.commit()
-                        except Exception:
-                            db.rollback()
-                    if _font_style:
-                        _internal += (
-                            f"\n\nFONT — CHANGE IT: render ALL the lettering in this EXACT font style: {_font_style}. "
-                            "This is a NEW font the customer requires — do NOT keep the reference's font; the "
-                            "lettering STYLE is the one thing that must change. Keep the design, colours, enamel, "
-                            "layers and everything else exactly the same."
-                        )
-                        logger.info("Applied requested font style for design_id=%s: %s", design_id, _font_style[:160])
-
-                # (b) Metal + jewelry/non-jewelry handling across ALL references.
-                # First, check if the user prompt explicitly specifies a metal:
-                prompt_metal = extract_metal_from_prompt(prompt)
-                if prompt_metal:
-                    input_metal = prompt_metal
-                    logger.info("User prompt explicitly specified metal='%s' for design_id=%s", input_metal, design_id)
-                    # Apply the "convert to plain solid metal (NO stones)" instruction ONLY when the
-                    # reference is genuinely NON-jewelry (a logo / graphic / artwork), using the user's
-                    # requested metal instead of the default gold. For a real JEWELRY input the metal is
-                    # just a recolour and the render prompt keeps every stone — appending the non-jewelry
-                    # instruction here previously WIPED the diamonds off iced pieces (the de-gem bug).
-                    _nonjewelry = [c for c in _classified if not c.get("is_jewelry", True)]
-                    _jewelry = [c for c in _classified if c.get("is_jewelry", True)]
-                    if _nonjewelry and not _jewelry and len(_refs) == 1:
-                        _internal += build_non_jewelry_metal_instruction(input_metal)
-                else:
-                    _jewelry = [c for c in _classified if c.get("is_jewelry", True)]
-                    _nonjewelry = [c for c in _classified if not c.get("is_jewelry", True)]
-                    if _jewelry:
-                        # At least one real JEWELRY reference → match its metal, keep its stones.
-                        _m = _jewelry[0].get("metal")
-                        if _m in ("gold", "silver", "rose_gold", "two_tone"):
-                            input_metal = _m
-                        if _nonjewelry and len(_refs) > 1:
-                            # PERSON photo + JEWELRY reference → memorial photo pendant: copy the
-                            # reference pendant's design and embed the person's portrait inside it.
-                            _internal += MEMORIAL_PHOTO_PENDANT_INSTRUCTION
-                            logger.info("Memorial photo pendant (embed photo into jewelry design) for design_id=%s", design_id)
-                        logger.info("Reference has jewelry (metal='%s') for design_id=%s", input_metal, design_id)
-                    elif len(_refs) == 1:
-                        # Single NON-jewelry image (logo/graphic) → default to gold (10KT Yellow Gold) and append instruction
-                        input_metal = "gold"
-                        _internal += NON_JEWELRY_GOLD_INSTRUCTION
-                        logger.info("Single non-jewelry input with no metal specified → pure gold pendant for design_id=%s", design_id)
-                    # else: multiple non-jewelry images → leave defaults (rare, ambiguous).
-            except Exception as _pre_err:
-                logger.warning("Pre-generation image read failed for design_id=%s: %s", design_id, _pre_err)
-
-            # Generation prompt = the user-facing prompt + internal generation-only instructions.
-            # The user-facing `prompt` itself is saved/displayed; `gen_prompt` goes to the model.
             gen_prompt = (prompt or "") + _internal
 
-            # PARSE-FIRST (Lovable-style): convert the request + reference image into a STRUCTURED
-            # design state (source_kind / intent / item_type / metal / normalized note) so the prompt
-            # builder routes to a focused template instead of building from raw user language.
-            # Uses the user-facing `prompt` (not the internal additions). Fail-open inside.
-            parsed_state = None
-            try:
-                from app.services.parse_request_service import parse_request
-                _ref_list = reference_image_source if isinstance(reference_image_source, list) else ([reference_image_source] if reference_image_source else [])
-                parsed_state = parse_request(prompt or "", image_urls=_ref_list, item_type_hint=design.jewellery_type or "")
-            except Exception as _pe:
-                logger.warning("parse_request failed for design_id=%s: %s", design_id, _pe)
-
-            # Use the newly migrated Gemini high-fidelity pipeline (Primary + Fallback + QA Checks)
+            # CREATE = ALWAYS initial; no parsed_data (item_type comes straight from jewellery_type).
             generated_item = openai_service.generate_base_image(
                 image_source=reference_image_source,
                 user_prompt=gen_prompt,
                 jewellery_type=design.jewellery_type or "",
                 metal_tone=input_metal,
-                parsed_data=parsed_state,
+                mode="initial",
+                parsed_data=None,
             )
 
             # Retrieve the dynamically detected metal tone from the vision translator
@@ -385,19 +328,25 @@ def refine_design_variant_image(
                     # Fallback: get the first key
                     parent_metal = list(parent_variant.metal_variations_json.keys())[0]
 
-        # Generate refined image via OpenAI using the resolved reference images
-        # generated_item = openai_service.generate_base_image(
-        #     reference_image_source,
-        #     combined_prompt,
-        #     jewellery_type=jewellery_type,
-        #     metal_tone=parent_metal
-        # Generate refined image via OpenAI using the resolved reference images.
-        # Force mode="refine": this is ALWAYS a refine of an existing variant, so do NOT rely on
-        # keyword auto-detection (prompts like "make the bail hinged" have no edit keyword and were
-        # being misclassified as a fresh generation — which forced default yellow gold and dropped
-        # the reference's real metal colour / design fidelity).
+        # ROUTE REFINES THROUGH THE CREATE-WITH-IMAGE PATH (mode="initial").
+        # WHY: the dedicated refine/edit path (MASTER_REFINE, preserve-first) made the model NO-OP — it kept
+        # the base render and DROPPED the requested change (validated across "make it fully iced" and a
+        # bail-swap). The create-with-image path instead REPRODUCES the base faithfully AND applies the
+        # requested change — which is exactly what a refine should be: keep the OLD piece identical, change
+        # ONLY what's asked. (Validated: bail-swap preserved the heart and swapped in the new bail; metal
+        # recolour and element edits apply.) We frame the change as a "reproduce + change only this" request
+        # so the first image is the source of truth and everything unmentioned stays identical.
+        _refine_change = (combined_prompt or "").strip()
+        # IMPORTANT: do NOT enumerate components to preserve (e.g. "keep the bail...") — if the change IS that
+        # component (a bail swap), listing it contradicts the edit and the model keeps the original. Just say
+        # "apply ONLY this change, keep EVERYTHING ELSE identical" and let the model infer what "else" is.
+        _create_prompt = (
+            "Reproduce the FIRST piece EXACTLY as it is and apply ONLY the following change — keep EVERYTHING "
+            f"ELSE about the piece identical (do not redesign anything that is not part of this change): {_refine_change}"
+            if _refine_change else combined_prompt
+        )
         generated_item = openai_service.generate_base_image(
-            reference_image_source, combined_prompt, jewellery_type=jewellery_type, mode="refine"
+            reference_image_source, _create_prompt, jewellery_type=jewellery_type, mode="initial"
         )
         image_bytes, content_type = _extract_generated_image_data(generated_item)
         _validate_image_bytes(image_bytes, content_type)

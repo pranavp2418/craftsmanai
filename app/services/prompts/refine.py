@@ -119,6 +119,59 @@ def build_refine_prompt(
     centering = "Front-facing, upright, and centered." if wants_front else "Keep the reference's camera angle; centered."
     layered_block = f"\n\n{svc.LAYERED_RULE}" if svc._user_wants_layered(user_prompt) else ""
 
+    # MULTI-IMAGE refine (combine / component swap): the user attached an EXTRA image showing a component
+    # (e.g. a new BAIL) to put on the base piece. The preserve-heavy MASTER_REFINE stack made the model
+    # NO-OP. Lead with the CHANGE — take that element from the additional image and place it correctly on
+    # the FIRST piece, replacing the existing one. (Mirrors the proven lean change-dominant fix.)
+    if image_count and image_count > 1:
+        _what = (user_prompt or "").strip() or "the component shown in the additional image"
+        _mi_intensity = ("" if attempt <= 1 else
+                         " CRITICAL CORRECTION: the previous attempt did NOT visibly apply the swap. Redraw the target "
+                         "component now using the additional image; do NOT keep the original one.")
+        return (
+            "REFINEMENT — COMBINE / COMPONENT SWAP. The FIRST attached image is the CURRENT piece (the master). "
+            "The ADDITIONAL image(s) show a COMPONENT / element to use.\n\n"
+            "PRIORITY ORDER (do not violate): "
+            f"1) APPLY THE CHANGE — {_what}: take that specific component / element from the ADDITIONAL image and "
+            "integrate it into the FIRST piece at the CORRECT, natural position (a bail / hook goes at the "
+            "TOP-CENTRE facing forward; a centre stone / motif goes in the centre), REPLACING the existing one "
+            "there. The swap MUST be clearly and visibly applied. "
+            "2) Preserve everything else on the FIRST piece exactly — same design, silhouette, metal colour, stones, "
+            "proportions and camera angle. NEVER let preservation cancel the edit. Do NOT copy the additional "
+            f"image's background, metal colour or any unrelated part — use ONLY the element the request refers to.{_mi_intensity}\n\n"
+            "Clean CAD-style render on a pure solid white (#FFFFFF) background. One image only."
+        )
+
+    # BIG ADDITIVE COVERAGE refine (plain -> fully iced / add full diamonds): the heavy, preserve-laden
+    # MASTER_REFINE stack makes the model NO-OP (it keeps the clean reference). Mirror the proven initial
+    # fix — a LEAN, CHANGE-DOMINANT prompt where "add 100% diamonds" leads and preservation is minimal.
+    _p_low = (user_prompt or "").lower()
+    _iced_refine = (any(w in _p_low for w in ("iced", "ice out", "bust down", "bustdown", "flooded",
+                                              "fully covered", "full diamond", "all diamond", "cover the whole",
+                                              "cover the entire", "cover the pendant", "in diamonds", "all over"))
+                    or "stone_coverage" in str((refinement_intent or {}).get("attribute_to_change", "")).lower())
+    if _iced_refine and not replacements:
+        # Mirror Lovable's focused-refinement structure: lead with the CHANGE as priority #1, explicitly say
+        # preservation applies ONLY to non-target regions and must never cancel the edit, and frame it as a
+        # structured attribute change. (A preservation-first prompt made the model no-op.)
+        _intensity = ("" if attempt <= 1 else
+                      " CRITICAL CORRECTION: the previous attempt was too conservative and did NOT visibly add the "
+                      "diamonds. Do NOT preserve the plain surface — redraw the whole face fully covered in diamonds now.")
+        return (
+            "REFINEMENT — TARGETED EDIT. The attached image is the CURRENT render; this is an IMAGE EDIT, not a "
+            "redesign.\n\n"
+            "PRIORITY ORDER (do not violate): "
+            "1) APPLY THE CHANGE — cover the ENTIRE front surface of the piece with a SOLID SHEET of small micro-pavé "
+            "diamonds: fully iced out, 100% coverage, edge to edge, the whole face becomes diamonds, metal showing "
+            "ONLY as the thin prong walls between touching stones. "
+            "2) Preserve ONLY the non-target parts — the same silhouette, outline, proportions, metal colour and bail. "
+            "NEVER let preservation cancel the edit.\n\n"
+            "ATTRIBUTE TO CHANGE: stone coverage — change it from PLAIN / bare metal to FULLY ICED (covered in "
+            "diamonds). Apply this CLEARLY and OBVIOUSLY — the edit must be unmistakable, not subtle: the plain metal "
+            f"surface MUST become fully diamond-covered. Never return the image unchanged.{_intensity}\n\n"
+            "Clean CAD-style render on a pure solid white (#FFFFFF) background. One image only."
+        )
+
     # BAIL RE-DRIFT GUARD: the model tends to "complete" a pendant by re-adding a bail even when the
     # reference has none (e.g. after a previous refine removed it). Unless THIS refine is about the
     # bail, tell it to preserve the exact top/bail state of the reference.
@@ -201,9 +254,26 @@ One image only."""
     else:
         intensity = ""
 
+    # FULLY-ICED / add-full-diamonds refine: turning a plain piece iced is a BIG additive edit that
+    # MASTER_REFINE's "preserve / change less" bias tends to NO-OP. Inject a strong, positive coverage
+    # instruction so the diamonds are actually added across the whole surface.
+    _p = (user_prompt or "").lower()
+    _iced_refine = (any(w in _p for w in ("iced", "ice out", "bust down", "bustdown", "flooded", "fully covered",
+                                          "full diamond", "all diamond", "pave the whole", "cover the whole",
+                                          "cover the entire", "cover the pendant", "in diamonds", "all over"))
+                    or "stone_coverage" in str((refinement_intent or {}).get("attribute_to_change", "")).lower()
+                    or "stone_coverage" in str((refinement_intent or {}).get("change_type", "")).lower())
+    iced_clause = ""
+    if _iced_refine:
+        iced_clause = (" FULLY ICED — ADD 100% DIAMOND COVERAGE: cover the ENTIRE surface of the piece with a SOLID "
+                       "SHEET of small micro-pavé diamonds (the whole face becomes diamonds edge to edge), metal "
+                       "showing ONLY as the thin prong walls between touching stones. This is a STRONG, OBVIOUS "
+                       "change from the plain piece — you MUST visibly add the diamonds, never return it unchanged. "
+                       "Keep the SAME silhouette, outline, metal colour and bail.")
+
     return f"""{MASTER_REFINE}
 
-USER REQUEST (apply exactly, change nothing else): {change_desc}{combine_block}{metal_lock}{metal_convert}{bail_state}{dcut}
+USER REQUEST (apply exactly, change nothing else): {change_desc}{iced_clause}{combine_block}{metal_lock}{metal_convert}{bail_state}{dcut}
 
 {svc._font_clause(user_prompt, True)}{layered_block}
 

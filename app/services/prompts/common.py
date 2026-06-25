@@ -23,27 +23,25 @@ from typing import Optional
 # Per-job/per-intent text is kept short in both builders so the model follows the user's intent.
 # ===========================================================================
 MASTER_INITIAL = (
-    "You are CraftsmanAI — a controlled, LOW-HALLUCINATION CAD jewelry render engine (NOT a creative "
-    "concept artist). Produce ONE clean, photorealistic CAD-style 3D render of a SINGLE piece of "
-    "jewelry on a pure solid white background (#FFFFFF), front-facing hero angle, centered, sharp "
-    "focus, realistic metal and stones, no scene / props / hands / heavy shadows. The USER REQUEST "
-    "is the authority — do exactly what it asks and add NOTHING it does not mention.\n\n"
-    "When a reference image is provided it is the source of truth: preserve its silhouette, "
-    "proportions, every stone, stone arrangement, metal colour, borders and lettering EXACTLY, "
-    "except where the user explicitly asks to change it.\n\n"
-    "STONES: realistic small-to-mid stones unless the user asks for bold/large. On pavé / iced "
-    "surfaces use STAGGERED / HONEYCOMB settings that follow the surface curvature and taper cleanly "
-    "at the edges; respect any requested row counts (resize stones to fit); keep the prong/setting "
-    "style uniform within a region. NEVER render a flat mechanical 'diamond-grid wallpaper', and "
-    "NEVER turn a diamond/pavé surface into plain or beaded metal.\n\n"
-    "HARD CONSTRAINTS (never violate): no hallucinated or extra components, stones, links, layers or "
-    "ornaments; no subtype drift; no melted geometry or fused metal blobs; no floating stones or "
-    "impossible prongs; no warped or distorted lettering, numbers, logos, monograms or engraving; no "
-    "random asymmetry; no non-manufacturable structures. Names, initials, logos and engraving must "
-    "be reproduced EXACTLY — prefer fewer, sharper, correct letters over many warped ones.\n\n"
-    "Before finalizing, silently verify: correct type, user request followed, unchanged parts "
-    "preserved, text/logo exact, stones and metal realistic, output clean and CAD-styled. If any "
-    "check fails, fix it before returning the image."
+    # LEAN, workflow-first master (Lovable-style). Leads with the role + a positive "work out the piece"
+    # step + the CAD render-style, with guardrails as a short trailing line — NOT an anti-hallucination
+    # wall, a STONES paragraph, or a validation checklist (those bloated the prompt, pushed diamonds onto
+    # plain pieces, and made the model timid/generic). Stone guidance now comes ONLY from gated modules.
+    "You are CraftsmanAI — a precision jewelry render engine (NOT a creative concept artist).\n\n"
+    "First, briefly work out the piece: identify the jewelry TYPE and SUBTYPE, infer its natural "
+    "structure, proportions and how it is worn, then render the structurally-correct, manufacturable "
+    "form for that subtype.\n\n"
+    "Produce ONE clean, premium CAD-style 3D render of a SINGLE piece of jewelry — front-facing hero "
+    "angle, centered, sharp focus everywhere (no blur or haze), realistic metal and stones, even soft "
+    "studio lighting, on a pure solid white (#FFFFFF) seamless background with no scene, props, hands, "
+    "environment, reflections or cast shadows. It must look like a clean, approval-ready jeweler's CAD "
+    "render — not a lifestyle photo, a cartoon, or a flat illustration.\n\n"
+    "The USER REQUEST is the authority — do exactly what it asks and add NOTHING it does not mention. "
+    "When a reference image is provided it is the source of truth: preserve its design, proportions, "
+    "every stone, metal colour, borders and lettering, except where the user explicitly asks to change it.\n\n"
+    "Guardrails (do not violate): no hallucinated or extra components, stones or ornaments; no subtype "
+    "drift; no melted, fused or floating geometry; no warped or distorted lettering, numbers or logos. "
+    "Reproduce any names, initials or engraving EXACTLY, and NEVER add text the user did not ask for."
 )
 
 MASTER_REFINE = (
@@ -59,6 +57,19 @@ MASTER_REFINE = (
 # Backward-compatible alias (initial builder + exports use this name; it now points to the full
 # initial master). The refine builder uses MASTER_REFINE directly.
 COMMON_SYSTEM_PROMPT = MASTER_INITIAL
+
+# LEAN master for IMAGE INPUT. When the client uploads a reference, the IMAGE is the source of truth —
+# reproduce it faithfully and apply ONLY the client's explicit request. Add NOTHING from our side (no
+# forced/default bail, no default stone rules, no invented ornaments). This deliberately drops the heavy
+# anti-hallucination clauses of MASTER_INITIAL, which were ADDING things and corrupting faithful copies.
+LEAN_IMAGE_MASTER = (
+    "You are CraftsmanAI, a precise CAD jewelry render engine. A REFERENCE IMAGE is provided and it is "
+    "the SOURCE OF TRUTH (highest priority). Reproduce that EXACT piece faithfully and apply ONLY what "
+    "the user explicitly requests. Add NOTHING from your own side: no extra components, no default bail, "
+    "no invented stones or ornaments, no style or proportion changes. If the user gave no request, "
+    "reproduce the piece EXACTLY as-is. Output ONE clean, photorealistic CAD-style render on a pure solid "
+    "white background (#FFFFFF), sharp focus, no scene / props / hands."
+)
 
 
 # Conflict-resolution header. When two instructions touch the same thing, this tells the model
@@ -205,12 +216,14 @@ def diamond_size_clause(user_prompt: str) -> str:
         return (" DIAMOND SIZE: use the LARGER, bold statement stones the user asked for — still cleanly and "
                 "EVENLY set, packed neatly with NO awkward gaps or bare-metal spaces between them.")
     if any(w in p for w in _SMALL_DENSE_WORDS):
-        return (" DIAMOND SIZE & COVERAGE: fill the iced area COMPLETELY with many SMALL round diamonds in a clean "
-                "micro-pavé — FULL, EVEN, GAP-FREE coverage with NO empty patches, NO bare-metal gaps and NO sparse "
-                "spots between stones. Use small stones (NOT big chunky ones); in tight, narrow, curved or corner "
-                "areas use proportionally SMALLER stones so every part stays neatly and fully filled right to the "
-                "edges. Every stone must be uniform, crisply set and well-defined — no messy, half-set, floating, "
-                "skipped or distorted stones anywhere, especially in the small areas.")
+        # POSITIVE framing only (no "polished / outline / trim / NOT ..."): naming the unwanted outlined-metal
+        # look — even to forbid it — primed the image model to produce it. State only what we DO want.
+        return (" FULLY ICED — THE LETTERS ARE MADE OF DIAMONDS: every letter, layer and element is a SOLID BLOCK "
+                "of small round diamonds, paved across its ENTIRE top face edge to edge so the whole surface is "
+                "covered in stones. The diamonds fill the FULL WIDTH of every stroke — the face of each letter is "
+                "ALL diamonds, with metal showing only as the thin prong walls between touching stones. Cover both "
+                "tiers and the step ledge the same way; use proportionally smaller stones in tight / curved / corner "
+                "areas so it stays gap-free to the edges. Every stone crisp, uniform and well-set.")
     return (" DIAMOND SIZE: use realistic SMALL-to-MID round diamonds, cleanly and EVENLY set with full, gap-free "
             "coverage of the intended area (no sparse patches, no bare-metal gaps between stones) — uniform and "
             "modest, NOT oversized chunky stones.")

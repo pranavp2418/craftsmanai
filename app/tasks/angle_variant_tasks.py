@@ -33,7 +33,7 @@ from app.core.database import SessionLocal
 from app.models.design import Design
 from app.repositories.design_variant import DesignVariantRepository
 from app.repositories.activity_log import DesignActivityLogRepository
-from app.services.openai_service import openai_service, generate_with_openai_image, download_reference_images
+from app.services.openai_service import openai_service, generate_with_openai_image, generate_primary_image, download_reference_images
 from app.services.storage_service import _validate_image_bytes, upload_image_to_supabase
 from app.core.sse_manager import sse_manager
 from app.tasks.base import create_task
@@ -353,7 +353,11 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
                 # Worn view is a lifestyle photo with skin + natural background — do NOT
                 # apply the white-background flood-fill (it would bleed into the photo).
                 is_worn = "worn" in angle_name
-                b64_json = generate_with_openai_image(
+                # Use the CONFIGURED provider (generate_primary_image respects settings.IMAGE_PROVIDER) so a
+                # Gemini-only deployment renders angles with Gemini too — instead of hard-calling OpenAI,
+                # which fails when OpenAI is unreachable/unset (the "api.openai.com" error). It still falls
+                # back to OpenAI only if Gemini fails AND OpenAI is configured.
+                b64_json = generate_primary_image(
                     [ref_url], prompt, pre_downloaded_blobs=cached_blobs, whiten_output=not is_worn,
                 )
                 image_bytes = base64.b64decode(b64_json)

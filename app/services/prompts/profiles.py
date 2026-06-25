@@ -79,6 +79,18 @@ JEWELLERY_PROFILES = {
     "grill": _p("grill", BAIL_NONE, TEXT_IF_DETECTED, {MODULE_TEXT, MODULE_STONE}),
     "watch": _p("watch", BAIL_NONE, TEXT_NEVER, {MODULE_STONE}),
     "anklet": _p("anklet", BAIL_NONE, TEXT_NEVER, {MODULE_STONE}),
+    "chain": _p("chain", BAIL_NONE, TEXT_NEVER, {MODULE_STONE}, front=False),
+
+    # Components / accessories — each gets a dedicated profile so it NEVER falls through to the
+    # bail-less generic 'custom' (which would silently strip correct text/stone module gating).
+    "cufflink": _p("cufflink", BAIL_NONE, TEXT_IF_DETECTED, {MODULE_TEXT, MODULE_STONE}),
+    "brooch": _p("brooch", BAIL_NONE, TEXT_IF_DETECTED, {MODULE_TEXT, MODULE_STONE}),
+    "buckle": _p("buckle", BAIL_NONE, TEXT_IF_DETECTED, {MODULE_TEXT, MODULE_STONE}),
+    "clasp": _p("clasp", BAIL_NONE, TEXT_NEVER, {MODULE_STONE}),
+    "bail": _p("bail", BAIL_NONE, TEXT_NEVER, {MODULE_STONE}),
+    "body": _p("body", BAIL_NONE, TEXT_NEVER, {MODULE_STONE}),
+    # Matching set — multiple distinct pieces rendered together.
+    "set": _p("set", BAIL_NONE, TEXT_IF_DETECTED, {MODULE_TEXT, MODULE_STONE, MODULE_LAYERED}),
 
     # Fallback for "Custom" / unknown free-text types.
     "custom": _p("custom", BAIL_NONE, TEXT_IF_DETECTED, {MODULE_TEXT, MODULE_STONE, MODULE_SKETCH}),
@@ -93,20 +105,37 @@ def resolve_profile(item_type: str) -> JewelleryProfile:
     """
     t = (item_type or "").strip().lower()
 
+    # Matching set first — "pendant set" / "earring set" is a SET, not a lone pendant/earring.
+    if t.endswith("set") or "matching set" in t or "jewelry set" in t or "jewellery set" in t:
+        return JEWELLERY_PROFILES["set"]
     if "earring" in t or "ear ring" in t:
         return JEWELLERY_PROFILES["earring"]
+    if "cufflink" in t or "cuff link" in t or "cuff-link" in t:
+        return JEWELLERY_PROFILES["cufflink"]
     # Signet / class rings are just rings — they resolve to the ring profile below.
     if "ring" in t and "earring" not in t:
         return JEWELLERY_PROFILES["ring"]
     if "bracelet" in t or "bangle" in t or ("cuff" in t and "link" not in t):
         return JEWELLERY_PROFILES["bracelet"]
+    if "anklet" in t:
+        return JEWELLERY_PROFILES["anklet"]
+    if "chain" in t:
+        return JEWELLERY_PROFILES["chain"]
+    if "brooch" in t:
+        return JEWELLERY_PROFILES["brooch"]
     if "grill" in t or "grillz" in t:
         return JEWELLERY_PROFILES["grill"]
     if "watch" in t:
         return JEWELLERY_PROFILES["watch"]
-    if "anklet" in t:
-        return JEWELLERY_PROFILES["anklet"]
-    if any(k in t for k in ["pendant", "necklace", "charm"]):
+    if "buckle" in t:
+        return JEWELLERY_PROFILES["buckle"]
+    if "clasp" in t:
+        return JEWELLERY_PROFILES["clasp"]
+    if "bail" in t:
+        return JEWELLERY_PROFILES["bail"]
+    if "body" in t:
+        return JEWELLERY_PROFILES["body"]
+    if any(k in t for k in ["pendant", "necklace", "charm", "choker"]):
         return JEWELLERY_PROFILES["pendant"] if ("pendant" in t or "charm" in t) else JEWELLERY_PROFILES["necklace"]
 
     # Generic / blank / custom / unknown -> the bail-LESS "custom" profile.

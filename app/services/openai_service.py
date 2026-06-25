@@ -304,8 +304,17 @@ def extract_metal_from_prompt(prompt: Optional[str]) -> Optional[str]:
     if not prompt:
         return None
     lower = prompt.lower()
-    # Check for two-tone/mixed metal
-    if any(x in lower for x in ["two tone", "two-tone", "mixed metal", "mixed-metal", "multi-tone", "multi-tone"]):
+    # If MORE THAN ONE distinct metal colour is named (e.g. "rose gold mainly and top layer white gold")
+    # OR an explicit two-tone phrase is used, it's a TWO-TONE piece — return that so callers don't collapse
+    # it to a single metal (which dropped the rose gold and forced an all-white render).
+    _tones = set()
+    if any(x in lower for x in ["white gold", "white-gold", "silver", "platinum"]):
+        _tones.add("white")
+    if any(x in lower for x in ["rose gold", "rose-gold", "pink gold", "pink-gold"]):
+        _tones.add("rose")
+    if any(x in lower for x in ["yellow gold", "yellow-gold"]):
+        _tones.add("yellow")
+    if len(_tones) >= 2 or any(x in lower for x in ["two tone", "two-tone", "mixed metal", "mixed-metal", "multi-tone", "multi-tone"]):
         return "two_tone"
     # Check for white gold, silver, platinum
     if any(x in lower for x in ["white gold", "white-gold", "silver", "platinum"]):
@@ -2486,10 +2495,15 @@ def _ensure_white_background(image_bytes: bytes) -> bytes:
     return _whiten_background(image_bytes, tag="white_bg_input")
 
 
-def download_reference_images(image_urls: list[str]) -> list[bytes]:
-    """Pre-download reference images and ensure white backgrounds.
-    Use with generate_with_openai_image's pre_downloaded_blobs parameter
-    to avoid redundant downloads in parallel calls."""
+def download_reference_images(image_urls: list[str], whiten: bool = False) -> list[bytes]:
+    """Pre-download reference images. Use with pre_downloaded_blobs to avoid redundant downloads.
+
+    IMPORTANT — INPUT is fed to the model UNTOUCHED by default (whiten=False). We used to flood-fill
+    the INPUT background white before the model saw it, but that could eat into edge-bleeding / low-
+    contrast / coloured-backdrop designs and silently CORRUPT the source-of-truth reference (the very
+    thing the lean image=truth design protects). Lovable feeds the raw reference too; the prompt already
+    instructs a pure-white background and the OUTPUT is whitened, so input whitening is unnecessary and
+    risky. Pass whiten=True only if a caller specifically needs a pre-whitened input."""
     blobs: list[bytes] = []
     for url in (image_urls or [])[:10]:
         if not url:
@@ -2508,9 +2522,7 @@ def download_reference_images(image_urls: list[str]) -> list[bytes]:
                     raw_bytes = f.read()
 
             if raw_bytes:
-                # Pre-process to ensure white background
-                processed = _ensure_white_background(raw_bytes)
-                blobs.append(processed)
+                blobs.append(_ensure_white_background(raw_bytes) if whiten else raw_bytes)
         except Exception as e:
             logger.warning("Failed to fetch reference image %s: %s", url[:80], e)
     return blobs
@@ -2584,9 +2596,9 @@ def generate_with_gemini_image(image_blobs, prompt_text: str) -> Optional[str]:
         for p in cands[0].get("content", {}).get("parts", []):
             inline = p.get("inlineData") or p.get("inline_data")
             if inline and inline.get("data"):
-                logger.info("Gemini image fallback succeeded")
+                logger.info("Gemini image generated (%s)", _model)
                 return inline["data"]
-        logger.error("Gemini image fallback: response had no image part")
+        logger.error("Gemini image (%s): response had no image part", _model)
         return None
     except Exception as e:
         logger.error("Gemini image fallback exception: %s", e)
@@ -2617,10 +2629,20 @@ def generate_primary_image(
         if blobs is None and image_urls:
             blobs = download_reference_images(image_urls)
         g64 = None
-        try:
-            g64 = generate_with_gemini_image(blobs or [], prompt_text)
-        except Exception as _ge:
-            logger.warning("Gemini primary generation errored (%s) — falling back to OpenAI", _ge)
+        # RETRY Gemini on a transient empty/errored response BEFORE any fallback. Gemini is the configured
+        # provider; a transient hiccup (it succeeds on a re-try moments later) must NOT drop us onto OpenAI —
+        # in a Gemini-only deployment OpenAI may be unreachable / unset, producing the confusing
+        # "api.openai.com" DNS error the user saw.
+        for _attempt in range(3):
+            try:
+                g64 = generate_with_gemini_image(blobs or [], prompt_text)
+            except Exception as _ge:
+                logger.warning("Gemini primary generation errored (attempt %d/3): %s", _attempt + 1, _ge)
+                g64 = None
+            if g64:
+                break
+            if _attempt < 2:
+                logger.warning("Gemini returned no image (attempt %d/3) — retrying", _attempt + 1)
         if g64:
             if whiten_output:
                 try:
@@ -2631,7 +2653,15 @@ def generate_primary_image(
                     logger.warning("Gemini output white-bg post-process skipped: %s", _w)
             logger.info("Primary image generated via Gemini (%s)", getattr(settings, "GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"))
             return g64
-        logger.warning("Gemini primary returned no image — falling back to OpenAI gpt-image-2")
+        # Gemini still failed after 3 attempts. Fall back to OpenAI ONLY if it is actually configured;
+        # otherwise raise a CLEAR Gemini-focused error instead of an opaque OpenAI DNS failure.
+        _openai_key = os.getenv("OPENAI_API_KEY") or getattr(settings, "OPENAI_API_KEY", None)
+        if not _openai_key:
+            raise RuntimeError(
+                "Image generation temporarily failed: Gemini returned no image after 3 attempts and no OpenAI "
+                "fallback is configured. Please try again."
+            )
+        logger.warning("Gemini failed after 3 attempts — falling back to OpenAI gpt-image-2")
 
     return generate_with_openai_image(
         image_urls, prompt_text, pre_downloaded_blobs=pre_downloaded_blobs, whiten_output=whiten_output,
@@ -3149,12 +3179,16 @@ PENDANT_BAIL_ROLE_RULE = (
 
 # Two-step / two-layer stacked nameplate (client requested "step up, 2 layers").
 LAYERED_RULE = (
-    "STEP-UP / RAISED TWO-LAYER STRUCTURE (also called 3D, raised, double-layer, two-tier): build the design as a "
-    "raised piece sitting on a bordered BACKPLATE — add a flat backing plate of the SAME outline shape as the "
-    "design but slightly larger, with a clean polished border (a clearly visible bordered plate) running all "
-    "around the edge, and seat the main design raised on TOP of that plate so there is a clear stepped 3D ledge "
-    "between the two layers. Stones may cover both the backplate border and the raised design if requested. Keep "
-    "it a clean CAD-style render with the two-layer step clearly readable."
+    # NOTE: deliberately NO "raised piece / backplate / raised border / polished faces" wording. Those
+    # metal-surface nouns primed the image model toward polished-metal letters with a pavé outline (the
+    # "outlined name" look), and even the negation "do NOT polished faces" summoned it. The step is
+    # described as DEPTH only, and an iced finish is the headline (both tiers + faces fully paved).
+    "TWO-LAYER STEP-UP DEPTH: give the nameplate two stacked tiers so the letters sit slightly above a "
+    "lower backing layer of the SAME outline, with a clean stepped ledge between them purely for 3D DEPTH. "
+    "When the request is iced / pavé, treat the whole piece as ONE continuous diamond surface: BOTH tiers — "
+    "the lower backing layer AND the upper letters, including their full top faces and the step ledge — are "
+    "completely paved with diamonds edge to edge. The step is depth only, never a metal frame around the "
+    "stones. Keep both tiers and the name clearly readable."
 )
 
 
@@ -3347,64 +3381,125 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
     jewelry type (Pendant -> add a bail, Ring -> band, Earring -> pair, etc.) so the chosen
     type actually shapes the output. Kept short to avoid re-bloating the prompt."""
     t = (item_type or "").strip().lower()
+    lower = (user_prompt or "").lower()  # used to pick a SUBTYPE recipe (Cuban, hoop, signet, skeleton...)
+
+    def _sub(*pairs):
+        """Return the first subtype recipe whose keyword is in the user's prompt, else ''."""
+        for kws, recipe in pairs:
+            if any(k in lower for k in kws):
+                return recipe
+        return ""
+
     _PENDANT = (
-        " This is a PENDANT and MUST be wearable with a bail/hook at the very TOP for a chain. If the reference "
-        "already shows a bail, keep that exact bail. Otherwise ADD a single appropriate bail at the top-centre — "
-        "YOU choose a bail style that best SUITS THIS design (e.g. a simple round loop, a flared bail, a hinged "
-        "bail, a tapered bail, or a decorative one that matches the piece); match its finish to the piece (same "
-        "metal, pavé-set if the piece is iced/diamond-set, else smooth polished). The bail is REQUIRED — never "
-        "omit it — but do NOT force one fixed default shape; pick what fits. Show only ONE bail. If a chain or "
-        "cord is shown, remove the chain and show only the pendant (keep the bail)."
+        # DETERMINISTIC + minimal (Lovable-style): preserve the reference bail, else add ONE simple standard
+        # loop bail. No "you choose a style" / random variety — that produced inconsistent, odd bails.
+        " This is a PENDANT and must hang from ONE bail at the top-centre. If the reference already shows a "
+        "bail, keep that exact bail; otherwise add a single simple standard round LOOP bail (a clean plain "
+        "loop), with the same metal/finish as the piece. The bail sits at the very TOP of the piece, facing "
+        "FORWARD (its loop opening visible from the front) and ABOVE the design — NOT behind the piece, NOT "
+        "flat against the back, NOT below or to the side. Show ONLY ONE bail — never two, never stacked. If a "
+        "chain or cord is shown, remove the chain and show only the pendant with its bail."
     )
-    # Check the most specific / collision-prone types first (earring/cufflink contain 'ring').
+    # MATCHING SET first — "pendant set" / "earring set" must be a SET, not a lone pendant/earring.
+    if t.endswith("set") or "matching set" in t or "jewelry set" in t or "jewellery set" in t:
+        return (" Render a MATCHING SET as MULTIPLE DISTINCT pieces in a flat-lay on a white background — two "
+                "IDENTICAL, MIRRORED earrings/studs side by side on the TOP ROW and ONE matching pendant CENTERED "
+                "BELOW. All pieces share the same design, stones, metal and finish. The pendant shows ONLY its bail "
+                "(no chain). NEVER merge the pieces into a single object.")
+    # Collision-prone types first (earring/cufflink contain 'ring').
     if "earring" in t or "ear ring" in t:
-        return " Render as a matching PAIR of EARRINGS with posts/backs so they can be worn."
+        sub = _sub(((" hoop",), " Each is a continuous circular/oval HOOP hinged to the post."),
+                   (("stud",), " Each is a STUD — a centered stone/motif on a post, with no drop."),
+                   (("chandelier",), " Each is a CHANDELIER — tiered drops on multiple levels."),
+                   (("drop", "dangle"), " Each has a DROP element hanging below the post."),
+                   (("ear cuff", "cuff"), " Each is an EAR CUFF that wraps the outer ear, with NO post."))
+        return (" Render an IDENTICAL, MIRRORED PAIR of EARRINGS (two matching pieces side by side), each with a "
+                "post/back so they can be worn." + sub)
     if "cufflink" in t or "cuff link" in t or "cuff-link" in t:
-        return " Render as a matching PAIR of CUFFLINKS with the standard swivel-bar backs."
+        return (" Render a matching PAIR of CUFFLINKS — two IDENTICAL faces, mirrored, side by side, each with a "
+                "swivel-bar back-post. Show them ISOLATED on white (no shirt or cuff).")
     if "ring" in t:
-        return " Present the design as the face/top of a wearable RING on a smooth polished band/shank."
+        if "signet" in t or "class ring" in t or "signet" in lower or "class ring" in lower:
+            return (" Render a wearable SIGNET / CLASS RING: a FLAT or gently domed planar signet FACE (a solid "
+                    "plate, NOT a gemstone dome) on top, symmetric shoulders, and a realistic taper from the face "
+                    "down to a smooth shank. Treat any logo / lettering as the EXACT centre-face content.")
+        return (" Present the design as the face/top of a wearable RING on a smooth polished band/shank, with a "
+                "realistic taper from the face down to the shank.")
     if "bangle" in t:
         return " Render as a wearable BANGLE — a rigid closed circular band worn over the hand (no clasp needed)."
     if "cuff" in t and "link" not in t:
         return " Render as a wearable open CUFF bracelet — a rigid C-shaped band with an open gap at the back (no clasp)."
     if "bracelet" in t:
+        sub = _sub((("tennis",), " As a TENNIS bracelet: ONE continuous row of identical small prong-set stones around the whole strand."),
+                   (("charm",), " As a CHARM bracelet: a link strand with small charms hanging evenly along it."))
         return (" Render as a wearable BRACELET laid out flat / gently open. It MUST be finished with a working "
                 "CLASP / lock closure at the two ends — e.g. a lobster-claw or box clasp with the matching end "
-                "link / jump ring — so it can actually fasten and be worn. Show the clasp clearly; it is an "
-                "openable strand, NOT a seamless closed loop.")
+                "link — so it can actually fasten. Show the clasp clearly; it is an openable strand, NOT a "
+                "seamless closed loop." + sub)
     if "anklet" in t:
         return (" Render as a wearable ANKLET (ankle chain) finished with a working CLASP / lock closure at the "
                 "ends so it can fasten — show the clasp clearly.")
     if "chain" in t:
-        return (" Render as a wearable CHAIN with consistent link rhythm, finished with a working CLASP / lock "
-                "closure (e.g. a lobster clasp) at the ends so it can be worn.")
+        sub = _sub((("cuban",), " Build it from uniform interlocking FLAT oval links, each link locking into the next (Cuban link)."),
+                   (("rope",), " Build it from twisted/braided strands spiralling like a rope (rope chain)."),
+                   (("figaro",), " Build it from a repeating pattern of several short links then ONE longer link (Figaro)."),
+                   (("franco",), " Build it from tight interlocking V/rectangular links forming a smooth rope (Franco)."),
+                   (("box chain", "box link"), " Build it from square box-shaped links in a straight column (box chain)."),
+                   (("tennis",), " Build it as ONE continuous row of identical small prong-set stones (tennis chain)."),
+                   (("cable", "rolo", "link"), " Build it from uniform oval cable links."))
+        return (" Render as a wearable CHAIN with a consistent link rhythm, finished with a working lobster CLASP "
+                "at the ends so it can be worn." + sub)
     if "brooch" in t:
-        return " Render as a BROOCH with a hidden pin/clasp on the back."
+        return (" Render a BROOCH front-on — a decorative FACE / motif as the focal element, with a hidden PIN-BACK "
+                "clasp behind it. Show it ISOLATED on white.")
     if "grill" in t:
-        return " Render as wearable GRILLZ for the teeth."
+        sub = _sub((("top",), " Show the TOP row only."), (("bottom",), " Show the BOTTOM row only."),
+                   (("single", "one tooth"), " Show a SINGLE tooth cap."),
+                   (("full",), " Show matching TOP and BOTTOM rows in the same design."))
+        return (" Render GRILLZ as metal tooth caps following the natural curved dental ARCH, each cap fitted to one "
+                "tooth, with the correct tooth COUNT and even spacing." + sub)
     if "watch" in t:
-        return " Render as a WATCH."
+        sub = _sub((("skeleton",), " Show the internal movement through a transparent / skeleton dial."),
+                   (("apple", "smart"), " Render a modern square smartwatch with stones paved on the bezel/case."))
+        return (" Render a WATCH with a realistic round/cushion CASE, a BEZEL ring, two pairs of LUGS, a clear DIAL "
+                "with hour markers and hands, and a BAND attached at the lugs — all in correct proportion." + sub)
     if "buckle" in t:
-        return " Render as a BELT BUCKLE."
+        return (" Render a BELT BUCKLE as a standalone piece — a rigid outer FRAME, a decorative FACE/plate and the "
+                "TONGUE/prong, with the belt-strap slots. Show it ISOLATED on white (no belt).")
     if "clasp" in t:
-        return " Render as a jewelry CLASP (a working fastener/connector)."
+        return (" Render the CLASP as a STANDALONE working fastener on white — show the lock body, the tongue / "
+                "opening mechanism and the hinge. Do NOT attach a chain or bracelet.")
     if "bail" in t:
-        return " Render as a pendant BAIL — the small top loop a chain passes through."
+        return (" Render the BAIL as a STANDALONE component on white — the small top loop a chain passes through "
+                "(loop + body, plus a hinge if applicable). Do NOT attach a pendant, chain or any other piece.")
     if "body" in t:
-        return " Render as wearable BODY JEWELRY suited to the design."
+        return (" Render BODY JEWELRY with realistic piercing hardware — a decorative FACE, a POST / bar that passes "
+                "through, and a BACK fastener. Match the hardware to the piercing type (nose/septum/navel/eyebrow/"
+                "lip/dermal). Show it ISOLATED on white.")
     if "pendant" in t or "charm" in t:
         return _PENDANT
-    if "necklace" in t:
-        return (" Render as a wearable NECKLACE — a LARGE, neck-sized piece worn around the NECK, clearly BIGGER and "
-                "LONGER than a bracelet: the chain / strand forms a wide U-shape or oval that drapes around the "
-                "neckline, finished with a working CLASP at the back. If it is a plain chain necklace, show the full "
-                "neck-length chain with even links; if it carries a pendant, nameplate or centre motif, hang that as "
-                "the focal piece at the BOTTOM-CENTRE of the necklace. Do NOT render it small like a bracelet, do NOT "
-                "make a tight little wrist-sized loop, and do NOT show it as a flat standalone nameplate.")
-    # Custom / unknown type the user typed in: render it as that exact named object — do NOT
-    # force a pendant bail onto it. Only fall back to a pendant for a truly generic/blank type.
+    if "necklace" in t or "choker" in t:
+        chain_sub = _sub((("cuban",), " a Cuban link"), (("rope",), " a rope"), (("figaro",), " a Figaro"),
+                         (("franco",), " a Franco"), (("box",), " a box-link"), (("tennis",), " a tennis"))
+        link_note = (f" If it is a plain chain, use{chain_sub} link pattern with even links." if chain_sub else "")
+        if "choker" in t or "choker" in lower:
+            base = (" Render as a CHOKER — a SHORT necklace that sits SNUG and high around the base of the neck, "
+                    "finished with a working CLASP at the back.")
+        else:
+            base = (" Render as a wearable NECKLACE — a LARGE, neck-sized piece worn around the NECK, clearly BIGGER "
+                    "and LONGER than a bracelet: the chain / strand forms a wide U-shape or oval that drapes around "
+                    "the neckline, finished with a working CLASP at the back.")
+        return (base + link_note +
+                " If it carries a pendant, nameplate or centre motif, hang that as the focal piece at the "
+                "BOTTOM-CENTRE — the pendant hangs from ONLY its bail on the chain (no extra hook, jump-ring or "
+                "clasp above the bail). Do NOT render it small like a bracelet, and do NOT show it as a flat "
+                "standalone nameplate.")
+    # Custom / unknown type the user typed in: convert the named object into a manufacturable, wearable
+    # fine-jewelry interpretation (not a flat literal object) — do NOT force a pendant bail onto it.
     if t and t not in ("jewelry", "jewellery", "custom", "custom object", "other"):
-        return f" Render as a real, wearable {item_type} — the actual {item_type} form, not a pendant (no bail unless the {item_type} naturally hangs from a chain)."
+        return (f" Render as a real, wearable fine-jewelry interpretation of a {item_type} — convert the named "
+                f"object into a manufacturable metal jewelry piece (not a flat or literal object), in its natural "
+                f"{item_type} form. Add a bail ONLY if the {item_type} naturally hangs from a chain.")
     # Generic / blank / 'custom' type -> NEUTRAL form, NO forced bail. (A bail on a ring / unknown
     # piece was the client's #1 complaint.) A bail is added only for an explicit pendant/necklace/charm.
     return (" Render as a clean, wearable jewelry piece in its natural form. Add a top bail/hook ONLY "
@@ -3986,11 +4081,15 @@ def generate_with_fallback(
     has_reference_image = bool(image_source or image_urls)
     lower_prompt = (user_prompt or "").lower()
     edit_keywords = ["change", "convert", "replace", "modify", "remove", "add", "switch", "edit", "update"]
+    # An EXPLICIT mode is authoritative — never override it. A CREATE always passes mode="initial" (a
+    # first generation is NEVER a refine, even if the prompt says "add"/"change" — that just describes
+    # the design to create), and the refine endpoint passes mode="refine". Only auto-detect when the
+    # caller gave no mode at all.
     selected_mode = mode
-    if has_reference_image and any(w in lower_prompt for w in edit_keywords):
-        selected_mode = "refine"
-    elif not selected_mode:
-        if any(w in lower_prompt for w in ["refine", "style tags:", "focus on:", "change", "add", "remove", "replace"]):
+    if not selected_mode:
+        if has_reference_image and any(w in lower_prompt for w in edit_keywords):
+            selected_mode = "refine"
+        elif any(w in lower_prompt for w in ["refine", "style tags:", "focus on:", "change", "add", "remove", "replace"]):
             selected_mode = "refine"
         else:
             selected_mode = "initial"
@@ -4059,30 +4158,14 @@ def generate_with_fallback(
     # Font-template: use the rendered glyph image as the (only) reference blob for generation.
     if font_template:
         ref_blobs = [base64.b64decode(font_template["b64"])]
-    # ANNOTATED-REFERENCE CROP: a reference spec sheet / photo with notes, dimensions or labels around
-    # the piece makes the model reproduce that text in the render. The prompt alone can't stop it, so
-    # for INITIAL image inputs we physically crop the reference down to just the jewelry (text removed).
-    # Skipped for refines (those references are clean renders) and font templates (intentional text).
-    if not is_refine and not font_template and ref_blobs:
-        ref_blobs = [crop_reference_to_jewelry(b) for b in ref_blobs]
     input_b64 = base64.b64encode(ref_blobs[0]).decode("utf-8") if ref_blobs else None
 
-    # BAIL-GUARD (initial, image-input): if the DECLARED type would add a pendant bail but the
-    # reference IMAGE is clearly a non-hanging piece (ring/bracelet/earring/grill/watch/anklet),
-    # trust the image and override the type so we never slap a bail onto a ring. This covers the
-    # case where the frontend sends the wrong/"Pendant"/blank type. Only the (cheap) cases that
-    # would otherwise add a bail trigger the vision call.
-    if not is_refine and has_reference_image and input_b64:
-        try:
-            from app.services.prompts.profiles import resolve_profile as _resolve_profile
-            _declared = ((parsed_data or {}).get("item_type") or "")
-            if _resolve_profile(_declared).bail_policy != "none":
-                _piece = (detect_jewelry_piece_type(input_b64) or "").strip().lower()
-                if _piece in ("ring", "bracelet", "earring", "grill", "watch", "anklet"):
-                    parsed_data = {**(parsed_data or {}), "item_type": _piece}
-                    logger.info("[bail-guard] declared type='%s' but reference image is a '%s' -> overriding, no bail", _declared, _piece)
-        except Exception as _bg_err:
-            logger.warning("[bail-guard] piece-type check failed: %s", _bg_err)
+    # (Removed two pre-generation vision calls from the image-create path:
+    #   * ANNOTATED-REFERENCE CROP (crop_reference_to_jewelry) — annotation/text exclusion is now handled
+    #     by the LEAN prompt's no-annotation rule, so we no longer crop the reference.
+    #   * BAIL-GUARD (detect_jewelry_piece_type) — the LEAN image prompt no longer FORCES a bail, so
+    #     detecting the piece type to avoid a wrong bail is unnecessary.
+    # Image-create (initial, image input) now runs with ZERO pre-generation vision/LLM calls.)
 
     # Detect the reference's letter casing (via OCR) so a name/number change keeps the
     # SAME case as the input image — not however the user typed it. Only when the user
@@ -4137,7 +4220,10 @@ def generate_with_fallback(
     needs_visual_qa = bool(is_refine and refinement_intent)
     # Initial-generation auto-QA: no previous reference, so check the OUTPUT against the user's raw
     # request (correct type / text spelling / metal / stones / clean render) and retry once.
-    needs_initial_qa = bool((not is_refine) and os.getenv("GEMINI_API_KEY") and original_request)
+    # IMAGE INPUT is EXCLUDED: when the client uploads a reference, the image is the source of truth and
+    # we reproduce it faithfully — a QA pass that "checks vs the request" would second-guess and possibly
+    # regenerate a correct faithful copy. So QA runs ONLY on TEXT-ONLY initials (no reference image).
+    needs_initial_qa = bool((not is_refine) and (not has_reference_image) and os.getenv("GEMINI_API_KEY") and original_request)
     any_check = needs_spelling_check or needs_visual_qa or needs_initial_qa
     # Refines (Gemini) are fast & cheap, and the model sometimes drops the edit (stochastic no-op).
     # Allow up to 3 generations for a refine so a dropped edit gets escalated corrective re-rolls
@@ -4167,8 +4253,16 @@ def generate_with_fallback(
         #    regardless of the soft vision QA (which is easily fooled by two near-identical images).
         #    Skipped for metal-colour edits: phash is colour-blind, so a real recolour would look
         #    'identical' and falsely trigger a retry.
-        if is_refine and input_b64 and not _user_wants_metal_change(user_prompt) and _images_near_identical(input_b64, b64):
-            logger.warning("[refine no-op guard attempt %d] output ~identical to reference — forcing escalated retry", qa_attempt)
+        # For BIG additive changes (plain -> fully iced, add full diamonds, remove a component) a real edit
+        # shifts the image a LOT, so even a SMALL phash distance means the model no-op'd; use a higher
+        # threshold there. Small edits keep the tight default (4) so a legitimate minor change isn't flagged.
+        _lp_noop = (user_prompt or "").lower()
+        _big_change = any(w in _lp_noop for w in ("iced", "ice out", "bust down", "bustdown", "flooded",
+                                                  "fully covered", "full diamond", "all diamond", "cover the whole",
+                                                  "cover the entire", "cover the pendant", "in diamonds", "all over"))
+        _noop_thresh = 14 if _big_change else 4
+        if is_refine and input_b64 and not _user_wants_metal_change(user_prompt) and _images_near_identical(input_b64, b64, max_distance=_noop_thresh):
+            logger.warning("[refine no-op guard attempt %d] output ~identical to reference (thresh=%d) — forcing escalated retry", qa_attempt, _noop_thresh)
             correction_notes = (
                 "The previous attempt returned an image almost IDENTICAL to the reference and did NOT visibly apply "
                 "the requested change. Apply the requested change STRONGLY and OBVIOUSLY this time — redraw the target "
@@ -4348,13 +4442,11 @@ class OpenAIService:
         """
         logger.info("Generating base image using Gemini Pipeline (metal_tone=%s)", metal_tone)
 
-        selected_mode = mode
-        if not selected_mode:
-            lower_prompt = (user_prompt or "").lower()
-            if any(w in lower_prompt for w in ["refine", "style tags:", "focus on:", "change", "add", "remove", "replace"]):
-                selected_mode = "refine"
-            else:
-                selected_mode = "initial"
+        # generate_base_image is the CREATE / first-generation path -> ALWAYS initial. A first
+        # generation is never a refine, even if the user's prompt contains an edit word like
+        # "add"/"change" (that just describes the design they want CREATED). Refines run through the
+        # separate refine task, which calls generate_with_fallback with mode="refine" directly.
+        selected_mode = mode or "initial"
 
         # Prefer the rich parsed_data; ensure item_type is populated from the jewellery_type hint.
         _pd = dict(parsed_data) if parsed_data else None

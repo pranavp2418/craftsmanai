@@ -89,10 +89,13 @@ class Settings(BaseSettings):
     # "gemini" -> gemini-2.5-flash-image (fast, ~seconds; falls back to OpenAI on failure).
     # "openai" -> gpt-image-2 (slow, ~minutes). Side ANGLES always use OpenAI regardless.
     IMAGE_PROVIDER: str = "gemini"
-    # Image model: gemini-3.1-flash-image = "Nano Banana 2" (fast + good quality, supports 2K).
-    # Alternatives: "gemini-3-pro-image" (Nano Banana Pro — highest quality, slower/costlier),
-    # "gemini-2.5-flash-image" (older Nano Banana).
-    GEMINI_IMAGE_MODEL: str = "gemini-3.1-flash-image"
+    # Image model: gemini-3.1-flash-image-preview = "Nano Banana 2" — the EXACT model the Lovable
+    # prototype uses (it calls google/gemini-3.1-flash-image-preview). The direct Gemini API exposes BOTH
+    # "gemini-3.1-flash-image" (stable) and "...-preview"; they can be different checkpoints, so we use
+    # the -preview one to match Lovable like-for-like.
+    # Alternatives: "gemini-3-pro-image" / "gemini-3-pro-image-preview" (Nano Banana Pro — higher quality,
+    # slower, ~2x cost), "gemini-2.5-flash-image" (older Nano Banana).
+    GEMINI_IMAGE_MODEL: str = "gemini-3.1-flash-image-preview"
     # Output resolution for Gemini image gen ("1K" | "2K" | "4K"). Higher = better quality + more
     # tokens/time. Empty = model default. 2K = 2816x1536 (4x the default pixels).
     GEMINI_IMAGE_SIZE: str = "2K"
