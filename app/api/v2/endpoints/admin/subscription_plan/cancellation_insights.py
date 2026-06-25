@@ -1,3 +1,4 @@
+from math import ceil
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
@@ -121,6 +122,8 @@ def get_cancellation_summary(
 
 @router.get("/reasons", response_model=CancellationReasonsResponse)
 def get_cancellation_reasons(
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=10, ge=1, le=100, description="Number of records per page"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -138,30 +141,41 @@ def get_cancellation_reasons(
         )
         .filter(UserSubscription.status == SubscriptionStatus.CANCELLED)
         .group_by(UserSubscription.cancellation_reason)
+        .order_by(func.count(UserSubscription.id).desc())
+        .limit(limit)
+        .offset((page - 1) * limit)
         .all()
     )
     
-    reasons_map = {r.value: 0 for r in CancellationReason}
-    for row in rows:
-        reason_obj, count = row
+    reasons_list = []
+    for reason_obj, count in rows:
         if reason_obj:
             val = reason_obj.value if hasattr(reason_obj, 'value') else reason_obj
-            reasons_map[val] = count
+            percentage = round((count / total_cancelled * 100), 1) if total_cancelled > 0 else 0
+            reasons_list.append({
+                "reason": val,
+                "count": count,
+                "percentage": percentage
+            })
     
-    reasons_list = []
-    for reason, count in reasons_map.items():
-        percentage = round((count / total_cancelled * 100), 1) if total_cancelled > 0 else 0
-        reasons_list.append({
-            "reason": reason,
-            "count": count,
-            "percentage": percentage
-        })
+    total_reasons = db.query(func.count(func.distinct(UserSubscription.cancellation_reason))).filter(
+        and_(
+            UserSubscription.status == SubscriptionStatus.CANCELLED,
+            UserSubscription.cancellation_reason.isnot(None)
+        )
+    ).scalar() or 0
     
-    reasons_list.sort(key=lambda x: x["count"], reverse=True)
-    
+    total_pages = ceil(total_reasons / limit) if limit > 0 else 1
+
     return {
         "success": True,
-        "data": reasons_list
+        "data": reasons_list,
+        "total": total_reasons,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages,
+        "has_next": page < total_pages,
+        "has_prev": page > 1
     }
 
 
