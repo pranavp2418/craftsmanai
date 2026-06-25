@@ -271,6 +271,10 @@ class CustomerListResponse(BaseModel):
     items: List[CustomerResponse]
     total: int
     page: int
+    limit: int = 20
+    total_pages: int = 1
+    has_next: bool = False
+    has_prev: bool = False
 
 
 

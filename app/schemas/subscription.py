@@ -112,6 +112,12 @@ class CancellationSummaryResponse(BaseModel):
 class CancellationReasonsResponse(BaseModel):
     success: bool = True
     data: List[CancellationReasonBreakdown]
+    total: int = 0
+    page: int = 1
+    limit: int = 10
+    total_pages: int = 1
+    has_next: bool = False
+    has_prev: bool = False
 
 class CancellationTrendsResponse(BaseModel):
     success: bool = True
