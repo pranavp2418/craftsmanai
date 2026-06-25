@@ -2565,10 +2565,18 @@ def generate_with_gemini_image(image_blobs, prompt_text: str) -> Optional[str]:
     for blob in (image_blobs or []):
         parts.append({"inline_data": {"mime_type": "image/png", "data": base64.b64encode(blob).decode("utf-8")}})
     gen_config = {"responseModalities": ["TEXT", "IMAGE"]}
-    # Higher output resolution for better quality (config-driven). Sent as imageConfig.imageSize.
+    # Output resolution + ASPECT RATIO (config-driven) via imageConfig. aspectRatio FORCES every render to
+    # the same shape (e.g. "16:9" landscape) so outputs are consistent — without it the model chose portrait
+    # for tall pieces and landscape for wide ones, giving mixed orientations.
     _size = getattr(settings, "GEMINI_IMAGE_SIZE", None)
+    _aspect = getattr(settings, "GEMINI_IMAGE_ASPECT", None)
+    _img_cfg = {}
     if _size:
-        gen_config["imageConfig"] = {"imageSize": str(_size).upper()}
+        _img_cfg["imageSize"] = str(_size).upper()
+    if _aspect:
+        _img_cfg["aspectRatio"] = str(_aspect)
+    if _img_cfg:
+        gen_config["imageConfig"] = _img_cfg
     try:
         resp = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={key}",

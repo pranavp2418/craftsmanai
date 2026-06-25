@@ -99,6 +99,10 @@ class Settings(BaseSettings):
     # Output resolution for Gemini image gen ("1K" | "2K" | "4K"). Higher = better quality + more
     # tokens/time. Empty = model default. 2K = 2816x1536 (4x the default pixels).
     GEMINI_IMAGE_SIZE: str = "2K"
+    # Output ASPECT RATIO — FORCE every render to the SAME shape so outputs are consistent (some pieces
+    # were coming out portrait/vertical and others landscape). "16:9" = a horizontal/landscape frame.
+    # Other valid values: "4:3", "3:2", "1:1", "3:4", "9:16". Empty = let the model choose (inconsistent).
+    GEMINI_IMAGE_ASPECT: str = "16:9"
     # Text / vision ANALYSIS calls (parse gate, OCR, metal detect, spelling, classify, enrich).
     # "gemini" -> GEMINI_TEXT_MODEL via its OpenAI-compatible endpoint; "openai" -> gpt-4o-mini.
     TEXT_LLM_PROVIDER: str = "gemini"
