@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.schemas.contact import ContactSubmissionCreate, ContactMessageResponse
 from app.models.contact import ContactSubmission
+from app.models.user import User
 from app.tasks.email_tasks import send_contact_notification_email
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,23 @@ async def submit_contact_form(
     to send the notification email.
     """
     try:
+        # Check if email already exists in users table
+        existing_user_by_email = db.query(ContactSubmission).filter(ContactSubmission.email == contact_data.email).first()
+        if existing_user_by_email:
+            raise HTTPException(
+                status_code=409,
+                detail="A user with this email address already exists.",
+            )
+
+        # Check if phone already exists in users table
+        if contact_data.phone:
+            existing_user_by_phone = db.query(ContactSubmission).filter(ContactSubmission.phone == contact_data.phone).first()
+            if existing_user_by_phone:
+                raise HTTPException(
+                    status_code=409,
+                    detail="A user with this phone number already exists.",
+                )
+
         # Save to database
         submission = ContactSubmission(
             full_name=contact_data.full_name,

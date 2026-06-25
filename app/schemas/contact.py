@@ -1,4 +1,5 @@
-from pydantic import BaseModel, EmailStr, Field
+import phonenumbers
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 from datetime import datetime
 
@@ -11,6 +12,20 @@ class ContactSubmissionCreate(BaseModel):
     phone: Optional[str] = Field(None, max_length=50, description="Sender's phone number")
     store_type: Optional[str] = Field(None, max_length=255, description="Type of store")
     interest: Optional[str] = Field(None, description="What they are interested in")
+
+    model_config = {"extra": "forbid"}
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            try:
+                number = phonenumbers.parse(v)
+                if not phonenumbers.is_valid_number(number):
+                    raise ValueError("Invalid phone number format")
+            except phonenumbers.NumberParseException:
+                raise ValueError("Invalid phone number format")
+        return v
 
 
 class ContactSubmissionResponse(BaseModel):

@@ -1,3 +1,4 @@
+from math import ceil
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -11,6 +12,7 @@ from app.schemas.design import (
     DesignVariantListItem,
     SharedCustomerInfo,
 )
+from app.schemas.design_variant import PaginationMetadata
 from app.services.design_service import DesignService
 
 
@@ -75,12 +77,13 @@ def _build_design_response(design) -> dict:
 def list_designs(
     status: DesignStatus | None = Query(default=None),
     search: str | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    page: int = Query(default=1, ge=1, description="Page number"),
+    limit: int = Query(default=50, ge=1, le=100, description="Number of records per page"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     service = DesignService(db)
+    offset = (page - 1) * limit
     items, total = service.list_designs(
         user=current_user,
         status=status,
@@ -90,4 +93,16 @@ def list_designs(
     )
     items = [design for design in items if not getattr(design, "is_archived", False)]
     response_items = [DesignResponse.model_validate(_build_design_response(d)) for d in items]
-    return DesignListResponse(items=response_items, total=total)
+
+    total_pages = ceil(total / limit) if limit > 0 else 1
+
+    pagination = PaginationMetadata(
+        page=page,
+        limit=limit,
+        total_items=total,
+        total_pages=total_pages,
+        has_next=page < total_pages,
+        has_prev=page > 1,
+    )
+
+    return DesignListResponse(items=response_items, total=total, pagination=pagination)
