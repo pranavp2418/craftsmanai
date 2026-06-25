@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 
 from app.models.order import OrderStatus, ManufacturerQuoteStatus
+from app.core.sanitizer import validate_and_sanitize
 
 
 class OrderCreateRequest(BaseModel):
@@ -24,6 +25,14 @@ class OrderCreateRequest(BaseModel):
 class OrderStatusUpdateRequest(BaseModel):
     status: OrderStatus
     message: Optional[str] = None
+
+    @field_validator('message')
+    @classmethod
+    def validate_message(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize message to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=1000)
 
 
 class OrderResponse(BaseModel):
@@ -51,6 +60,14 @@ class ManufacturerQuoteSubmitRequest(BaseModel):
     cost_price: Optional[float] = Field(default=None, ge=0)
     delivery_time_days: Optional[int] = Field(default=None, ge=0)
     notes: Optional[str] = None
+
+    @field_validator('notes')
+    @classmethod
+    def validate_notes(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize notes to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=2000)
 
     @field_validator('cost_price', mode='before')
     @classmethod
@@ -84,6 +101,14 @@ class ManufacturerQuoteSubmitRequest(BaseModel):
 class ManufacturerQuoteStatusUpdateRequest(BaseModel):
     status: ManufacturerQuoteStatus
     message: Optional[str] = None
+
+    @field_validator('message')
+    @classmethod
+    def validate_message(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize message to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=1000)
 
 
 class ManufacturerQuoteResponse(BaseModel):

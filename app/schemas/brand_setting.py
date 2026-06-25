@@ -1,9 +1,10 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, field_validator
 
 from app.schemas.validations import NormalizedEmailStr, normalize_phone_number
+from app.core.sanitizer import validate_and_sanitize
 
 
 class BrandSettingUpdateRequest(BaseModel):
@@ -12,6 +13,22 @@ class BrandSettingUpdateRequest(BaseModel):
     business_email: Optional[NormalizedEmailStr] = None
     phone_number: Optional[str] = None
     primary_color: Optional[str] = None
+
+    @field_validator('brand_name')
+    @classmethod
+    def validate_brand_name(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize brand name to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
+
+    @field_validator('logo_url')
+    @classmethod
+    def validate_logo_url(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize URL to prevent javascript: schemes"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="url", max_length=500)
 
     @model_validator(mode="before")
     @classmethod

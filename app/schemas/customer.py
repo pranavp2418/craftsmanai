@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator, field_validator
 from email_validator import EmailNotValidError, validate_email
 
 from app.schemas.validations import normalize_phone_number
+from app.core.sanitizer import validate_and_sanitize
 
 
 def _coerce_customer_emails(data: any) -> any:
@@ -91,6 +92,20 @@ class CustomerCreateRequest(BaseModel):
     location: Optional[str] = None
     status: Optional[str] = Field(default="Active")  # "Active" or "Inactive"
 
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, v: str) -> str:
+        """Sanitize full name to prevent XSS"""
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
+    
+    @field_validator('location')
+    @classmethod
+    def validate_location(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize location to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
+
     @model_validator(mode="before")
     @classmethod
     def normalize_email_payload(cls, data: any) -> any:
@@ -119,6 +134,22 @@ class CustomerUpdateRequest(BaseModel):
     phone_number: Optional[str] = None
     location: Optional[str] = None
     status: Optional[str] = None  # "Active" or "Inactive"
+
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize full name to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
+    
+    @field_validator('location')
+    @classmethod
+    def validate_location(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize location to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
 
     @model_validator(mode="before")
     @classmethod

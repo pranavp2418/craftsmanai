@@ -1,9 +1,9 @@
-import html
 import re
 from pydantic import BaseModel, Field, EmailStr, field_validator
 from typing import Optional
 
 from app.schemas.validations import normalize_phone_number
+from app.core.sanitizer import validate_and_sanitize
 
 
 class UserProfileResponse(BaseModel):
@@ -35,9 +35,10 @@ class UserProfileUpdate(BaseModel):
     @field_validator('first_name', 'last_name', 'username')
     @classmethod
     def validate_names(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize names to prevent XSS"""
         if v is None:
             return v
-        val = v.strip()
+        val = validate_and_sanitize(v, field_type="plain", max_length=100)
         if val == "":
             return val
         if not re.match(r"^[a-zA-Z0-9\s'\-_]+$", val):
@@ -47,9 +48,10 @@ class UserProfileUpdate(BaseModel):
     @field_validator('business_name')
     @classmethod
     def sanitize_business_name(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize business name to prevent XSS"""
         if v is None:
             return v
-        return html.escape(v.strip())
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
     
     @field_validator('whatsapp_number')
     @classmethod

@@ -3,6 +3,8 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 from datetime import datetime
 
+from app.core.sanitizer import validate_and_sanitize
+
 
 class ContactSubmissionCreate(BaseModel):
     """Schema for creating a contact form submission."""
@@ -14,6 +16,14 @@ class ContactSubmissionCreate(BaseModel):
     interest: Optional[str] = Field(None, description="What they are interested in")
 
     model_config = {"extra": "forbid"}
+
+    @field_validator("full_name", "business_name", "store_type", "interest")
+    @classmethod
+    def validate_text_fields(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize text fields to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
 
     @field_validator("phone")
     @classmethod

@@ -158,6 +158,32 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        
+        # Content Security Policy - prevents XSS attacks
+        # Adjust the policy based on your application's needs
+        csp_directives = [
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'",  # Adjust based on needs
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: https: http:",
+            "font-src 'self' data:",
+            "connect-src 'self' wss: https:",
+            "frame-ancestors 'none'",
+            "base-uri 'self'",
+            "form-action 'self'"
+        ]
+        response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
+        
+        # Permissions Policy - restrict browser features
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        
+        # Prevent Adobe Flash/AIR access
+        response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+        
+        # HSTS - enforce HTTPS (only in production)
+        from app.core.config import settings
+        if settings.ENVIRONMENT == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
 
         return response
 

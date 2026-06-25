@@ -1,8 +1,9 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, validator
 from typing import Optional
 from datetime import datetime
 
 from app.schemas.validations import NormalizedEmailStr, normalize_phone_number
+from app.core.sanitizer import validate_and_sanitize, InputSanitizer
 
 
 class DeviceInfo(BaseModel):
@@ -44,6 +45,12 @@ class SignupRequest(BaseModel):
     @classmethod
     def validate_whatsapp_number(cls, v):
         return normalize_phone_number(v, validate=True)
+    
+    @field_validator('business_name')
+    @classmethod
+    def validate_business_name(cls, v):
+        """Sanitize business name to prevent XSS"""
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
 
 
 class SignUpResponse(BaseModel):
@@ -151,6 +158,22 @@ class UserCreate(BaseModel):
         if not any(c.isdigit() for c in v):
             raise ValueError('Password must contain at least one digit')
         return v
+    
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v):
+        """Sanitize username to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=100)
+    
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, v):
+        """Sanitize full name to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
 
 
 class RefreshTokenResponse(BaseModel):

@@ -1,9 +1,11 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.validations import NormalizedEmailStr
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
+
+from app.core.sanitizer import validate_and_sanitize
 
 
 class TeamRoleEnum(str, Enum):
@@ -29,6 +31,15 @@ class TeamCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=1000)
 
+    @field_validator('name', 'description')
+    @classmethod
+    def validate_text_fields(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize text fields to prevent XSS"""
+        if v is None:
+            return v
+        max_len = 255 if 'name' in v else 1000
+        return validate_and_sanitize(v, field_type="plain", max_length=max_len)
+
     class Config:
         from_attributes = True
 
@@ -37,6 +48,15 @@ class TeamUpdate(BaseModel):
     """Schema for updating a team"""
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=1000)
+
+    @field_validator('name', 'description')
+    @classmethod
+    def validate_text_fields(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize text fields to prevent XSS"""
+        if v is None:
+            return v
+        max_len = 255 if 'name' in v else 1000
+        return validate_and_sanitize(v, field_type="plain", max_length=max_len)
 
     class Config:
         from_attributes = True
@@ -112,6 +132,12 @@ class TeamInvitationCreate(BaseModel):
     email: NormalizedEmailStr
     role: TeamRoleEnum = TeamRoleEnum.VIEWER
 
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, v: str) -> str:
+        """Sanitize full name to prevent XSS"""
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
+
     class Config:
         from_attributes = True
 
@@ -153,6 +179,20 @@ class TeamRolePermissionCreate(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
     permissions: List[str] = []
+
+    @field_validator('name', 'display_name')
+    @classmethod
+    def validate_text_fields(cls, v: str) -> str:
+        """Sanitize text fields to prevent XSS"""
+        return validate_and_sanitize(v, field_type="plain", max_length=100)
+    
+    @field_validator('description')
+    @classmethod
+    def validate_description(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize description to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=500)
 
     class Config:
         from_attributes = True

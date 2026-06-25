@@ -5,9 +5,11 @@ Pydantic schemas for email template validation and serialization.
 """
 
 from typing import Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from uuid import UUID
+
+from app.core.sanitizer import validate_and_sanitize
 
 
 class EmailTemplateBase(BaseModel):
@@ -18,6 +20,20 @@ class EmailTemplateBase(BaseModel):
     html_content: str = Field(..., description="HTML body content")
     text_content: Optional[str] = Field(None, description="Plain text body content")
     is_active: bool = Field(True, description="Whether the template is active")
+
+    @field_validator('key', 'subject')
+    @classmethod
+    def validate_text_fields(cls, v: str) -> str:
+        """Sanitize text fields to prevent XSS"""
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
+    
+    @field_validator('description')
+    @classmethod
+    def validate_description(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize description to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
 
 
 class EmailTemplateCreate(EmailTemplateBase):
@@ -32,6 +48,22 @@ class EmailTemplateUpdate(BaseModel):
     html_content: Optional[str] = None
     text_content: Optional[str] = None
     is_active: Optional[bool] = None
+
+    @field_validator('subject')
+    @classmethod
+    def validate_subject(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize subject to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
+    
+    @field_validator('description')
+    @classmethod
+    def validate_description(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize description to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
 
 
 class EmailTemplateResponse(EmailTemplateBase):

@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.design import DesignStatus, DesignShareStatus
 from app.schemas.design_variant import PaginationMetadata
+from app.core.sanitizer import validate_and_sanitize
 
 
 class DesignBase(BaseModel):
@@ -21,6 +22,12 @@ class DesignCreateRequest(DesignBase):
     jewellery_type: str = Field(..., min_length=1)
     user_prompt: str = Field(..., min_length=1)
     images:Optional [list[str]] = Field(default=None, min_items=1, max_items=10)
+
+    @field_validator('name', 'jewellery_type', 'user_prompt')
+    @classmethod
+    def validate_text_fields(cls, v: str) -> str:
+        """Sanitize text fields to prevent XSS"""
+        return validate_and_sanitize(v, field_type="plain", max_length=1000)
 
 
 class DesignUpdateRequest(DesignBase):
@@ -105,6 +112,14 @@ class DesignShareCreateRequest(BaseModel):
                     "When set, further manufacturer shares will use the same metal.",
     )
 
+    @field_validator('comment')
+    @classmethod
+    def validate_comment(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize comment to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=1000)
+
 
 class DesignShareResponse(BaseModel):
     id: int
@@ -125,6 +140,14 @@ class DesignShareResponse(BaseModel):
 class DesignShareStatusUpdateRequest(BaseModel):
     status: DesignShareStatus
     comment: Optional[str] = None
+
+    @field_validator('comment')
+    @classmethod
+    def validate_comment(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize comment to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=1000)
 
 
 class ActivityLogEntry(BaseModel):

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.core.sanitizer import validate_and_sanitize
 
 
 class ProductionSheetCreateRequest(BaseModel):
@@ -16,6 +18,14 @@ class ProductionSheetCreateRequest(BaseModel):
     manufacturing_notes: Optional[str] = None
     # manufacturing_image is handled as a file upload in the endpoint; response returns its URL
 
+    @field_validator('budget_range', 'stone_type', 'setting_type', 'stone_size', 'manufacturing_notes')
+    @classmethod
+    def validate_text_fields(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize text fields to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=1000)
+
 
 class ProductionSheetDraftRequest(BaseModel):
     budget_range: Optional[str] = Field(default=None, max_length=100)
@@ -26,6 +36,14 @@ class ProductionSheetDraftRequest(BaseModel):
     stone_size: Optional[str] = Field(default=None, max_length=100)
     dimension: Optional[Any] = None
     manufacturing_notes: Optional[str] = None
+
+    @field_validator('budget_range', 'stone_type', 'setting_type', 'stone_size', 'manufacturing_notes')
+    @classmethod
+    def validate_text_fields(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize text fields to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=1000)
 
 
 class ProductionSheetResponse(BaseModel):

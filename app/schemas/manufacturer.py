@@ -5,9 +5,10 @@ from enum import Enum
 from typing import Optional, List
 import json
 
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, model_validator, field_validator
 from app.schemas.customer import EmailAddressSchema
 from app.schemas.validations import normalize_phone_number
+from app.core.sanitizer import validate_and_sanitize
 
 
 class ManufacturerSpeciality(str, Enum):
@@ -34,6 +35,20 @@ class ManufacturerCreateRequest(BaseModel):
     location: Optional[str] = None
     is_active: Optional[bool] = True
 
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Sanitize name to prevent XSS"""
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
+    
+    @field_validator('location')
+    @classmethod
+    def validate_location(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize location to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
+
     @model_validator(mode="before")
     @classmethod
     def validate_phone_number(cls, data: any) -> any:
@@ -57,6 +72,22 @@ class ManufacturerUpdateRequest(BaseModel):
     phone_number: Optional[str] = None
     location: Optional[str] = None
     is_active: Optional[bool] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize name to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
+    
+    @field_validator('location')
+    @classmethod
+    def validate_location(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize location to prevent XSS"""
+        if v is None:
+            return v
+        return validate_and_sanitize(v, field_type="plain", max_length=255)
 
     @model_validator(mode="before")
     @classmethod
