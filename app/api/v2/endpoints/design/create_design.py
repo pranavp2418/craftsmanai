@@ -31,9 +31,9 @@ router = APIRouter()
 
 @router.post("/", response_model=DesignResponse, status_code=status.HTTP_201_CREATED)
 async def create_design(
-    name: str = Form(default=None),
+    name: Optional[str] = Form(default=None),
     jewellery_type: str = Form(...),
-    user_prompt: str = Form(None),
+    user_prompt: Optional[str] = Form(None),
     files: List[UploadFile] = File(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -92,6 +92,10 @@ async def create_design(
                 file_bytes_list,
                 bucket_prefix=f"reference-images/user_{current_user.id}",
             )
+
+    # Default name to jewellery_type if not provided (name is required by DB)
+    if not name:
+        name = jewellery_type or "Design"
 
     design = design_service.create_design(
         user=current_user,

@@ -54,6 +54,19 @@ class OrderRepository:
             query = query.filter(Order.status == status)
         return query.order_by(Order.created_at.desc()).offset(offset).limit(limit).all()
 
+    def count_orders(
+        self,
+        *,
+        customer_id: Optional[int] = None,
+        status: Optional[OrderStatus] = None,
+    ) -> int:
+        query = self.db.query(Order)
+        if customer_id:
+            query = query.filter(Order.customer_id == customer_id)
+        if status:
+            query = query.filter(Order.status == status)
+        return query.count()
+
     def update_status(self, order: Order, *, status: OrderStatus) -> Order:
         order.status = status
         self.db.commit()

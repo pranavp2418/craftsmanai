@@ -1,3 +1,4 @@
+from math import ceil
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -6,12 +7,13 @@ from app.schemas.customer import CustomerListResponse
 from app.services.customer_service import CustomerService
 from app.models.user import User
 
+
 router = APIRouter()
 
 @router.get("/", response_model=CustomerListResponse)
 def list_customers(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(10, ge=1, le=100),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(20, ge=1, le=100, description="Number of records per page"),
     search: Optional[str] = Query(None),
     status: Optional[str] = Query(None, description="Filter by customer status: 'Active' or 'Inactive'"),
     db: Session = Depends(get_db),
@@ -27,9 +29,10 @@ def list_customers(
             is_active = False
 
     service = CustomerService(db)
+    offset = (page - 1) * limit
     items = service.list_customers(
         created_by_user_id=current_user.id,
-        offset=skip,
+        offset=offset,
         limit=limit,
         search=search,
         is_active=is_active,
@@ -39,6 +42,13 @@ def list_customers(
         search=search,
         is_active=is_active,
     )
-    page = (skip // limit) + 1
-    return CustomerListResponse(items=items, total=total, page=page)
-
+    total_pages = ceil(total / limit) if limit > 0 else 1
+    return CustomerListResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+        total_pages=total_pages,
+        has_next=page < total_pages,
+        has_prev=page > 1,
+    )
