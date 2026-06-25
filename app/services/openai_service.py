@@ -304,8 +304,17 @@ def extract_metal_from_prompt(prompt: Optional[str]) -> Optional[str]:
     if not prompt:
         return None
     lower = prompt.lower()
-    # Check for two-tone/mixed metal
-    if any(x in lower for x in ["two tone", "two-tone", "mixed metal", "mixed-metal", "multi-tone", "multi-tone"]):
+    # If MORE THAN ONE distinct metal colour is named (e.g. "rose gold mainly and top layer white gold")
+    # OR an explicit two-tone phrase is used, it's a TWO-TONE piece — return that so callers don't collapse
+    # it to a single metal (which dropped the rose gold and forced an all-white render).
+    _tones = set()
+    if any(x in lower for x in ["white gold", "white-gold", "silver", "platinum"]):
+        _tones.add("white")
+    if any(x in lower for x in ["rose gold", "rose-gold", "pink gold", "pink-gold"]):
+        _tones.add("rose")
+    if any(x in lower for x in ["yellow gold", "yellow-gold"]):
+        _tones.add("yellow")
+    if len(_tones) >= 2 or any(x in lower for x in ["two tone", "two-tone", "mixed metal", "mixed-metal", "multi-tone", "multi-tone"]):
         return "two_tone"
     # Check for white gold, silver, platinum
     if any(x in lower for x in ["white gold", "white-gold", "silver", "platinum"]):
@@ -484,6 +493,59 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
 _TEXT_CHANGE_LLM_CACHE: Dict[str, bool] = {}
 
 
+def _analysis_post(payload: dict, timeout: int = 30):
+    """Single router for all TEXT / VISION ANALYSIS chat-completions (text-vs-design gate, OCR,
+    metal detect, spelling check, reference classify, image-brief extract, prompt enrich, fidelity).
+
+    Routes to the provider in settings.TEXT_LLM_PROVIDER:
+      * "gemini" -> settings.GEMINI_TEXT_MODEL (default gemini-3.1-pro-preview) via Gemini's
+        OpenAI-COMPATIBLE endpoint — same request/response shape, so callers parse identically.
+      * "openai" (or no Gemini key) -> the payload's original OpenAI model (gpt-4o-mini / gpt-4o).
+    The payload is OpenAI-style (messages, response_format, tools, max_tokens, temperature); only
+    the model + endpoint + auth are swapped.
+    """
+    provider = (getattr(settings, "TEXT_LLM_PROVIDER", "openai") or "openai").strip().lower()
+    gkey = os.getenv("GEMINI_API_KEY") or getattr(settings, "GEMINI_API_KEY", None)
+    body = dict(payload)
+    if provider == "gemini" and gkey:
+        body["model"] = getattr(settings, "GEMINI_TEXT_MODEL", None) or "gemini-3.1-pro-preview"
+        # Gemini reasoning models (esp. *-pro) spend tokens on internal THINKING before answering, so a
+        # tiny max_tokens (e.g. 4 for the text/design gate) leaves nothing for the actual reply and
+        # returns an empty string. Floor it so the answer is always produced. The model stops once it
+        # has answered, so this is only a cap — it does not force longer or slower output.
+        body["max_tokens"] = max(int(body.get("max_tokens") or 0), 512)
+        return requests.post(
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            headers={"Authorization": f"Bearer {gkey}", "Content-Type": "application/json"},
+            json=body, timeout=timeout,
+        )
+    okey = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
+    return requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={"Authorization": f"Bearer {okey}", "Content-Type": "application/json"},
+        json=body, timeout=timeout,
+    )
+
+
+def _json_from_content(content: str) -> Dict[str, Any]:
+    """Parse a JSON object out of an LLM reply that may be wrapped in ```json fences or have
+    reasoning text before/after it (Gemini reasoning models often do this, which breaks a strict
+    json.loads with 'Extra data'). Returns {} if nothing parseable is found."""
+    if not content:
+        return {}
+    try:
+        return _json_from_content(content)
+    except Exception:
+        pass
+    m = re.search(r"\{.*\}", content, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except Exception:
+            pass
+    return {}
+
+
 def _llm_is_text_change(prompt: str) -> bool:
     """LLM intent gate: True ONLY if the refine changes the literal TEXT / LETTERING / NAME /
     NUMBERS written or engraved on the piece; False for any structural/design change (links,
@@ -502,10 +564,8 @@ def _llm_is_text_change(prompt: str) -> bool:
     api_key = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
     if api_key:
         try:
-            resp = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={
+            resp = _analysis_post(
+                {
                     "model": "gpt-4o-mini",
                     "temperature": 0,
                     "max_tokens": 4,
@@ -962,6 +1022,9 @@ def interpret_refinement(params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             headers={"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"},
             json={
                 "model": "gemini-2.5-flash",
+                # temperature=0 so the SAME refine request yields the SAME normalized_prompt /
+                # intent every run (default ~1.0 made identical refines drift run-to-run).
+                "temperature": 0,
                 "messages": [
                     {"role": "system", "content": REFINEMENT_INTERPRETER_SYSTEM},
                     {"role": "user", "content": user_content},
@@ -1073,23 +1136,31 @@ def qa_refinement_check(params: Dict[str, Any]) -> Dict[str, Any]:
 
     intent = params.get("intent") or {}
     previous_ref_url = params.get("previousRefUrl")
+    previous_b64 = params.get("previousB64")
     new_image_b64 = params.get("newImageB64")
     new_data_url = f"data:image/png;base64,{new_image_b64}" if new_image_b64 else None
 
     user_content = [{
         "type": "text",
-        "text": f"Compare the PREVIOUS render (image 1) with the NEW render (image 2).\nThe user requested this change:\n\"{intent.get('normalized_prompt') or intent.get('raw_user_prompt')}\"\n\nTarget component(s): {', '.join(intent.get('target_components') or [])}\nAttribute to change: {intent.get('attribute_to_change')}\nFrom: {intent.get('from_state') or '(unspecified)'} → To: {intent.get('to_state') or '(unspecified)'}\n\nRun these visual checks against the NEW render:\n" + "\n".join([f"- {c}" for c in intent.get('qa_checks') or []]) + "\n\nAlso verify:\n- the requested change is VISIBLY applied (not subtle, not absent)\n- every non-target component is unchanged from the previous render\n- nothing was added or removed that the user did not ask for\n- the output remains a premium CAD-style jewelry render\n\nCall the function tool with your verdict.",
+        "text": f"Compare the PREVIOUS render (image 1) with the NEW render (image 2).\nThe user requested this change:\n\"{intent.get('normalized_prompt') or intent.get('raw_user_prompt')}\"\n\nTarget component(s): {', '.join(intent.get('target_components') or [])}\nAttribute to change: {intent.get('attribute_to_change')}\nFrom: {intent.get('from_state') or '(unspecified)'} → To: {intent.get('to_state') or '(unspecified)'}\n\nRun these visual checks against the NEW render:\n" + "\n".join([f"- {c}" for c in intent.get('qa_checks') or []]) + "\n\nAlso verify:\n- the requested change is VISIBLY applied (not subtle, not absent)\n- every non-target component is unchanged from the previous render\n- nothing was added or removed that the user did not ask for\n- the output remains a premium CAD-style jewelry render\n\nIMPORTANT: the user EXPLICITLY requested the change above. The requested change — and any direct, necessary CONSEQUENCE of it (for example, removing the bail/hook means the piece will no longer have a top loop or attachment point; removing stones means bare metal) — is CORRECT and must NEVER be reported as a defect, a 'missing' element, or a manufacturability problem. Do NOT recommend a retry just because the requested removal/change leaves the piece looking different. Only set retry_recommended=true if the requested change was NOT actually applied, or if an UNRELATED part of the piece changed.\n\nCall the function tool with your verdict.",
     }]
 
-    if previous_ref_url:
-        resolved_prev_url = previous_ref_url
-        if not previous_ref_url.startswith("http"):
-            resolved_prev_url = file_to_data_url(previous_ref_url)
-        if resolved_prev_url:
-            user_content.insert(0, {"type": "image_url", "image_url": {"url": resolved_prev_url}})
-            
+    # Attach the PREVIOUS render — prefer raw base64 (reliable), fall back to URL / local file.
+    prev_data_url = None
+    if previous_b64:
+        prev_data_url = f"data:image/png;base64,{previous_b64}"
+    elif previous_ref_url:
+        prev_data_url = previous_ref_url if previous_ref_url.startswith("http") else file_to_data_url(previous_ref_url)
+    if prev_data_url:
+        user_content.insert(0, {"type": "image_url", "image_url": {"url": prev_data_url}})
+
     if new_data_url:
         user_content.append({"type": "image_url", "image_url": {"url": new_data_url}})
+
+    # If the PREVIOUS render could NOT be attached, this comparison QA cannot fairly judge — skip it
+    # (fail-open, NO retry) instead of falsely failing and triggering a wasteful re-generation.
+    if not prev_data_url:
+        return {"passed": True, "reason": "qa_skipped_no_previous", "failed_checks": [], "retry_recommended": False}
 
     tools = [{
         "type": "function",
@@ -1142,6 +1213,128 @@ def qa_refinement_check(params: Dict[str, Any]) -> Dict[str, Any]:
         return {"passed": True, "reason": "qa_exception", "failed_checks": [], "retry_recommended": False}
 
 
+def qa_initial_check(params: Dict[str, Any]) -> Dict[str, Any]:
+    """QA for an INITIAL generation (no previous reference): verify the rendered image matches the
+    user's request. Returns {passed, reason, failed_checks, retry_recommended}. Fail-open (passed)
+    on missing key / any error so it never blocks a generation."""
+    gemini_api_key = os.getenv("GEMINI_API_KEY")
+    if not gemini_api_key:
+        return {"passed": True, "reason": "qa_skipped_no_key", "failed_checks": [], "retry_recommended": False}
+
+    request = params.get("request") or ""
+    item_type = params.get("itemType") or "jewelry"
+    new_image_b64 = params.get("newImageB64")
+    ref_b64 = params.get("referenceB64")
+    new_data_url = f"data:image/png;base64,{new_image_b64}" if new_image_b64 else None
+
+    if ref_b64:
+        # IMAGE-INPUT generation: the DESIGN comes from the reference (image 1); the request only
+        # says HOW to render it. The QA MUST see the reference, or it wrongly flags the reference's
+        # own subject as an "unrequested addition" and triggers a useless (damaging) retry.
+        instruction = (
+            f"The user provided a REFERENCE image (image 1) and asked:\n\"\"\"{request}\"\"\"\n\n"
+            f"Intended piece type: {item_type}. The GENERATED result is image 2.\n\n"
+            "The result's overall DESIGN is meant to come FROM the reference (image 1); the request only "
+            "describes HOW to render it as jewelry (metal, edges, size, added text, etc.).\n"
+            "Confirm about the result (image 2):\n"
+            "- the requested METAL / EDGES / changes from the request are applied\n"
+            "- the reference's main design is preserved (recognisably the same subject/shape)\n"
+            "- any letters/names/numbers in the request are present and spelled EXACTLY right\n"
+            "- it is a clean CAD-style jewelry render on a pure white background (no scene/props/hands)\n\n"
+            "IMPORTANT: do NOT flag design elements that come from the REFERENCE image as 'unrequested "
+            "additions' — they are EXPECTED. Call emit_qa_verdict; set retry_recommended=true ONLY for a "
+            "clear mismatch with the request (wrong metal colour, a requested feature missing, garbled/"
+            "misspelled text, or wrong piece type)."
+        )
+        user_content = [
+            {"type": "text", "text": instruction},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{ref_b64}"}},
+        ]
+        if new_data_url:
+            user_content.append({"type": "image_url", "image_url": {"url": new_data_url}})
+    else:
+        user_content = [{
+            "type": "text",
+            "text": (
+                f"A jewelry image was generated from this request:\n\"\"\"{request}\"\"\"\n\n"
+                f"Intended piece type: {item_type}.\n\n"
+                "Check the generated image against the request and confirm ALL of these:\n"
+                "- it depicts the correct jewelry TYPE\n"
+                "- any letters / names / numbers requested are present and spelled EXACTLY right\n"
+                "- the requested METAL colour is correct (e.g. rose gold is pink, white gold is silvery)\n"
+                "- requested stones/diamonds are present (and none invented if none were requested)\n"
+                "- it is a clean CAD-style jewelry render on a pure white background (no scene/props/hands)\n"
+                "- nothing MAJOR from the request is missing, and nothing major was added that wasn't asked for\n\n"
+                "Call emit_qa_verdict. Set retry_recommended=true ONLY for a CLEAR, fixable mismatch "
+                "(wrong/misspelled text, wrong metal colour, a clearly missing requested element, or wrong "
+                "piece type). Ignore minor styling differences."
+            ),
+        }]
+        if new_data_url:
+            user_content.append({"type": "image_url", "image_url": {"url": new_data_url}})
+
+    # When the lettering came from an exact FONT TEMPLATE, the font/style is guaranteed — the QA model
+    # cannot recognise a named font by sight and wrongly flags it as "wrong font", forcing useless
+    # retries. Tell it to ignore the font/style entirely (spelling is still checked).
+    if params.get("fontLocked"):
+        user_content.append({"type": "text", "text": (
+            "NOTE: the lettering FONT / letter STYLE is fixed by an exact font template and is GUARANTEED "
+            "correct — do NOT evaluate, compare, judge, or flag the font, typeface, or letter style in any "
+            "way. Only verify spelling, piece type, metal colour, stones and clean rendering."
+        )})
+
+    tools = [{
+        "type": "function",
+        "function": {
+            "name": "emit_qa_verdict",
+            "description": "Emit the QA verdict.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "passed": {"type": "boolean"},
+                    "reason": {"type": "string"},
+                    "failed_checks": {"type": "array", "items": {"type": "string"}},
+                    "retry_recommended": {"type": "boolean"},
+                },
+                "required": ["passed", "reason", "failed_checks", "retry_recommended"],
+            },
+        },
+    }]
+
+    try:
+        resp = requests.post(
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            headers={"Authorization": f"Bearer {gemini_api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "gemini-2.5-flash",
+                "temperature": 0,
+                "messages": [
+                    {"role": "system", "content": "You are a strict jewelry-render QA inspector. You only call the emit_qa_verdict tool."},
+                    {"role": "user", "content": user_content},
+                ],
+                "tools": tools,
+                "tool_choice": {"type": "function", "function": {"name": "emit_qa_verdict"}},
+            },
+            timeout=30,
+        )
+        if not resp.ok:
+            return {"passed": True, "reason": "qa_gateway_error", "failed_checks": [], "retry_recommended": False}
+        j = resp.json()
+        args = j.get("choices", [{}])[0].get("message", {}).get("tool_calls", [{}])[0].get("function", {}).get("arguments")
+        if not args:
+            return {"passed": True, "reason": "qa_no_tool_call", "failed_checks": [], "retry_recommended": False}
+        verdict = args if isinstance(args, dict) else json.loads(args)
+        return {
+            "passed": bool(verdict.get("passed")),
+            "reason": verdict.get("reason") or "",
+            "failed_checks": verdict.get("failed_checks") or [],
+            "retry_recommended": bool(verdict.get("retry_recommended")),
+        }
+    except Exception:
+        return {"passed": True, "reason": "qa_exception", "failed_checks": [], "retry_recommended": False}
+
+
 def _ocr_pendant_text(image_b64: str, expected_join: str) -> Optional[str]:
     """OCR the main lettering on a name pendant. Tries OpenAI vision first (the key we
     know exists), then Gemini if configured. Returns the detected text, or None if no
@@ -1166,10 +1359,8 @@ def _ocr_pendant_text(image_b64: str, expected_join: str) -> Optional[str]:
     openai_key = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
     if openai_key:
         try:
-            resp = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
-                json={
+            resp = _analysis_post(
+                {
                     "model": "gpt-4o-mini",
                     "messages": messages,
                     "response_format": {"type": "json_object"},
@@ -1181,7 +1372,7 @@ def _ocr_pendant_text(image_b64: str, expected_join: str) -> Optional[str]:
             if resp.ok:
                 content = resp.json().get("choices", [{}])[0].get("message", {}).get("content")
                 if content:
-                    parsed = json.loads(content)
+                    parsed = _json_from_content(content)
                     detected = (parsed.get("detected_text") or "").strip()
                     if detected:
                         return detected
@@ -1276,10 +1467,8 @@ def verify_design_fidelity(input_b64: str, output_b64: str, intended_change: str
         ]},
     ]
     try:
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
+        resp = _analysis_post(
+            {
                 "model": "gpt-4o-mini",
                 "messages": messages,
                 "response_format": {"type": "json_object"},
@@ -1293,7 +1482,7 @@ def verify_design_fidelity(input_b64: str, output_b64: str, intended_change: str
         content = resp.json().get("choices", [{}])[0].get("message", {}).get("content")
         if not content:
             return {"matches": True, "differences": []}
-        parsed = json.loads(content)
+        parsed = _json_from_content(content)
         diffs = parsed.get("differences") or []
         diffs = [str(d).strip() for d in diffs if str(d).strip()]
         matches = bool(parsed.get("matches")) and not diffs
@@ -1328,10 +1517,8 @@ def detect_metal_color(image_b64: str) -> str:
         ]},
     ]
     try:
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
+        resp = _analysis_post(
+            {
                 "model": "gpt-4o-mini",
                 "messages": messages,
                 "response_format": {"type": "json_object"},
@@ -1345,7 +1532,7 @@ def detect_metal_color(image_b64: str) -> str:
         content = resp.json().get("choices", [{}])[0].get("message", {}).get("content")
         if not content:
             return "gold"
-        metal = (json.loads(content).get("metal") or "").strip().lower()
+        metal = (_json_from_content(content).get("metal") or "").strip().lower()
         if metal in ("gold", "yellow_gold", "yellow gold"):
             return "gold"
         if metal in ("silver", "white_gold", "white gold", "platinum"):
@@ -1428,10 +1615,8 @@ def classify_reference_image(image_b64: str) -> Dict[str, Any]:
         ]},
     ]
     try:
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
+        resp = _analysis_post(
+            {
                 "model": "gpt-4o-mini",
                 "messages": messages,
                 "response_format": {"type": "json_object"},
@@ -1445,7 +1630,7 @@ def classify_reference_image(image_b64: str) -> Dict[str, Any]:
         content = resp.json().get("choices", [{}])[0].get("message", {}).get("content")
         if not content:
             return {"is_jewelry": True, "metal": "gold"}
-        data = json.loads(content)
+        data = _json_from_content(content)
         is_jewelry = bool(data.get("is_jewelry", True))
         metal = (data.get("metal") or "gold").strip().lower()
         if metal in ("yellow_gold", "yellow gold"):
@@ -1493,10 +1678,8 @@ def detect_jewelry_piece_type(image_b64: str) -> str:
     ]
     valid = {"ring", "pendant", "bracelet", "earring", "grill", "watch", "anklet"}
     try:
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
+        resp = _analysis_post(
+            {
                 "model": "gpt-4o-mini",
                 "messages": messages,
                 "response_format": {"type": "json_object"},
@@ -1510,7 +1693,7 @@ def detect_jewelry_piece_type(image_b64: str) -> str:
         content = resp.json().get("choices", [{}])[0].get("message", {}).get("content")
         if not content:
             return "pendant"
-        piece = (json.loads(content).get("piece") or "").strip().lower()
+        piece = (_json_from_content(content).get("piece") or "").strip().lower()
         if piece in ("grillz",):
             piece = "grill"
         return piece if piece in valid else "pendant"
@@ -1560,10 +1743,8 @@ def extract_image_instructions(image_b64: str) -> Tuple[Optional[str], Optional[
         ]},
     ]
     try:
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
+        resp = _analysis_post(
+            {
                 "model": "gpt-4o",
                 "messages": messages,
                 "response_format": {"type": "json_object"},
@@ -1577,7 +1758,7 @@ def extract_image_instructions(image_b64: str) -> Tuple[Optional[str], Optional[
         content = resp.json().get("choices", [{}])[0].get("message", {}).get("content")
         if not content:
             return None, None
-        data = json.loads(content)
+        data = _json_from_content(content)
         brief = (data.get("brief") or "").strip()
         font_style = (data.get("font_style") or "").strip()
         return (brief or None), (font_style or None)
@@ -2314,10 +2495,15 @@ def _ensure_white_background(image_bytes: bytes) -> bytes:
     return _whiten_background(image_bytes, tag="white_bg_input")
 
 
-def download_reference_images(image_urls: list[str]) -> list[bytes]:
-    """Pre-download reference images and ensure white backgrounds.
-    Use with generate_with_openai_image's pre_downloaded_blobs parameter
-    to avoid redundant downloads in parallel calls."""
+def download_reference_images(image_urls: list[str], whiten: bool = False) -> list[bytes]:
+    """Pre-download reference images. Use with pre_downloaded_blobs to avoid redundant downloads.
+
+    IMPORTANT — INPUT is fed to the model UNTOUCHED by default (whiten=False). We used to flood-fill
+    the INPUT background white before the model saw it, but that could eat into edge-bleeding / low-
+    contrast / coloured-backdrop designs and silently CORRUPT the source-of-truth reference (the very
+    thing the lean image=truth design protects). Lovable feeds the raw reference too; the prompt already
+    instructs a pure-white background and the OUTPUT is whitened, so input whitening is unnecessary and
+    risky. Pass whiten=True only if a caller specifically needs a pre-whitened input."""
     blobs: list[bytes] = []
     for url in (image_urls or [])[:10]:
         if not url:
@@ -2336,12 +2522,30 @@ def download_reference_images(image_urls: list[str]) -> list[bytes]:
                     raw_bytes = f.read()
 
             if raw_bytes:
-                # Pre-process to ensure white background
-                processed = _ensure_white_background(raw_bytes)
-                blobs.append(processed)
+                blobs.append(_ensure_white_background(raw_bytes) if whiten else raw_bytes)
         except Exception as e:
             logger.warning("Failed to fetch reference image %s: %s", url[:80], e)
     return blobs
+
+
+def _images_near_identical(b64_a: str, b64_b: str, max_distance: int = 4) -> bool:
+    """True if two base64 PNG images are perceptually NEAR-IDENTICAL (i.e. a refine returned the
+    input essentially unchanged — the requested edit was dropped).
+
+    Uses a perceptual hash (phash), which is luminance/structure based — so it does NOT detect a
+    pure metal-COLOUR change (a recolour keeps the same structure). Callers MUST skip this guard
+    for colour-only edits. Fail-open: returns False (no false retry) if it cannot compare.
+    """
+    try:
+        from PIL import Image as _Image
+        ha = imagehash.phash(_Image.open(BytesIO(base64.b64decode(b64_a))).convert("RGB"))
+        hb = imagehash.phash(_Image.open(BytesIO(base64.b64decode(b64_b))).convert("RGB"))
+        dist = ha - hb
+        logger.info("[no-op guard] phash distance=%d (<=%d => near-identical, edit not applied)", dist, max_distance)
+        return dist <= max_distance
+    except Exception as _e:
+        logger.warning("[no-op guard] image compare failed: %s", _e)
+        return False
 
 
 def generate_with_gemini_image(image_blobs, prompt_text: str) -> Optional[str]:
@@ -2355,16 +2559,41 @@ def generate_with_gemini_image(image_blobs, prompt_text: str) -> Optional[str]:
     if not key:
         logger.warning("Gemini image fallback skipped: no GEMINI_API_KEY")
         return None
+    # Model is config-driven (settings.GEMINI_IMAGE_MODEL) so it can be changed without code edits.
+    _model = getattr(settings, "GEMINI_IMAGE_MODEL", None) or "gemini-2.5-flash-image"
     parts = [{"text": prompt_text}]
     for blob in (image_blobs or []):
         parts.append({"inline_data": {"mime_type": "image/png", "data": base64.b64encode(blob).decode("utf-8")}})
+    gen_config = {"responseModalities": ["TEXT", "IMAGE"]}
+    # Output resolution + ASPECT RATIO (config-driven) via imageConfig. aspectRatio FORCES every render to
+    # the same shape (e.g. "16:9" landscape) so outputs are consistent — without it the model chose portrait
+    # for tall pieces and landscape for wide ones, giving mixed orientations.
+    _size = getattr(settings, "GEMINI_IMAGE_SIZE", None)
+    _aspect = getattr(settings, "GEMINI_IMAGE_ASPECT", None)
+    _img_cfg = {}
+    if _size:
+        _img_cfg["imageSize"] = str(_size).upper()
+    if _aspect:
+        _img_cfg["aspectRatio"] = str(_aspect)
+    if _img_cfg:
+        gen_config["imageConfig"] = _img_cfg
     try:
         resp = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=" + key,
+            f"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={key}",
             headers={"Content-Type": "application/json"},
-            json={"contents": [{"parts": parts}], "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}},
-            timeout=(15, 300),
+            json={"contents": [{"parts": parts}], "generationConfig": gen_config},
+            timeout=(15, 420),
         )
+        # Some models reject imageConfig.imageSize — retry once without it rather than failing over.
+        if not resp.ok and "imageConfig" in gen_config and ("imageConfig" in resp.text or "imageSize" in resp.text or resp.status_code == 400):
+            logger.warning("Gemini imageConfig rejected (%s) — retrying at default resolution", resp.status_code)
+            gen_config.pop("imageConfig", None)
+            resp = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={key}",
+                headers={"Content-Type": "application/json"},
+                json={"contents": [{"parts": parts}], "generationConfig": gen_config},
+                timeout=(15, 420),
+            )
         if not resp.ok:
             logger.error("Gemini image fallback HTTP %d: %s", resp.status_code, resp.text[:200])
             return None
@@ -2375,13 +2604,76 @@ def generate_with_gemini_image(image_blobs, prompt_text: str) -> Optional[str]:
         for p in cands[0].get("content", {}).get("parts", []):
             inline = p.get("inlineData") or p.get("inline_data")
             if inline and inline.get("data"):
-                logger.info("Gemini image fallback succeeded")
+                logger.info("Gemini image generated (%s)", _model)
                 return inline["data"]
-        logger.error("Gemini image fallback: response had no image part")
+        logger.error("Gemini image (%s): response had no image part", _model)
         return None
     except Exception as e:
         logger.error("Gemini image fallback exception: %s", e)
         return None
+
+
+def generate_primary_image(
+    image_urls: list[str],
+    prompt_text: str,
+    pre_downloaded_blobs: list[bytes] | None = None,
+    whiten_output: bool = True,
+) -> str:
+    """Primary jewelry image generator for MAIN generation, REFINEMENT and METAL-COLOUR change.
+
+    Routes to the provider in settings.IMAGE_PROVIDER:
+      * "gemini" -> gemini-2.5-flash-image (FAST, ~seconds). On any failure/empty result it
+        falls back to OpenAI gpt-image-2 so generation never breaks.
+      * "openai" -> gpt-image-2 (slow).
+    Side ANGLES intentionally still call generate_with_openai_image directly (OpenAI renders
+    angles better), so they are unaffected by this switch.
+
+    Gemini returns a raw render with no white-background post-process, so we apply the same
+    flood-fill whitening the OpenAI path uses (unless whiten_output is False for worn/lifestyle).
+    """
+    provider = (getattr(settings, "IMAGE_PROVIDER", "openai") or "openai").strip().lower()
+    if provider == "gemini":
+        blobs = pre_downloaded_blobs
+        if blobs is None and image_urls:
+            blobs = download_reference_images(image_urls)
+        g64 = None
+        # RETRY Gemini on a transient empty/errored response BEFORE any fallback. Gemini is the configured
+        # provider; a transient hiccup (it succeeds on a re-try moments later) must NOT drop us onto OpenAI —
+        # in a Gemini-only deployment OpenAI may be unreachable / unset, producing the confusing
+        # "api.openai.com" DNS error the user saw.
+        for _attempt in range(3):
+            try:
+                g64 = generate_with_gemini_image(blobs or [], prompt_text)
+            except Exception as _ge:
+                logger.warning("Gemini primary generation errored (attempt %d/3): %s", _attempt + 1, _ge)
+                g64 = None
+            if g64:
+                break
+            if _attempt < 2:
+                logger.warning("Gemini returned no image (attempt %d/3) — retrying", _attempt + 1)
+        if g64:
+            if whiten_output:
+                try:
+                    g64 = base64.b64encode(
+                        _whiten_background(base64.b64decode(g64), tag="gemini_primary_white_bg")
+                    ).decode("utf-8")
+                except Exception as _w:
+                    logger.warning("Gemini output white-bg post-process skipped: %s", _w)
+            logger.info("Primary image generated via Gemini (%s)", getattr(settings, "GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"))
+            return g64
+        # Gemini still failed after 3 attempts. Fall back to OpenAI ONLY if it is actually configured;
+        # otherwise raise a CLEAR Gemini-focused error instead of an opaque OpenAI DNS failure.
+        _openai_key = os.getenv("OPENAI_API_KEY") or getattr(settings, "OPENAI_API_KEY", None)
+        if not _openai_key:
+            raise RuntimeError(
+                "Image generation temporarily failed: Gemini returned no image after 3 attempts and no OpenAI "
+                "fallback is configured. Please try again."
+            )
+        logger.warning("Gemini failed after 3 attempts — falling back to OpenAI gpt-image-2")
+
+    return generate_with_openai_image(
+        image_urls, prompt_text, pre_downloaded_blobs=pre_downloaded_blobs, whiten_output=whiten_output,
+    )
 
 
 def generate_with_openai_image(
@@ -2431,7 +2723,7 @@ def generate_with_openai_image(
                     "prompt": truncated_prompt,
                     "n": "1",
                     "size": "1024x1024",
-                    "quality": "medium",
+                    "quality": "high",
                     "background": "opaque",
                 }
                 response = requests.post(
@@ -2454,7 +2746,7 @@ def generate_with_openai_image(
                         "prompt": truncated_prompt,
                         "n": 1,
                         "size": "1024x1024",
-                        "quality": "medium",
+                        "quality": "high",
                         "background": "opaque",
                     },
                     timeout=(15, 300),
@@ -2689,13 +2981,17 @@ NO_DEGEM_RULE = (
     "or a smooth textured border — diamonds must stay diamonds, not become metal."
 )
 
-# Default stone arrangement when the model must ADD or DEFAULT stones (i.e. NOT defined by
-# the reference). Client-confirmed (2026-06-18): PARALLEL rows, NON-UNIFORM spacing/sizing.
+# Default stone arrangement when the model must ADD or DEFAULT stones (i.e. NOT defined by the
+# reference). Updated 2026-06-24: client now wants TIGHT, GAP-FREE packing — the old "non-uniform
+# spacing" wording was literally producing bare-metal gaps between stones. Keep an organic (non-grid)
+# look but pack the stones close together with no empty gaps.
 STONE_ARRANGEMENT_DEFAULT = (
     "DEFAULT STONE ARRANGEMENT (apply ONLY when stones are not already defined by the reference and you must add "
     "or default them): use small ROUND white diamonds laid out in PARALLEL rows that follow the form of the "
-    "piece, with natural, slightly NON-UNIFORM spacing and sizing — never a rigid, perfectly-uniform mechanical "
-    "grid. If the reference already shows a stone arrangement, REPLICATE that arrangement exactly instead of this default."
+    "piece, packed TIGHTLY together edge-to-edge with minimal metal showing between them and NO empty gaps, sparse "
+    "spots or bare-metal patches between stones. Keep the placement natural and organic (not a rigid, mechanical, "
+    "perfectly-uniform grid) but always FULLY and EVENLY filled with stones touching their neighbours. If the "
+    "reference already shows a stone arrangement, REPLICATE that arrangement exactly instead of this default."
 )
 
 # Camera angle — client-confirmed (2026-06-18): for IMAGE inputs keep the reference's angle;
@@ -2891,12 +3187,16 @@ PENDANT_BAIL_ROLE_RULE = (
 
 # Two-step / two-layer stacked nameplate (client requested "step up, 2 layers").
 LAYERED_RULE = (
-    "STEP-UP / RAISED TWO-LAYER STRUCTURE (also called 3D, raised, double-layer, two-tier): build the design as a "
-    "raised piece sitting on a bordered BACKPLATE — add a flat backing plate of the SAME outline shape as the "
-    "design but slightly larger, with a clean polished border (a clearly visible bordered plate) running all "
-    "around the edge, and seat the main design raised on TOP of that plate so there is a clear stepped 3D ledge "
-    "between the two layers. Stones may cover both the backplate border and the raised design if requested. Keep "
-    "it a clean CAD-style render with the two-layer step clearly readable."
+    # NOTE: deliberately NO "raised piece / backplate / raised border / polished faces" wording. Those
+    # metal-surface nouns primed the image model toward polished-metal letters with a pavé outline (the
+    # "outlined name" look), and even the negation "do NOT polished faces" summoned it. The step is
+    # described as DEPTH only, and an iced finish is the headline (both tiers + faces fully paved).
+    "TWO-LAYER STEP-UP DEPTH: give the nameplate two stacked tiers so the letters sit slightly above a "
+    "lower backing layer of the SAME outline, with a clean stepped ledge between them purely for 3D DEPTH. "
+    "When the request is iced / pavé, treat the whole piece as ONE continuous diamond surface: BOTH tiers — "
+    "the lower backing layer AND the upper letters, including their full top faces and the step ledge — are "
+    "completely paved with diamonds edge to edge. The step is depth only, never a metal frame around the "
+    "stones. Keep both tiers and the name clearly readable."
 )
 
 
@@ -3089,48 +3389,147 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
     jewelry type (Pendant -> add a bail, Ring -> band, Earring -> pair, etc.) so the chosen
     type actually shapes the output. Kept short to avoid re-bloating the prompt."""
     t = (item_type or "").strip().lower()
+    lower = (user_prompt or "").lower()  # used to pick a SUBTYPE recipe (Cuban, hoop, signet, skeleton...)
+
+    def _sub(*pairs):
+        """Return the first subtype recipe whose keyword is in the user's prompt, else ''."""
+        for kws, recipe in pairs:
+            if any(k in lower for k in kws):
+                return recipe
+        return ""
+
     _PENDANT = (
-        " This is a PENDANT and MUST be wearable with a bail/hook at the very TOP for a chain. If the reference "
-        "already shows a bail, keep that exact bail. If it does NOT show a bail (or there is no reference image), "
-        "ADD the DEFAULT bail shape: a FLARED, FAN-SHAPED bail that is WIDER at the top and TAPERS downward, "
-        "narrowing into a small loop that connects to the top-centre of the pendant (the chain passes through the "
-        "bail). Match the bail's FINISH to the piece — same metal, pavé-set if the piece is iced/diamond-set, "
-        "otherwise smooth polished metal. The bail is REQUIRED — never omit it. If a chain or cord is shown, "
-        "remove the chain and show only the pendant (keep the bail)."
+        # DETERMINISTIC + minimal (Lovable-style): preserve the reference bail, else add ONE simple standard
+        # loop bail. No "you choose a style" / random variety — that produced inconsistent, odd bails.
+        " This is a PENDANT and must hang from ONE bail at the top-centre. If the reference already shows a "
+        "bail, keep that exact bail; otherwise add a single simple standard round LOOP bail (a clean plain "
+        "loop), with the same metal/finish as the piece. The bail sits at the very TOP of the piece, facing "
+        "FORWARD (its loop opening visible from the front) and ABOVE the design — NOT behind the piece, NOT "
+        "flat against the back, NOT below or to the side. Show ONLY ONE bail — never two, never stacked. If a "
+        "chain or cord is shown, remove the chain and show only the pendant with its bail."
     )
-    # Check the most specific / collision-prone types first (earring/cufflink contain 'ring').
+    # MATCHING SET first — "pendant set" / "earring set" must be a SET, not a lone pendant/earring.
+    if t.endswith("set") or "matching set" in t or "jewelry set" in t or "jewellery set" in t:
+        return (" Render a MATCHING SET as MULTIPLE DISTINCT pieces in a flat-lay on a white background — two "
+                "IDENTICAL, MIRRORED earrings/studs side by side on the TOP ROW and ONE matching pendant CENTERED "
+                "BELOW. All pieces share the same design, stones, metal and finish. The pendant shows ONLY its bail "
+                "(no chain). NEVER merge the pieces into a single object.")
+    # Collision-prone types first (earring/cufflink contain 'ring').
     if "earring" in t or "ear ring" in t:
-        return " Render as a matching PAIR of EARRINGS with posts/backs so they can be worn."
+        sub = _sub(((" hoop",), " Each is a continuous circular/oval HOOP hinged to the post."),
+                   (("stud",), " Each is a STUD — a centered stone/motif on a post, with no drop."),
+                   (("chandelier",), " Each is a CHANDELIER — tiered drops on multiple levels."),
+                   (("drop", "dangle"), " Each has a DROP element hanging below the post."),
+                   (("ear cuff", "cuff"), " Each is an EAR CUFF that wraps the outer ear, with NO post."))
+        return (" Render an IDENTICAL, MIRRORED PAIR of EARRINGS (two matching pieces side by side), each with a "
+                "post/back so they can be worn." + sub)
     if "cufflink" in t or "cuff link" in t or "cuff-link" in t:
-        return " Render as a matching PAIR of CUFFLINKS with the standard swivel-bar backs."
+        return (" Render a matching PAIR of CUFFLINKS — two IDENTICAL faces, mirrored, side by side, each with a "
+                "swivel-bar back-post. Show them ISOLATED on white (no shirt or cuff).")
     if "ring" in t:
-        return " Present the design as the face/top of a wearable RING on a smooth polished band/shank."
-    if "bracelet" in t or "bangle" in t or ("cuff" in t and "link" not in t):
-        return " Render as a wearable BRACELET form."
+        if "signet" in t or "class ring" in t or "signet" in lower or "class ring" in lower:
+            return (" Render a wearable SIGNET / CLASS RING: a FLAT or gently domed planar signet FACE (a solid "
+                    "plate, NOT a gemstone dome) on top, symmetric shoulders, and a realistic taper from the face "
+                    "down to a smooth shank. Treat any logo / lettering as the EXACT centre-face content.")
+        return (" Present the design as the face/top of a wearable RING on a smooth polished band/shank, with a "
+                "realistic taper from the face down to the shank.")
+    if "bangle" in t:
+        return " Render as a wearable BANGLE — a rigid closed circular band worn over the hand (no clasp needed)."
+    if "cuff" in t and "link" not in t:
+        return " Render as a wearable open CUFF bracelet — a rigid C-shaped band with an open gap at the back (no clasp)."
+    if "bracelet" in t:
+        sub = _sub((("tennis",), " As a TENNIS bracelet: ONE continuous row of identical small prong-set stones around the whole strand."),
+                   (("charm",), " As a CHARM bracelet: a link strand with small charms hanging evenly along it."))
+        return (" Render as a wearable BRACELET laid out flat / gently open. It MUST be finished with a working "
+                "CLASP / lock closure at the two ends — e.g. a lobster-claw or box clasp with the matching end "
+                "link — so it can actually fasten. Show the clasp clearly; it is an openable strand, NOT a "
+                "seamless closed loop." + sub)
+    if "anklet" in t:
+        return (" Render as a wearable ANKLET (ankle chain) finished with a working CLASP / lock closure at the "
+                "ends so it can fasten — show the clasp clearly.")
+    if "chain" in t:
+        sub = _sub((("cuban",), " Build it from uniform interlocking FLAT oval links, each link locking into the next (Cuban link)."),
+                   (("rope",), " Build it from twisted/braided strands spiralling like a rope (rope chain)."),
+                   (("figaro",), " Build it from a repeating pattern of several short links then ONE longer link (Figaro)."),
+                   (("franco",), " Build it from tight interlocking V/rectangular links forming a smooth rope (Franco)."),
+                   (("box chain", "box link"), " Build it from square box-shaped links in a straight column (box chain)."),
+                   (("tennis",), " Build it as ONE continuous row of identical small prong-set stones (tennis chain)."),
+                   (("cable", "rolo", "link"), " Build it from uniform oval cable links."))
+        return (" Render as a wearable CHAIN with a consistent link rhythm, finished with a working lobster CLASP "
+                "at the ends so it can be worn." + sub)
     if "brooch" in t:
-        return " Render as a BROOCH with a hidden pin/clasp on the back."
+        return (" Render a BROOCH front-on — a decorative FACE / motif as the focal element, with a hidden PIN-BACK "
+                "clasp behind it. Show it ISOLATED on white.")
     if "grill" in t:
-        return " Render as wearable GRILLZ for the teeth."
+        sub = _sub((("top",), " Show the TOP row only."), (("bottom",), " Show the BOTTOM row only."),
+                   (("single", "one tooth"), " Show a SINGLE tooth cap."),
+                   (("full",), " Show matching TOP and BOTTOM rows in the same design."))
+        return (" Render GRILLZ as metal tooth caps following the natural curved dental ARCH, each cap fitted to one "
+                "tooth, with the correct tooth COUNT and even spacing." + sub)
     if "watch" in t:
-        return " Render as a WATCH."
+        sub = _sub((("skeleton",), " Show the internal movement through a transparent / skeleton dial."),
+                   (("apple", "smart"), " Render a modern square smartwatch with stones paved on the bezel/case."))
+        return (" Render a WATCH with a realistic round/cushion CASE, a BEZEL ring, two pairs of LUGS, a clear DIAL "
+                "with hour markers and hands, and a BAND attached at the lugs — all in correct proportion." + sub)
     if "buckle" in t:
-        return " Render as a BELT BUCKLE."
+        return (" Render a BELT BUCKLE as a standalone piece — a rigid outer FRAME, a decorative FACE/plate and the "
+                "TONGUE/prong, with the belt-strap slots. Show it ISOLATED on white (no belt).")
     if "clasp" in t:
-        return " Render as a jewelry CLASP (a working fastener/connector)."
+        return (" Render the CLASP as a STANDALONE working fastener on white — show the lock body, the tongue / "
+                "opening mechanism and the hinge. Do NOT attach a chain or bracelet.")
     if "bail" in t:
-        return " Render as a pendant BAIL — the small top loop a chain passes through."
+        return (" Render the BAIL as a STANDALONE component on white — the small top loop a chain passes through "
+                "(loop + body, plus a hinge if applicable). Do NOT attach a pendant, chain or any other piece.")
     if "body" in t:
-        return " Render as wearable BODY JEWELRY suited to the design."
-    if any(k in t for k in ["pendant", "necklace", "charm"]):
+        return (" Render BODY JEWELRY with realistic piercing hardware — a decorative FACE, a POST / bar that passes "
+                "through, and a BACK fastener. Match the hardware to the piercing type (nose/septum/navel/eyebrow/"
+                "lip/dermal). Show it ISOLATED on white.")
+    if "pendant" in t or "charm" in t:
         return _PENDANT
-    # Custom / unknown type the user typed in: render it as that exact named object — do NOT
-    # force a pendant bail onto it. Only fall back to a pendant for a truly generic/blank type.
+    if "necklace" in t or "choker" in t:
+        chain_sub = _sub((("cuban",), " a Cuban link"), (("rope",), " a rope"), (("figaro",), " a Figaro"),
+                         (("franco",), " a Franco"), (("box",), " a box-link"), (("tennis",), " a tennis"))
+        link_note = (f" If it is a plain chain, use{chain_sub} link pattern with even links." if chain_sub else "")
+        if "choker" in t or "choker" in lower:
+            base = (" Render as a CHOKER — a SHORT necklace that sits SNUG and high around the base of the neck, "
+                    "finished with a working CLASP at the back.")
+        else:
+            base = (" Render as a wearable NECKLACE — a LARGE, neck-sized piece worn around the NECK, clearly BIGGER "
+                    "and LONGER than a bracelet: the chain / strand forms a wide U-shape or oval that drapes around "
+                    "the neckline, finished with a working CLASP at the back.")
+        return (base + link_note +
+                " If it carries a pendant, nameplate or centre motif, hang that as the focal piece at the "
+                "BOTTOM-CENTRE — the pendant hangs from ONLY its bail on the chain (no extra hook, jump-ring or "
+                "clasp above the bail). Do NOT render it small like a bracelet, and do NOT show it as a flat "
+                "standalone nameplate.")
+    # Custom / unknown type the user typed in: convert the named object into a manufacturable, wearable
+    # fine-jewelry interpretation (not a flat literal object) — do NOT force a pendant bail onto it.
     if t and t not in ("jewelry", "jewellery", "custom", "custom object", "other"):
-        return f" Render as a real, wearable {item_type} — the actual {item_type} form, not a pendant (no bail unless the {item_type} naturally hangs from a chain)."
-    return _PENDANT
+        return (f" Render as a real, wearable fine-jewelry interpretation of a {item_type} — convert the named "
+                f"object into a manufacturable metal jewelry piece (not a flat or literal object), in its natural "
+                f"{item_type} form. Add a bail ONLY if the {item_type} naturally hangs from a chain.")
+    # Generic / blank / 'custom' type -> NEUTRAL form, NO forced bail. (A bail on a ring / unknown
+    # piece was the client's #1 complaint.) A bail is added only for an explicit pendant/necklace/charm.
+    return (" Render as a clean, wearable jewelry piece in its natural form. Add a top bail/hook ONLY "
+            "if the piece is a pendant / charm / hanging piece; for any other form do NOT add a bail.")
 
 
-def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[str, Any]], metal_tone: str, has_images: bool, image_count: int = 0) -> str:
+def _build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[str, Any]], metal_tone: str, has_images: bool, image_count: int = 0, font_template: Optional[Dict[str, Any]] = None) -> str:
+    """Initial-generation prompt — delegates to the config-registry builder (app.services.prompts).
+
+    Per-jewellery profiles + a shared common core replace the old monolithic logic so
+    conflicting/duplicate instructions can't stack. On ANY error this falls back to the
+    legacy builder below, so image generation never breaks.
+    """
+    try:
+        from app.services.prompts.initial import build_initial_prompt
+        return build_initial_prompt(user_prompt, parsed_data, metal_tone, has_images, image_count, font_template=font_template)
+    except Exception as _e:  # pragma: no cover - safety net
+        logger.warning("[prompt-registry] initial builder failed (%s) — using legacy builder", _e)
+        return _legacy_build_concise_initial_prompt(user_prompt, parsed_data, metal_tone, has_images, image_count)
+
+
+def _legacy_build_concise_initial_prompt(user_prompt: str, parsed_data: Optional[Dict[str, Any]], metal_tone: str, has_images: bool, image_count: int = 0) -> str:
     """Build a short, focused prompt for initial generation — ultra-minimal like ChatGPT.
 
     Key insight: gpt-image-2 does BEST with minimal instructions. ChatGPT sends very
@@ -3332,7 +3731,27 @@ def _user_wants_metal_change(user_prompt: str) -> bool:
     ])
 
 
-def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[Dict[str, Any]], attempt: int, forced_case: Optional[str] = None, ref_metal: Optional[str] = None) -> str:
+def _build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[Dict[str, Any]], attempt: int, forced_case: Optional[str] = None, ref_metal: Optional[str] = None, image_count: int = 1) -> str:
+    """Refinement prompt — delegates to the config-registry builder (app.services.prompts.refine).
+
+    Handles both client refine cases (text-only update; combine-with-extra-image) on top of the
+    shared COMMON_SYSTEM_PROMPT. On ANY error this falls back to the legacy builder below, so
+    image generation never breaks.
+    """
+    try:
+        from app.services.prompts.refine import build_refine_prompt
+        return build_refine_prompt(
+            user_prompt, refinement_intent, attempt,
+            forced_case=forced_case, ref_metal=ref_metal, image_count=image_count,
+        )
+    except Exception as _e:  # pragma: no cover - safety net
+        logger.warning("[prompt-registry] refine builder failed (%s) — using legacy builder", _e)
+        return _legacy_build_concise_refine_prompt(
+            user_prompt, refinement_intent, attempt, forced_case=forced_case, ref_metal=ref_metal,
+        )
+
+
+def _legacy_build_concise_refine_prompt(user_prompt: str, refinement_intent: Optional[Dict[str, Any]], attempt: int, forced_case: Optional[str] = None, ref_metal: Optional[str] = None) -> str:
     """Build a short, focused prompt for refinement — ultra-minimal like ChatGPT.
 
     Key insight: ChatGPT sends almost NO wrapping for edits. When a user says
@@ -3553,10 +3972,8 @@ def enrich_jewelry_prompt(user_prompt: str, item_type: str = "") -> str:
         "description, no preamble."
     )
     try:
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
+        resp = _analysis_post(
+            {
                 "model": "gpt-4o-mini",
                 "messages": [
                     {"role": "system", "content": sys_p},
@@ -3575,6 +3992,80 @@ def enrich_jewelry_prompt(user_prompt: str, item_type: str = "") -> str:
     except Exception as e:
         logger.warning("[prompt-enrich] failed: %s", e)
     return user_prompt
+
+
+def detect_jewelry_crop_box(image_b64: str) -> Optional[Dict[str, float]]:
+    """If a reference image has written TEXT / notes / dimensions / labels AROUND the jewelry (e.g. an
+    annotated spec sheet), return the bounding box {x,y,w,h} (0-1 fractions) of ONLY the main jewelry
+    piece so we can crop the text away. Returns None when there is no surrounding text (use full image).
+
+    The image model copies any text embedded in the reference no matter what the prompt says, so the
+    reliable way to keep annotation text OUT of the render is to physically crop it off the input."""
+    if not image_b64:
+        return None
+    instruction = (
+        "Look at this image. Does it contain written TEXT / notes / dimensions / measurements / labels / "
+        "captions / spec-sheet writing AROUND the jewelry (text that is NOT engraved on the piece itself)? "
+        "If YES, give the TIGHT bounding box of ONLY the main jewelry piece (exclude all that surrounding "
+        "text). If there are multiple pieces, give a box covering all the jewelry but none of the text. "
+        "Respond ONLY as JSON: {\"has_text\": true|false, \"box\": {\"x\":0.0,\"y\":0.0,\"w\":1.0,\"h\":1.0}} "
+        "where x,y is the top-left corner and w,h the width/height as fractions (0-1) of the image."
+    )
+    try:
+        resp = _analysis_post(
+            {
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": instruction},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+                ]}],
+                "response_format": {"type": "json_object"},
+                "max_tokens": 150,
+                "temperature": 0,
+            },
+            timeout=30,
+        )
+        if not resp.ok:
+            return None
+        content = resp.json().get("choices", [{}])[0].get("message", {}).get("content")
+        data = _json_from_content(content)
+        if not data.get("has_text"):
+            return None
+        box = data.get("box") or {}
+        if all(k in box for k in ("x", "y", "w", "h")):
+            return {k: float(box[k]) for k in ("x", "y", "w", "h")}
+    except Exception as e:
+        logger.warning("[ref-crop] bbox detect failed: %s", e)
+    return None
+
+
+def crop_reference_to_jewelry(image_bytes: bytes) -> bytes:
+    """Crop an annotated reference (spec sheet / notes around the piece) down to just the jewelry so the
+    model can't reproduce the surrounding text. Returns the original bytes when there's no text to strip
+    or anything goes wrong (fail-open)."""
+    try:
+        box = detect_jewelry_crop_box(base64.b64encode(image_bytes).decode("utf-8"))
+        if not box:
+            return image_bytes
+        import io
+        from PIL import Image
+        im = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        W, H = im.size
+        x, y = box["x"] * W, box["y"] * H
+        w, h = box["w"] * W, box["h"] * H
+        pad_x, pad_y = 0.03 * W, 0.03 * H
+        left = max(0, int(x - pad_x)); top = max(0, int(y - pad_y))
+        right = min(W, int(x + w + pad_x)); bottom = min(H, int(y + h + pad_y))
+        # sanity: ignore a degenerate / near-full box
+        if (right - left) < W * 0.15 or (bottom - top) < H * 0.15 or (right - left) * (bottom - top) > W * H * 0.97:
+            return image_bytes
+        buf = io.BytesIO()
+        im.crop((left, top, right, bottom)).save(buf, "PNG")
+        logger.info("[ref-crop] annotated reference cropped to jewelry box (%d,%d,%d,%d) of %dx%d", left, top, right, bottom, W, H)
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning("[ref-crop] crop failed: %s", e)
+        return image_bytes
 
 
 def generate_with_fallback(
@@ -3598,11 +4089,15 @@ def generate_with_fallback(
     has_reference_image = bool(image_source or image_urls)
     lower_prompt = (user_prompt or "").lower()
     edit_keywords = ["change", "convert", "replace", "modify", "remove", "add", "switch", "edit", "update"]
+    # An EXPLICIT mode is authoritative — never override it. A CREATE always passes mode="initial" (a
+    # first generation is NEVER a refine, even if the prompt says "add"/"change" — that just describes
+    # the design to create), and the refine endpoint passes mode="refine". Only auto-detect when the
+    # caller gave no mode at all.
     selected_mode = mode
-    if has_reference_image and any(w in lower_prompt for w in edit_keywords):
-        selected_mode = "refine"
-    elif not selected_mode:
-        if any(w in lower_prompt for w in ["refine", "style tags:", "focus on:", "change", "add", "remove", "replace"]):
+    if not selected_mode:
+        if has_reference_image and any(w in lower_prompt for w in edit_keywords):
+            selected_mode = "refine"
+        elif any(w in lower_prompt for w in ["refine", "style tags:", "focus on:", "change", "add", "remove", "replace"]):
             selected_mode = "refine"
         else:
             selected_mode = "initial"
@@ -3610,12 +4105,30 @@ def generate_with_fallback(
     resolved_image_urls = resolve_image_urls(image_source, image_urls)
     is_refine = selected_mode == "refine"
 
-    # Text-only generation: enrich the terse prompt with domain knowledge (like ChatGPT does
-    # internally) so culturally/technically specific designs (e.g. "dos pesos coin", a named symbol
-    # or font) render correctly instead of being garbled. Skipped when there's a reference image
-    # (those are copied faithfully) and for refines.
-    if not has_reference_image and not is_refine and user_prompt:
+    # Keep the ORIGINAL raw request (before enrichment) so the initial-QA checks the output against
+    # what the USER actually asked — not the verbose enriched paragraph (which would over-strict it).
+    original_request = (user_prompt or "")
+
+    # PROMPT FIDELITY (default): the user's prompt is sent to the image model VERBATIM — NEVER
+    # LLM-rewritten. In jewelry the client's exact words matter (named fonts like "Road Rage Font",
+    # exact colours, "2 layer", quoted names), and the old enrich step paraphrased and DROPPED them
+    # (e.g. it removed the font name, which then defeated _font_style_clause / layered-rule detection
+    # that key off the literal words). Enrichment is now opt-in via settings.ENRICH_TEXT_PROMPT.
+    if getattr(settings, "ENRICH_TEXT_PROMPT", False) and not has_reference_image and not is_refine and user_prompt:
         user_prompt = enrich_jewelry_prompt(user_prompt, (parsed_data or {}).get("item_type", ""))
+
+    # FONT-TEMPLATE: if the user named a font we have a glyph file for, render the EXACT lettering as
+    # a reference image so the model TRACES the precise letterforms (text-to-image can't reproduce a
+    # named font consistently from words alone — "har baar font alag"). This converts the text-only
+    # request into a glyph-guided generation. Uses original_request (the raw, un-enriched words).
+    font_template = None
+    if not has_reference_image and not is_refine and original_request:
+        try:
+            from app.services.font_template_service import build_font_template
+            font_template = build_font_template(original_request)
+        except Exception as _fe:
+            logger.warning("[font-template] build failed: %s", _fe)
+            font_template = None
 
     # Refinement intelligence — use Gemini to interpret the user prompt
     refinement_intent = refinement_intent_override
@@ -3650,7 +4163,17 @@ def generate_with_fallback(
     # Pre-download the reference ONCE (whitened) — reused for generation and the fidelity
     # comparison so we don't download twice.
     ref_blobs = download_reference_images(resolved_image_urls) if resolved_image_urls else None
+    # Font-template: use the rendered glyph image as the (only) reference blob for generation.
+    if font_template:
+        ref_blobs = [base64.b64decode(font_template["b64"])]
     input_b64 = base64.b64encode(ref_blobs[0]).decode("utf-8") if ref_blobs else None
+
+    # (Removed two pre-generation vision calls from the image-create path:
+    #   * ANNOTATED-REFERENCE CROP (crop_reference_to_jewelry) — annotation/text exclusion is now handled
+    #     by the LEAN prompt's no-annotation rule, so we no longer crop the reference.
+    #   * BAIL-GUARD (detect_jewelry_piece_type) — the LEAN image prompt no longer FORCES a bail, so
+    #     detecting the piece type to avoid a wrong bail is unnecessary.
+    # Image-create (initial, image input) now runs with ZERO pre-generation vision/LLM calls.)
 
     # Detect the reference's letter casing (via OCR) so a name/number change keeps the
     # SAME case as the input image — not however the user typed it. Only when the user
@@ -3684,9 +4207,9 @@ def generate_with_fallback(
     # model fixes the exact details that drifted from the reference.
     def compose_prompt(attempt: int, correction_notes: str = "") -> str:
         if is_refine:
-            base = _build_concise_refine_prompt(user_prompt, refinement_intent, attempt, forced_case=forced_case, ref_metal=ref_metal)
+            base = _build_concise_refine_prompt(user_prompt, refinement_intent, attempt, forced_case=forced_case, ref_metal=ref_metal, image_count=len(resolved_image_urls or []))
         else:
-            base = _build_concise_initial_prompt(user_prompt, parsed_data, metal_tone, bool(resolved_image_urls), len(resolved_image_urls or []))
+            base = _build_concise_initial_prompt(user_prompt, parsed_data, metal_tone, bool(resolved_image_urls), len(resolved_image_urls or []), font_template=font_template)
         if correction_notes:
             base += (
                 "\n\nIMPORTANT — the previous attempt differed from the reference in these ways. FIX each one "
@@ -3694,11 +4217,27 @@ def generate_with_fallback(
             )
         return base
 
-    # Attempt budget — keep renders fast (<1:30 target). Only allow a 2nd full generation for a
-    # SPELLING fix on text/name changes (a wrong name is unacceptable); everything else is a single
-    # generation. The Gemini refinement-QA no longer forces a full re-render (it doubled render time).
-    any_check = needs_spelling_check
-    max_qa_attempts = 2 if any_check else 1
+    # Attempt budget — keep renders fast. Allow ONE corrective re-generation (cap = 1 retry, so
+    # max 2 attempts) when there is something to verify:
+    #   * a SPELLING fix on text/name changes (a wrong name is unacceptable), OR
+    #   * a VISUAL QA pass on any refine that has an interpreted intent (general / combine edits),
+    #     so the most common refines are no longer a single un-checked stochastic shot.
+    # The retry is TARGETED: the QA's failed checks are fed back into the next prompt (below).
+    # Worst case is ~2x render time; everything that passes the first check costs only the
+    # (cheap) QA call on top of one generation.
+    needs_visual_qa = bool(is_refine and refinement_intent)
+    # Initial-generation auto-QA: no previous reference, so check the OUTPUT against the user's raw
+    # request (correct type / text spelling / metal / stones / clean render) and retry once.
+    # IMAGE INPUT is EXCLUDED: when the client uploads a reference, the image is the source of truth and
+    # we reproduce it faithfully — a QA pass that "checks vs the request" would second-guess and possibly
+    # regenerate a correct faithful copy. So QA runs ONLY on TEXT-ONLY initials (no reference image).
+    needs_initial_qa = bool((not is_refine) and (not has_reference_image) and os.getenv("GEMINI_API_KEY") and original_request)
+    any_check = needs_spelling_check or needs_visual_qa or needs_initial_qa
+    # Refines (Gemini) are fast & cheap, and the model sometimes drops the edit (stochastic no-op).
+    # Allow up to 3 generations for a refine so a dropped edit gets escalated corrective re-rolls
+    # (driven by the no-op guard below) instead of a single un-verified shot.
+    _refine_cap = 3 if (is_refine and refinement_intent) else 2
+    max_qa_attempts = _refine_cap if any_check else 1
     previous_ref_url = resolved_image_urls[0] if (is_refine and resolved_image_urls) else None
     final_b64 = None
     qa_result = None
@@ -3707,14 +4246,37 @@ def generate_with_fallback(
     for qa_attempt in range(1, max_qa_attempts + 1):
         prompt_text = compose_prompt(qa_attempt, correction_notes)
 
-        logger.info("[OpenAI gpt-image-2] Attempt %d/%d, mode=%s, prompt_len=%d, spelling=%s, fidelity=%s",
-                    qa_attempt, max_qa_attempts, selected_mode, len(prompt_text), needs_spelling_check, needs_fidelity_check)
-        b64 = generate_with_openai_image(resolved_image_urls, prompt_text, pre_downloaded_blobs=ref_blobs)
+        logger.info("[image-gen provider=%s] Attempt %d/%d, mode=%s, prompt_len=%d, spelling=%s, fidelity=%s",
+                    getattr(settings, "IMAGE_PROVIDER", "openai"), qa_attempt, max_qa_attempts, selected_mode,
+                    len(prompt_text), needs_spelling_check, needs_fidelity_check)
+        b64 = generate_primary_image(resolved_image_urls, prompt_text, pre_downloaded_blobs=ref_blobs)
         final_b64 = b64
 
         # Last attempt — accept whatever we have, no point checking further.
         if qa_attempt == max_qa_attempts:
             break
+
+        # 0) NO-OP GUARD (refine only): if the output is perceptually near-identical to the reference,
+        #    the model dropped the edit (Gemini stochastic no-op) — force an escalated retry NOW,
+        #    regardless of the soft vision QA (which is easily fooled by two near-identical images).
+        #    Skipped for metal-colour edits: phash is colour-blind, so a real recolour would look
+        #    'identical' and falsely trigger a retry.
+        # For BIG additive changes (plain -> fully iced, add full diamonds, remove a component) a real edit
+        # shifts the image a LOT, so even a SMALL phash distance means the model no-op'd; use a higher
+        # threshold there. Small edits keep the tight default (4) so a legitimate minor change isn't flagged.
+        _lp_noop = (user_prompt or "").lower()
+        _big_change = any(w in _lp_noop for w in ("iced", "ice out", "bust down", "bustdown", "flooded",
+                                                  "fully covered", "full diamond", "all diamond", "cover the whole",
+                                                  "cover the entire", "cover the pendant", "in diamonds", "all over"))
+        _noop_thresh = 14 if _big_change else 4
+        if is_refine and input_b64 and not _user_wants_metal_change(user_prompt) and _images_near_identical(input_b64, b64, max_distance=_noop_thresh):
+            logger.warning("[refine no-op guard attempt %d] output ~identical to reference (thresh=%d) — forcing escalated retry", qa_attempt, _noop_thresh)
+            correction_notes = (
+                "The previous attempt returned an image almost IDENTICAL to the reference and did NOT visibly apply "
+                "the requested change. Apply the requested change STRONGLY and OBVIOUSLY this time — redraw the target "
+                "area fully if needed; preserve only the parts the user did not ask to change."
+            )
+            continue
 
         # 1) Spelling verification (highest priority — fixes missing/extra/wrong letters).
         if needs_spelling_check:
@@ -3739,11 +4301,32 @@ def generate_with_fallback(
             qa_result = qa_refinement_check({
                 "intent": refinement_intent,
                 "previousRefUrl": previous_ref_url,
+                "previousB64": input_b64,
                 "newImageB64": b64,
             })
             logger.info("[refinement_qa attempt %d] %s", qa_attempt, qa_result)
             if qa_result.get("passed") or not qa_result.get("retry_recommended"):
                 break
+            # Targeted retry: feed the SPECIFIC failed checks back into the next prompt so the
+            # re-generation fixes exactly what QA flagged, instead of being a blind re-roll.
+            failed = qa_result.get("failed_checks") or []
+            correction_notes = "; ".join(failed[:6]) if failed else (qa_result.get("reason") or "")
+            continue
+
+        # 3b) Initial-generation QA via Gemini (no previous reference — check output vs the request).
+        if needs_initial_qa:
+            qa_result = qa_initial_check({
+                "request": original_request,
+                "itemType": (parsed_data or {}).get("item_type") or infer_item_type_from_prompt(original_request),
+                "newImageB64": b64,
+                "referenceB64": input_b64 if has_reference_image else None,
+                "fontLocked": bool(font_template),
+            })
+            logger.info("[initial_qa attempt %d] %s", qa_attempt, qa_result)
+            if qa_result.get("passed") or not qa_result.get("retry_recommended"):
+                break
+            failed = qa_result.get("failed_checks") or []
+            correction_notes = "; ".join(failed[:6]) if failed else (qa_result.get("reason") or "")
             continue
 
         # All active checks passed → accept.
@@ -3852,28 +4435,38 @@ class OpenAIService:
         jewellery_type: str = "",
         size: str = "1024x1024",
         mode: Optional[str] = None,
-        metal_tone: str = "yellow_gold"
+        metal_tone: str = "yellow_gold",
+        parsed_data: Optional[Dict[str, Any]] = None,
     ) -> OpenAIImageObject:
         """
         Generate base image using full Gemini pipeline (Primary + Fallback + QA checks).
 
         metal_tone defaults to yellow_gold but the caller should pass the metal DETECTED
         from the input image (e.g. 'silver') so a silver reference doesn't come out gold.
+
+        parsed_data: optional STRUCTURED design state (from parse_request_service) — carries
+        source_kind / intent / metal etc. so the prompt builder can route to a focused template.
+        Falls back to {"item_type": jewellery_type} when not supplied.
         """
         logger.info("Generating base image using Gemini Pipeline (metal_tone=%s)", metal_tone)
 
-        selected_mode = mode
-        if not selected_mode:
-            lower_prompt = (user_prompt or "").lower()
-            if any(w in lower_prompt for w in ["refine", "style tags:", "focus on:", "change", "add", "remove", "replace"]):
-                selected_mode = "refine"
-            else:
-                selected_mode = "initial"
+        # generate_base_image is the CREATE / first-generation path -> ALWAYS initial. A first
+        # generation is never a refine, even if the user's prompt contains an edit word like
+        # "add"/"change" (that just describes the design they want CREATED). Refines run through the
+        # separate refine task, which calls generate_with_fallback with mode="refine" directly.
+        selected_mode = mode or "initial"
+
+        # Prefer the rich parsed_data; ensure item_type is populated from the jewellery_type hint.
+        _pd = dict(parsed_data) if parsed_data else None
+        if _pd is not None and not _pd.get("item_type") and jewellery_type:
+            _pd["item_type"] = jewellery_type
+        if _pd is None and jewellery_type:
+            _pd = {"item_type": jewellery_type}
 
         result = generate_with_fallback(
             image_source=image_source,
             user_prompt=user_prompt,
-            parsed_data={"item_type": jewellery_type} if jewellery_type else None,
+            parsed_data=_pd,
             metal_tone=metal_tone or "yellow_gold",
             mode=selected_mode
         )

@@ -14,6 +14,10 @@ engine = create_engine(
     max_overflow=settings.DB_MAX_OVERFLOW,
     pool_timeout=settings.DB_POOL_TIMEOUT,
     pool_recycle=settings.DB_POOL_RECYCLE,
+    # Force UTF-8 on the client connection so non-ASCII prompt text (em-dashes "—", emoji, accented or
+    # Hindi/non-Latin names) is stored instead of raising UnicodeEncodeError on insert (the DB's default
+    # client encoding may be ASCII/LATIN1). Without this, a prompt with "—" 500s the refine/create.
+    client_encoding="utf8",
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

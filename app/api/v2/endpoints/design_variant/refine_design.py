@@ -1,3 +1,4 @@
+import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Form, File, UploadFile
@@ -14,6 +15,7 @@ from app.tasks.design_tasks import refine_design_variant_image
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/{design_id}/variants/refine", response_model=DesignVariantResponse, status_code=status.HTTP_201_CREATED)
@@ -70,7 +72,18 @@ async def refine_design_variant(
                 if requested_metal_image_url:
                     break
 
+    # The ORIGINAL design-input image(s) the user first uploaded must NEVER be the refine source —
+    # a refine edits the CURRENT variant render, not the original upload. (The frontend sometimes
+    # keeps the original attached and re-sends it; guard against that here.)
+    _original_inputs = set()
+    if design.input_image_urls:
+        _original_inputs.update(design.input_image_urls if isinstance(design.input_image_urls, list) else [design.input_image_urls])
+    if design.input_image_url:
+        _original_inputs.add(design.input_image_url)
+
     resolved_source_image_url = requested_metal_image_url or base_design_image_url
+    if resolved_source_image_url in _original_inputs:
+        resolved_source_image_url = None  # ignore an original-input passed as the refine source
 
     if not resolved_source_image_url and parent_variant.base_design_image_url:
         resolved_source_image_url = parent_variant.base_design_image_url
@@ -104,17 +117,24 @@ async def refine_design_variant(
         reference_images_json=reference_urls if reference_urls else None,
     )
 
-    # Resolve reference images for AI:
-    # The parent variant's image MUST be the first (primary) image in refinement, serving as the master visual truth.
+    # Resolve reference images for AI. PRIMARY = the variant render being edited (or a selected
+    # metal variant of it). The original design-input upload is EXCLUDED so a refine never edits the
+    # original instead of the current render.
     ai_reference_images = []
-    if parent_variant.base_design_image_url:
-        ai_reference_images.append(parent_variant.base_design_image_url)
-    
-    # Append any user-provided reference images as secondary resources
+    primary_reference = resolved_source_image_url or parent_variant.base_design_image_url
+    if primary_reference and primary_reference not in _original_inputs:
+        ai_reference_images.append(primary_reference)
+
+    # If the user uploaded reference image(s) in THIS refine, pass them ALL straight to the model
+    # together with the client's prompt — no keyword gating. The user attached them on purpose; the
+    # model decides how to use them per the prompt (merge / replace an element / take a style etc.).
+    # (We only skip any that exactly match the ORIGINAL design upload, which must never be a refine
+    # source.) NOTE: this assumes the frontend sends `files` ONLY when the user actually picks an
+    # image — it should not auto-attach an image on a plain text edit.
     if reference_urls:
-        ai_reference_images.extend(reference_urls)
-        
-    # If the parent variant had no image (e.g. edge cases), fall back to design's input images
+        ai_reference_images.extend([u for u in reference_urls if u not in _original_inputs])
+
+    # Edge case: parent variant has no render at all — fall back to the original input.
     if not ai_reference_images:
         if design.input_image_urls:
             ai_reference_images = design.input_image_urls if isinstance(design.input_image_urls, list) else [design.input_image_urls]
@@ -122,6 +142,11 @@ async def refine_design_variant(
             ai_reference_images = [design.input_image_url]
         else:
             ai_reference_images = None
+
+    logger.info(
+        "[refine] variant=%s refs=%d uploaded_files=%d",
+        variant.id, len(ai_reference_images or []), len(reference_urls or []),
+    )
 
 
     # Dispatch background AI generation task on variant-specific SSE channel

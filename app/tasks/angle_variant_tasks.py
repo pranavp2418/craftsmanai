@@ -33,7 +33,7 @@ from app.core.database import SessionLocal
 from app.models.design import Design
 from app.repositories.design_variant import DesignVariantRepository
 from app.repositories.activity_log import DesignActivityLogRepository
-from app.services.openai_service import openai_service, generate_with_openai_image, download_reference_images
+from app.services.openai_service import openai_service, generate_with_openai_image, generate_primary_image, download_reference_images
 from app.services.storage_service import _validate_image_bytes, upload_image_to_supabase
 from app.core.sse_manager import sse_manager
 from app.tasks.base import create_task
@@ -57,7 +57,7 @@ METAL_DESCRIPTIONS = {
 
 VIEW_PROMPTS = {
     "side_view": "slightly turned view — rotate the piece only about 10 degrees from straight front (a very subtle turn that just hints at the side depth/thickness). This is NOT a full side profile; the front face must still be clearly visible, almost front-on, just gently angled by ~10 degrees",
-    "back_view": "rear / back view shown as a clean GALLERY-STYLE HOLLOW layout — the open, hollowed-out back construction (open gallery work, hollow under-settings and cut-outs) the way a real CAD jeweler shows the reverse of a piece, NOT a solid filled back",
+    "back_view": "rear / back view shown with a SOLID, smooth, closed, polished metal back (a solid filled back finish) — clean solid metalwork, NOT open gallery work, NOT hollow under-settings or cut-outs",
     "worn_view": "worn on a real person",
 }
 
@@ -194,7 +194,7 @@ Render it as a clean CAD-style 3D jewelry render (crisp, sharp, even studio ligh
 One image only."""
         return f"""Show the BACK / REVERSE side of this exact same {jt} — as if you physically flipped the piece over front-to-back — in {same_metal}, on a pure solid white background (#FFFFFF) with NO background scene.{stone_protection}
 
-This is the REVERSE side, NOT the front. Show the REALISTIC back of this exact piece exactly as real finished jewellery looks from behind — the reverse of the actual metalwork and construction: the backs of the stone settings, bezels and prongs, the reverse of the frame and any open-work / gallery, and the back of the bail/hook ONLY if the piece actually has one. Keep the SAME outer silhouette, proportions and structure as the front. Do NOT render a flat featureless metal plate / backplate, and do NOT invent any plate, hook or attachment that is not really part of the piece — show the genuine reverse construction of this specific jewellery type. The front design must NOT appear readable on the back: the name, numbers, lettering, motifs and any enamel/colour from the front must NOT show normally on the back. If the piece is open-work / see-through so some lettering shows through from the front, that lettering MUST be MIRRORED (reversed left-to-right), never readable.
+This is the REVERSE side, NOT the front. By DEFAULT give it a SOLID, smooth, closed, polished metal BACK — a solid filled back finish covering the whole reverse, gently flat or softly domed, the way real finished name pendants / plates / charms are made. Do NOT show open-work, hollow gallery cut-outs, or the open backs of the stone settings; the back is a clean solid metal surface. Show the back of the bail/hook ONLY if the piece actually has one. Keep the SAME outer silhouette, proportions and structure as the front. The front design must NOT appear on the back: the name, numbers, lettering, motifs and any enamel/colour from the front must NOT be readable on the solid back (a subtle hidden maker's mark is fine, but no readable front design and no mirrored text).
 
 Render it as a clean CAD-style 3D jewelry render (crisp, sharp, even studio lighting) — NOT a lifestyle photo, NOT a cartoon, no background scene. Pure solid white background (#FFFFFF).
 
@@ -353,7 +353,11 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
                 # Worn view is a lifestyle photo with skin + natural background — do NOT
                 # apply the white-background flood-fill (it would bleed into the photo).
                 is_worn = "worn" in angle_name
-                b64_json = generate_with_openai_image(
+                # Use the CONFIGURED provider (generate_primary_image respects settings.IMAGE_PROVIDER) so a
+                # Gemini-only deployment renders angles with Gemini too — instead of hard-calling OpenAI,
+                # which fails when OpenAI is unreachable/unset (the "api.openai.com" error). It still falls
+                # back to OpenAI only if Gemini fails AND OpenAI is configured.
+                b64_json = generate_primary_image(
                     [ref_url], prompt, pre_downloaded_blobs=cached_blobs, whiten_output=not is_worn,
                 )
                 image_bytes = base64.b64decode(b64_json)

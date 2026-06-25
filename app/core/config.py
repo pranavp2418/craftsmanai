@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     CELERY_ACCEPT_CONTENT: List[str] = ["json"]
     CELERY_TIMEZONE: str = "UTC"
     CELERY_ENABLE_UTC: bool = True
+    # Worker concurrency + memory safety. High-quality image tasks (pro+2K ~210MB, 4K ~356MB working
+    # set; child RSS incl. interpreter ~0.5-1GB). Server has 32GB RAM, so 4 concurrent is comfortably
+    # safe (4 * ~1GB = ~4GB, leaving plenty for API + Redis). Could go higher (6-8) for more throughput.
+    # max_memory_per_child is GENEROUS (~1.5GB) so children only recycle on a real leak, NOT after every
+    # task (a low value here causes constant child restarts = slow). max_tasks_per_child also recycles.
+    CELERY_WORKER_CONCURRENCY: int = 4
+    CELERY_MAX_MEMORY_PER_CHILD: int = 1500000  # KiB (~1.46GB); leak safety net, not a per-task killer
 
     # Environment
     ENVIRONMENT: str = "development"
@@ -82,6 +89,32 @@ class Settings(BaseSettings):
     # OpenAI / generative AI
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_IMAGE_MODEL: str = "gpt-image-1.5"
+    # Primary image generator for MAIN generation + REFINEMENT + METAL-COLOUR change.
+    # "gemini" -> gemini-2.5-flash-image (fast, ~seconds; falls back to OpenAI on failure).
+    # "openai" -> gpt-image-2 (slow, ~minutes). Side ANGLES always use OpenAI regardless.
+    IMAGE_PROVIDER: str = "gemini"
+    # Image model: gemini-3.1-flash-image-preview = "Nano Banana 2" — the EXACT model the Lovable
+    # prototype uses (it calls google/gemini-3.1-flash-image-preview). The direct Gemini API exposes BOTH
+    # "gemini-3.1-flash-image" (stable) and "...-preview"; they can be different checkpoints, so we use
+    # the -preview one to match Lovable like-for-like.
+    # Alternatives: "gemini-3-pro-image" / "gemini-3-pro-image-preview" (Nano Banana Pro — higher quality,
+    # slower, ~2x cost), "gemini-2.5-flash-image" (older Nano Banana).
+    GEMINI_IMAGE_MODEL: str = "gemini-3.1-flash-image-preview"
+    # Output resolution for Gemini image gen ("1K" | "2K" | "4K"). Higher = better quality + more
+    # tokens/time. Empty = model default. 2K = 2816x1536 (4x the default pixels).
+    GEMINI_IMAGE_SIZE: str = "2K"
+    # Output ASPECT RATIO — FORCE every render to the SAME shape so outputs are consistent (some pieces
+    # were coming out portrait/vertical and others landscape). "16:9" = a horizontal/landscape frame.
+    # Other valid values: "4:3", "3:2", "1:1", "3:4", "9:16". Empty = let the model choose (inconsistent).
+    GEMINI_IMAGE_ASPECT: str = "16:9"
+    # Text / vision ANALYSIS calls (parse gate, OCR, metal detect, spelling, classify, enrich).
+    # "gemini" -> GEMINI_TEXT_MODEL via its OpenAI-compatible endpoint; "openai" -> gpt-4o-mini.
+    TEXT_LLM_PROVIDER: str = "gemini"
+    GEMINI_TEXT_MODEL: str = "gemini-3.1-pro-preview"
+    # Prompt FIDELITY: when False (default) the user's TEXT-ONLY prompt is sent VERBATIM to the image
+    # model — never LLM-rewritten. Jewelry needs the client's exact words (named fonts like "Road Rage
+    # Font", colours, "2 layer" etc.) preserved; the old enrich step paraphrased and dropped them.
+    ENRICH_TEXT_PROMPT: bool = False
 
     # Logging
     LOG_LEVEL: str = "INFO"
