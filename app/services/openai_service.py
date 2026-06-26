@@ -2565,18 +2565,10 @@ def generate_with_gemini_image(image_blobs, prompt_text: str) -> Optional[str]:
     for blob in (image_blobs or []):
         parts.append({"inline_data": {"mime_type": "image/png", "data": base64.b64encode(blob).decode("utf-8")}})
     gen_config = {"responseModalities": ["TEXT", "IMAGE"]}
-    # Output resolution + ASPECT RATIO (config-driven) via imageConfig. aspectRatio FORCES every render to
-    # the same shape (e.g. "16:9" landscape) so outputs are consistent — without it the model chose portrait
-    # for tall pieces and landscape for wide ones, giving mixed orientations.
+    # Higher output resolution for better quality (config-driven). Sent as imageConfig.imageSize.
     _size = getattr(settings, "GEMINI_IMAGE_SIZE", None)
-    _aspect = getattr(settings, "GEMINI_IMAGE_ASPECT", None)
-    _img_cfg = {}
     if _size:
-        _img_cfg["imageSize"] = str(_size).upper()
-    if _aspect:
-        _img_cfg["aspectRatio"] = str(_aspect)
-    if _img_cfg:
-        gen_config["imageConfig"] = _img_cfg
+        gen_config["imageConfig"] = {"imageSize": str(_size).upper()}
     try:
         resp = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={key}",
@@ -3425,7 +3417,9 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
                 "post/back so they can be worn." + sub)
     if "cufflink" in t or "cuff link" in t or "cuff-link" in t:
         return (" Render a matching PAIR of CUFFLINKS — two IDENTICAL faces, mirrored, side by side, each with a "
-                "swivel-bar back-post. Show them ISOLATED on white (no shirt or cuff).")
+                "swivel-bar back-post. Orient each cufflink with its decorative FACE flat toward the camera as the "
+                "hero; the swivel toggle bar / post sits BEHIND the face and toward the BOTTOM, NOT protruding above "
+                "the TOP edge of the face. Show them ISOLATED on white (no shirt or cuff).")
     if "ring" in t:
         if "signet" in t or "class ring" in t or "signet" in lower or "class ring" in lower:
             return (" Render a wearable SIGNET / CLASS RING: a FLAT or gently domed planar signet FACE (a solid "

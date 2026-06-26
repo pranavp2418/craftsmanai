@@ -165,9 +165,22 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
         "piece). The final image must show ONLY the single finished jewelry piece on a pure white background — no "
         "notes, dimensions, labels, captions, arrows or watermarks.")
 
+    # When CONVERTING a flat design (logo/figure/motif) into jewelry, apply it to the FORM the user actually
+    # asked for (their selected jewellery_type / prompt) — do NOT default to a pendant + bail if a RING,
+    # bracelet, earring etc. is requested. (A butterfly + "a gold RING with this on it" was coming out as a
+    # pendant because the conversion hard-coded "add a bail".)
+    _ct = (item_type or "").strip().lower()
+    _generic_type = (not _ct) or _ct in ("jewelry", "jewellery", "custom", "custom object", "other", "charm")
+    if svc._is_pendant_like(item_type, user_prompt) or _generic_type:
+        _convert_form = (" and add a single bail at the very TOP (facing FORWARD, above the design, not behind) so it "
+                         "hangs as a pendant, rendered in the requested metal")
+    else:
+        _convert_form = (f" and present it as the requested {item_type}:{svc._type_form_clause(item_type, user_prompt)} "
+                         "Apply the design as its FACE / motif. Do NOT add a pendant bail. Rendered in the requested metal")
+
     return f"""{LEAN_IMAGE_MASTER}
 
-Reproduce this reference image as a clean, photorealistic CAD-style 3D jewelry render on a pure solid white background (#FFFFFF), {angle_phrase}, sharp focus. The reference is the SOURCE OF TRUTH — keep its EXACT design, silhouette, every stone and arrangement, metal colour, borders, lettering, negative space (cut-outs / gaps between elements) AND its own bail / hook / connection. Do NOT add, remove, simplify or 'improve' anything the user did not explicitly ask for — no default bail, no extra ornaments, no invented stones. If the reference is a real jewelry photo or CAD render, reproduce it 1:1. If it is a FLAT 2D design — a hand sketch, line-art, silhouette, logo, name or lettering on a plain background (NOT a photograph of an existing 3D piece) — do NOT output a flat copy: BUILD it as a real, wearable 3D metal jewelry piece, but keep its DESIGN EXACT. TRACE the design faithfully — the SAME letterforms (every stroke, curve, tail, loop and join, and the EXACT cursive / script / block style), the SAME silhouette, shapes, proportions, spacing, layout and negative space (open windows / gaps between letters). Do NOT restyle the font, redraw, swap, simplify, smear or improvise ANY character or shape — the design is the source of truth. ONLY give the design real raised 3D geometry (depth + side walls), set the faces with neat pavé diamonds when it reads as a name / charm / iced piece, and add a single bail at the very TOP — facing FORWARD (its loop visible from the front), ABOVE the design, NOT behind the piece or flat against the back — rendered in the requested metal.{merge_block}{user_request}{metal_convert}{dcut}{no_annotation_note}
+Reproduce this reference image as a clean, photorealistic CAD-style 3D jewelry render on a pure solid white background (#FFFFFF), {angle_phrase}, sharp focus. The reference is the SOURCE OF TRUTH — keep its EXACT design, silhouette, every stone and arrangement, metal colour, borders, lettering, negative space (cut-outs / gaps between elements) AND its own bail / hook / connection. Do NOT add, remove, simplify or 'improve' anything the user did not explicitly ask for — no default bail, no extra ornaments, no invented stones. If the reference is a real jewelry photo or CAD render, reproduce it 1:1. If it is a FLAT 2D design — a hand sketch, line-art, silhouette, logo, name or lettering on a plain background (NOT a photograph of an existing 3D piece) — do NOT output a flat copy: BUILD it as a real, wearable 3D metal jewelry piece, but keep its DESIGN EXACT. TRACE the design faithfully — the SAME letterforms (every stroke, curve, tail, loop and join, and the EXACT cursive / script / block style), the SAME silhouette, shapes, proportions, spacing, layout and negative space (open windows / gaps between letters). Do NOT restyle the font, redraw, swap, simplify, smear or improvise ANY character or shape — the design is the source of truth. ONLY give the design real raised 3D geometry (depth + side walls), set the faces with neat pavé diamonds when it reads as a name / charm / iced piece,{_convert_form}.{merge_block}{user_request}{metal_convert}{dcut}{no_annotation_note}
 
 One image only."""
 
