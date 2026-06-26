@@ -105,7 +105,30 @@ def customer_access_design(
 
 
     from app.repositories.brand_setting import BrandSettingRepository
+    from app.models.subscription import UserSubscription, SubscriptionPlan, SubscriptionStatus
+    from sqlalchemy import or_
+    from datetime import datetime, timezone
+    
     brand_setting = BrandSettingRepository(db).get_by_user_id(design.user_id)
+    
+    # Check if user has all 3 branding feature flags enabled
+    powered_by = False
+    now = datetime.now(timezone.utc)
+    active_sub = db.query(UserSubscription).join(SubscriptionPlan).filter(
+        UserSubscription.user_id == design.user_id,
+        UserSubscription.is_queued == False,
+        or_(
+            UserSubscription.status == SubscriptionStatus.ACTIVE,
+            UserSubscription.status == SubscriptionStatus.TRIAL,
+            (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= now)
+        )
+    ).order_by(UserSubscription.end_date.desc()).first()
+    
+    if active_sub and active_sub.plan:
+        plan = active_sub.plan
+        # powered_by is true only if ALL 3 flags are true
+        if plan.can_use_logo and plan.can_use_brand_name and plan.can_use_custom_color:
+            powered_by = True
 
     return PublicDesignFullResponse(
         design=design_response,
@@ -115,4 +138,5 @@ def customer_access_design(
         public_token=share.public_token,
         brand_logo_url=brand_setting.logo_url if brand_setting else None,
         brand_primary_color=brand_setting.primary_color if brand_setting else "#6366F1",
+        powered_by=powered_by,
     )
