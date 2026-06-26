@@ -93,7 +93,7 @@ class EmailService:
             raise ValueError("ZEPTOMAIL_API_KEY is not configured")
         
         api_url = settings.ZEPTOMAIL_API_URL
-        from_email = from_email or settings.ZEPTOMAIL_FROM_EMAIL or "noreply@craftmen.com"
+        from_email = from_email or settings.ZEPTOMAIL_FROM_EMAIL or "noreply@craftsmanai.com"
         from_name = settings.ZEPTOMAIL_FROM_NAME
         
         payload = {
@@ -150,13 +150,13 @@ class EmailService:
         log_id = EmailService._create_email_log(
             to_email=to,
             template_name="signup_otp",
-            subject="Verify your email address - Craftmen",
+            subject="Verify your email address - Craftsman AI",
             variables={"otp": otp, "user_name": user_name, "expires_minutes": expires_minutes, "verify_url": verify_url}
         )
         try:
             logger.info(f"SENDING EMAIL: To={to}, OTP={otp}, User={user_name}")
             
-            subject = "Verify your email address - Craftmen"
+            subject = "Verify your email address - Craftsman AI"
             
             # Render template using Jinja2
             html_content = await render_template(
@@ -169,7 +169,7 @@ class EmailService:
                 }
             )
             
-            text_body = f"Hi {user_name},\n\nYour OTP code is: {otp}\n\nBest regards,\nThe Craftmen Team"
+            text_body = f"Hi {user_name},\n\nYour OTP code is: {otp}\n\nBest regards,\nThe Craftsman AI Team"
             
             result = await EmailService._send_via_zeptomail(
                 to_email=to,
@@ -204,13 +204,13 @@ class EmailService:
         log_id = EmailService._create_email_log(
             to_email=to,
             template_name="password_reset_otp",
-            subject="Reset your password - Craftmen",
+            subject="Reset your password - Craftsman AI",
             variables={"otp": otp, "user_name": user_name, "expires_minutes": expires_minutes, "reset_url": reset_url}
         )
         try:
             logger.info(f"SENDING PASSWORD RESET EMAIL: To={to}, OTP={otp}, User={user_name}")
             
-            subject = "Reset your password - Craftmen"
+            subject = "Reset your password - Craftsman AI"
             
             # Render template using Jinja2
             html_content = await render_template(
@@ -223,7 +223,7 @@ class EmailService:
                 }
             )
             
-            text_body = f"Hi {user_name},\n\nYour security code is: {otp}\n\nBest regards,\nThe Craftmen Team"
+            text_body = f"Hi {user_name},\n\nYour security code is: {otp}\n\nBest regards,\nThe Craftsman AI Team"
             
             result = await EmailService._send_via_zeptomail(
                 to_email=to,
@@ -259,13 +259,13 @@ class EmailService:
         log_id = EmailService._create_email_log(
             to_email=to_email,
             template_name="customer_approval",
-            subject=f"{designer_name} shared a design with you - Craftmen",
+            subject=f"{designer_name} shared a design with you - Craftsman AI",
             variables={"customer_name": customer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "version": version, "version_label": version_label, "brand_logo_url": brand_logo_url}
         )
         try:
             logger.info(f"SENDING CUSTOMER SHARE EMAIL: To={to_email}, URL={preview_url}")
             
-            subject = f"{designer_name} shared a design with you - Craftmen"
+            subject = f"{designer_name} shared a design with you - Craftsman AI"
             
             # Render the customer_approval template
             context = {
@@ -281,7 +281,7 @@ class EmailService:
             
             html_content = await render_template("customer_approval", context)
             
-            text_body = f"Hi {customer_name},\n\n{retailer_name or designer_name} has shared a custom jewelry design with you.\n\nDesign Number: {design_code or 'N/A'}\nJewelry Type: {jewelry_type or 'Custom Jewelry'}\nVersion: {version or 'v1.0'}\n\nReview it here: {preview_url}\n\nBest regards,\nThe Craftmen Team"
+            text_body = f"Hi {customer_name},\n\n{retailer_name or designer_name} has shared a custom jewelry design with you.\n\nDesign Number: {design_code or 'N/A'}\nJewelry Type: {jewelry_type or 'Custom Jewelry'}\nVersion: {version or 'v1.0'}\n\nReview it here: {preview_url}\n\nBest regards,\nThe Craftsman AI Team"
             
             # Customer design share emails use ZEPTOMAIL_CUSTOMER_EMAIL
             result = await EmailService._send_via_zeptomail(
@@ -319,13 +319,13 @@ class EmailService:
         log_id = EmailService._create_email_log(
             to_email=to_email,
             template_name="manufacturer_design_share",
-            subject=f"Quote Request from {designer_name} - Craftmen",
+            subject=f"Quote Request from {designer_name} - Craftsman AI",
             variables={"manufacturer_name": manufacturer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "metal": metal, "brand_logo_url": brand_logo_url}
         )
         try:
             logger.info(f"SENDING MANUFACTURER SHARE EMAIL: To={to_email}, URL={preview_url}")
             
-            subject = f"Quote Request from {designer_name} - Craftmen"
+            subject = f"Quote Request from {designer_name} - Craftsman AI"
             
             # Render the manufacturer_design_share template
             context = {
@@ -340,7 +340,7 @@ class EmailService:
             
             html_content = await render_template("manufacturer_design_share", context)
             
-            text_body = f"Hi {manufacturer_name},\n\n{retailer_name or designer_name} sent a Details Sheet for manufacturer quote.\n\nDesign Number: {design_code or 'N/A'}\nJewelry Type: {jewelry_type or 'Custom Jewelry'}\nMetal: {metal or 'Not specified'}\n\nOpen the Details Sheet and submit costing here: {preview_url}\n\nBest regards,\nThe Craftmen Team"
+            text_body = f"Hi {manufacturer_name},\n\n{retailer_name or designer_name} sent a Details Sheet for manufacturer quote.\n\nDesign Number: {design_code or 'N/A'}\nJewelry Type: {jewelry_type or 'Custom Jewelry'}\nMetal: {metal or 'Not specified'}\n\nOpen the Details Sheet and submit costing here: {preview_url}\n\nBest regards,\nThe Craftsman AI Team"
             
             # Manufacturer quote emails use ZEPTOMAIL_QUOTES_EMAIL
             result = await EmailService._send_via_zeptomail(
@@ -397,7 +397,7 @@ class EmailService:
         try:
             logger.info(f"SENDING CONTACT NOTIFICATION: From={name} ({email}), Subject={subject}")
 
-            email_subject = f"New Contact Form Submission: {subject} - Craftmen"
+            email_subject = f"New Contact Form Submission: {subject} - Craftsman AI"
 
             html_content = f"""
             <html>
@@ -429,7 +429,7 @@ class EmailService:
                 </p>
                 <hr style="border: 1px solid #eee;">
                 <p style="color: #999; font-size: 12px;">
-                    This email was sent from the Craftmen contact form.
+                    This email was sent from the Craftsman AI contact form.
                 </p>
             </body>
             </html>
@@ -517,7 +517,7 @@ Message:
             "refinement_requested": "Requested Changes",
         }.get(action, action)
         
-        subject = f"Customer {action_display}: {design_name or 'Design'} - Craftmen"
+        subject = f"Customer {action_display}: {design_name or 'Design'} - Craftsman AI"
         
         log_id = EmailService._create_email_log(
             to_email=to_email,
@@ -573,8 +573,8 @@ Message:
                 f"Jewelry Type: {jewelry_type or 'Custom Jewelry'}\n"
                 f"Version: {version or 'v1.0'}\n"
                 + (f"\nCustomer's note: {comment}\n" if comment else "")
-                + "\nCheck the design in your Craftmen dashboard for more details.\n\n"
-                "Best regards,\nThe Craftmen Team"
+                + "\nCheck the design in your Craftsman AI dashboard for more details.\n\n"
+                "Best regards,\nThe Craftsman AI Team"
             )
             
             result = await EmailService._send_via_zeptomail(
@@ -610,13 +610,13 @@ Message:
         log_id = EmailService._create_email_log(
             to_email=to,
             template_name="welcome_platform",
-            subject="Welcome to Craftmen!",
+            subject="Welcome to Craftsman AI!",
             variables={"user_name": user_name, "dashboard_url": dashboard_url}
         )
         try:
             logger.info(f"SENDING WELCOME EMAIL: To={to}, User={user_name}")
             
-            subject = "Welcome to Craftmen!"
+            subject = "Welcome to Craftsman AI!"
             
             # Render template using Jinja2
             html_content = await render_template(
@@ -626,7 +626,7 @@ Message:
                 }
             )
             
-            text_body = f"Hi {user_name},\n\nWelcome to Craftmen! Your email address has been successfully verified.\n\nBest regards,\nThe Craftmen Team"
+            text_body = f"Hi {user_name},\n\nWelcome to Craftsman AI! Your email address has been successfully verified.\n\nBest regards,\nThe Craftsman AI Team"
             
             result = await EmailService._send_via_zeptomail(
                 to_email=to,

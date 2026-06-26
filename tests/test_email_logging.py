@@ -40,7 +40,7 @@ class TestEmailLogging:
 
             assert log_record is not None, "EmailLog record was not created"
             assert log_record.status == EmailStatus.SENT
-            assert log_record.subject == "Verify your email address - Craftmen"
+            assert log_record.subject == "Verify your email address - Craftsmai AI"
             assert "123456" in log_record.template_variables
             assert "Log Test User" in log_record.template_variables
             assert log_record.sent_at is not None
