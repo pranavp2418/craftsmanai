@@ -38,7 +38,7 @@ def _send_via_zeptomail_sync(
     if not settings.ZEPTOMAIL_API_KEY:
         raise ValueError("ZEPTOMAIL_API_KEY is not configured")
     
-    from_email = from_email or settings.ZEPTOMAIL_FROM_EMAIL or "noreply@craftmen.com"
+    from_email = from_email or settings.ZEPTOMAIL_FROM_EMAIL or "noreply@craftsmanai.com"
     from_name = settings.ZEPTOMAIL_FROM_NAME
     
     payload = {
@@ -295,7 +295,7 @@ def send_welcome_email(self, to: str, user_name: str, dashboard_url: str = "#"):
         email_log = EmailLog(
             to_email=to,
             template_name="welcome_platform",
-            subject="Welcome to Craftsman AI ",
+            subject="Welcome to Craftsman AI",
             template_variables=json.dumps({
                 "user_name": user_name,
                 "dashboard_url": dashboard_url,
@@ -443,7 +443,7 @@ def send_design_review_email(
                     <tr>
                         <td align="center" style="padding: 40px 40px 20px 40px;">
                             <div style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); -webkit-background-clip: text; color: transparent; font-size: 32px; font-weight: 800; letter-spacing: -0.025em; margin-bottom: 8px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-                                CRAFTMEN
+                                Craftsman AI
                             </div>
                             <div style="height: 2px; width: 60px; background: linear-gradient(90deg, #6366f1 0%, #a855f7 100%); border-radius: 1px;"></div>
                         </td>
@@ -1056,7 +1056,7 @@ def _build_team_invitation_html(team_name: str, variables: dict) -> str:
                     <tr>
                         <td align="center" style="padding: 40px 40px 20px 40px;">
                             <div style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); -webkit-background-clip: text; color: transparent; font-size: 32px; font-weight: 800; letter-spacing: -0.025em; margin-bottom: 8px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-                                CRAFTMEN
+                                Craftsman AI
                             </div>
                             <div style="height: 2px; width: 60px; background: linear-gradient(90deg, #6366f1 0%, #a855f7 100%); border-radius: 1px;"></div>
                         </td>

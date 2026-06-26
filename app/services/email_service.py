@@ -93,7 +93,7 @@ class EmailService:
             raise ValueError("ZEPTOMAIL_API_KEY is not configured")
         
         api_url = settings.ZEPTOMAIL_API_URL
-        from_email = from_email or settings.ZEPTOMAIL_FROM_EMAIL or "noreply@craftmen.com"
+        from_email = from_email or settings.ZEPTOMAIL_FROM_EMAIL or "noreply@craftsmanai.com"
         from_name = settings.ZEPTOMAIL_FROM_NAME
         
         payload = {
@@ -204,7 +204,7 @@ class EmailService:
         log_id = EmailService._create_email_log(
             to_email=to,
             template_name="password_reset_otp",
-            subject="Reset your password - Craftsman AI ",
+            subject="Reset your password - Craftsman AI",
             variables={"otp": otp, "user_name": user_name, "expires_minutes": expires_minutes, "reset_url": reset_url}
         )
         try:
@@ -429,7 +429,7 @@ class EmailService:
                 </p>
                 <hr style="border: 1px solid #eee;">
                 <p style="color: #999; font-size: 12px;">
-                    This email was sent from the Craftsman  AI contact form.
+                    This email was sent from the Craftsman AI contact form.
                 </p>
             </body>
             </html>

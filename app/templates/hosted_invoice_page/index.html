@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Invoice — CraftsmanAI</title>
+  <title>Invoice — Craftsman AI</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body style="margin:0;padding:0;background-color:#08081a;font-family:'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
@@ -21,7 +21,7 @@
                   <!-- Left: Features -->
                   <td width="45%" valign="top" class="invoice-two-col-left" style="padding-right:24px;">
                     <table role="presentation" cellpadding="0" cellspacing="0" border="0">
-                      <tr><td><img src="logo_icon.png" alt="CraftsmanAI" width="28" height="28" style="display:block;width:28px;height:28px;border-radius:4px;mix-blend-mode:lighten;" /></td></tr>
+                      <tr><td><img src="logo_icon.png" alt="Craftsman AI" width="28" height="28" style="display:block;width:28px;height:28px;border-radius:4px;mix-blend-mode:lighten;" /></td></tr>
                       <tr><td style="padding-top:12px;"><h2 style="margin:0;font-size:20px;font-weight:700;color:#ffffff;">Hosted Invoice Link</h2><p style="margin:6px 0 0 0;font-size:12px;color:#6b7280;word-break:break-all;">https://app.craftsmanai.app/billing/invoices/{{invoice_id}}</p></td></tr>
                       <tr><td style="padding-top:28px;">
                         <table role="presentation" cellpadding="0" cellspacing="0" border="0">
@@ -36,7 +36,7 @@
                   <!-- Right: Invoice Card -->
                   <td width="55%" valign="top" class="invoice-two-col-right">
                     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.3);">
-                      <tr><td style="padding:16px 20px;border-bottom:1px solid #e5e7eb;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td valign="middle"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td><img src="logo_icon.png" alt="" width="20" height="20" style="display:block;width:20px;height:20px;border-radius:4px;" /></td><td style="padding-left:8px;"><p style="margin:0;font-size:14px;font-weight:700;color:#111827;">CraftsmanAI</p><p style="margin:1px 0 0 0;font-size:10px;color:#9ca3af;">Invoice {{invoice_id}}</p></td></tr></table></td><td align="right" valign="middle"><span style="display:inline-block;padding:3px 10px;border-radius:20px;background-color:#dcfce7;color:#16a34a;font-size:10px;font-weight:600;">PAID</span></td></tr></table></td></tr>
+                      <tr><td style="padding:16px 20px;border-bottom:1px solid #e5e7eb;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td valign="middle"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td><img src="logo_icon.png" alt="" width="20" height="20" style="display:block;width:20px;height:20px;border-radius:4px;" /></td><td style="padding-left:8px;"><p style="margin:0;font-size:14px;font-weight:700;color:#111827;">Craftsman AI</p><p style="margin:1px 0 0 0;font-size:10px;color:#9ca3af;">Invoice {{invoice_id}}</p></td></tr></table></td><td align="right" valign="middle"><span style="display:inline-block;padding:3px 10px;border-radius:20px;background-color:#dcfce7;color:#16a34a;font-size:10px;font-weight:600;">PAID</span></td></tr></table></td></tr>
                       <tr><td style="padding:14px 20px 8px 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td><p style="margin:0;font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Billed to</p><p style="margin:3px 0 0 0;font-size:13px;font-weight:600;color:#111827;">{{billed_to_name}}</p><p style="margin:1px 0 0 0;font-size:11px;color:#6b7280;">{{billed_to_email}}</p></td><td align="right" valign="top"><p style="margin:0;font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Payment date</p><p style="margin:3px 0 0 0;font-size:13px;font-weight:600;color:#111827;">{{payment_date}}</p></td></tr></table></td></tr>
                       <tr><td style="padding:12px 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;"><tr style="background-color:#f9fafb;"><td style="padding:8px 12px;font-size:11px;color:#6b7280;font-weight:600;">Item</td><td align="right" style="padding:8px 12px;font-size:11px;color:#6b7280;font-weight:600;">Amount</td></tr><tr><td style="padding:12px;border-top:1px solid #e5e7eb;"><p style="margin:0;font-size:13px;font-weight:600;color:#111827;">{{line_item_name}}</p><p style="margin:2px 0 0 0;font-size:11px;color:#9ca3af;">{{line_item_description}}</p></td><td align="right" style="padding:12px;border-top:1px solid #e5e7eb;font-size:13px;font-weight:600;color:#111827;">{{line_item_amount}}</td></tr></table></td></tr>
                       <tr><td style="padding:4px 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:3px 0;font-size:12px;color:#9ca3af;">Subtotal</td><td align="right" style="padding:3px 0;font-size:12px;color:#374151;">{{subtotal}}</td></tr><tr><td style="padding:3px 0;font-size:12px;color:#9ca3af;">Tax</td><td align="right" style="padding:3px 0;font-size:12px;color:#374151;">{{tax}}</td></tr></table></td></tr>
@@ -56,7 +56,7 @@
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#08081a;">
     <tr>
       <td align="center" style="padding:24px 16px 40px 16px;">
-        <p style="margin:0;font-size:12px;color:#4b5563;">&copy; 2026 CraftsmanAI. All rights reserved. &bull; support@craftsmanai.app</p>
+        <p style="margin:0;font-size:12px;color:#4b5563;">&copy; 2026 Craftsman AI. All rights reserved. &bull; support@craftsmanai.app</p>
       </td>
     </tr>
   </table>
@@ -68,7 +68,7 @@
         "billed_to_name": "Acme Corporation",
         "billed_to_email": "billing@acme.com",
         "payment_date": "June 3, 2026",
-        "line_item_name": "CraftsmanAI Platform Subscription",
+        "line_item_name": "Craftsman AI Platform Subscription",
         "line_item_description": "Enterprise Pro Plan - Annual seat licensing",
         "line_item_amount": "$2,400.00",
         "subtotal": "$2,400.00",
