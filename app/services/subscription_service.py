@@ -63,8 +63,31 @@ class SubscriptionService:
                 detail="An active subscription is required to perform this action. Please subscribe to a plan."
             )
 
-        # Check limit
-        # subscription.initial_monthly_renders = -1 means unlimited
+        # Check if plan has unlimited renders feature flag
+        from app.models.subscription import SubscriptionPlan
+        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
+        
+        # If plan has unlimited renders, skip all limit checks
+        if plan and plan.has_unlimited_renders:
+            subscription.used_monthly_renders = (subscription.used_monthly_renders or 0) + tokens_to_deduct
+            try:
+                db.commit()
+                db.refresh(subscription)
+                logger.info(
+                    f"Successfully deducted {tokens_to_deduct} tokens for user {user.id} (owner {owner_id}). "
+                    f"New usage: {subscription.used_monthly_renders}/Unlimited"
+                )
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Failed to deduct subscription tokens for user {user.id}: {str(e)}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to update subscription usage. Please try again."
+                )
+            return subscription
+
+        # Check limit (only for plans without unlimited renders)
+        # subscription.initial_monthly_renders = -1 means unlimited (legacy)
         limit = subscription.initial_monthly_renders
         used = subscription.used_monthly_renders or 0
 

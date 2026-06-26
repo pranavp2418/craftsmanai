@@ -21,42 +21,39 @@ def create_subscription_plan(
 ) -> Any:
     """
     Create new subscription plan (Admin only ideally).
+    
+    Feature flags (can_use_logo, can_use_brand_name, has_unlimited_renders)
+    should be set explicitly in the request body. If not provided, all flags
+    default to False.
     """
-    # 1. Enforce allowed names (case-insensitive) and map them to their canonical tier
-    name_lower = plan_in.name.strip().lower() if plan_in.name else ""
-    category_map = {
-        "starter": "starter",
-        "starter plan": "starter",
-        "pro": "pro",
-        "pro plan": "pro",
-        "business": "business",
-        "business plan": "business"
-    }
-    if name_lower not in category_map:
+    # Prevent duplicate plan names
+    existing = db.query(SubscriptionPlan).filter(
+        func.lower(SubscriptionPlan.name) == plan_in.name.strip().lower()
+    ).first()
+    if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Plan name must be one of: Starter, Pro, Business (or with 'plan' suffix)."
+            detail=f"A subscription plan with the name '{plan_in.name.strip()}' already exists."
         )
     
-    canonical_tier = category_map[name_lower]
-
-    # 2. Check total plans count in database
-    existing_plans = db.query(SubscriptionPlan).all()
-    if len(existing_plans) >= 3:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Maximum limit of 3 subscription plans has been reached."
-        )
-
-    # 3. Prevent duplicate plans for the same tier
-    for existing in existing_plans:
-        existing_lower = existing.name.strip().lower() if existing.name else ""
-        if existing_lower in category_map and category_map[existing_lower] == canonical_tier:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"A subscription plan for the '{canonical_tier.capitalize()}' tier already exists."
-            )
-
+    # Use provided feature_points or auto-generate from flags
+    if hasattr(plan_in, 'feature_points') and plan_in.feature_points is not None:
+        feature_points = plan_in.feature_points
+    else:
+        # Auto-generate feature_points array based on feature flags
+        generated_features = []
+        if plan_in.can_use_logo:
+            generated_features.append("Custom Logo")
+        if plan_in.can_use_brand_name:
+            generated_features.append("Custom Brand Name")
+            generated_features.append("Business Email")
+            generated_features.append("Custom Phone Number")
+        if plan_in.can_use_custom_color:
+            generated_features.append("Custom Color")
+        if plan_in.has_unlimited_renders:
+            generated_features.append("Unlimited AI Renders")
+        feature_points = generated_features if generated_features else None
+    
     plan = SubscriptionPlan(
         name=plan_in.name,
         description=plan_in.description,
@@ -65,8 +62,12 @@ def create_subscription_plan(
         duration_days=plan_in.duration_days or 30,
         is_active=plan_in.is_active,
         is_most_popular=plan_in.is_most_popular,
-        feature_points=plan_in.feature_points,
-        monthly_renders=plan_in.monthly_renders
+        feature_points=feature_points,
+        monthly_renders=plan_in.monthly_renders,
+        can_use_logo=plan_in.can_use_logo,
+        can_use_brand_name=plan_in.can_use_brand_name,
+        can_use_custom_color=plan_in.can_use_custom_color,
+        has_unlimited_renders=plan_in.has_unlimited_renders
     )
     db.add(plan)
     try:
@@ -126,6 +127,30 @@ def update_subscription_plan(
     # Handle backward compatibility for price
     if "monthly_price" in update_data and update_data["monthly_price"] is not None:
         update_data["price"] = update_data["monthly_price"]
+
+    # If feature_points is explicitly provided, use it as-is
+    # Otherwise, if any feature flag is being updated, auto-regenerate feature_points
+    if "feature_points" not in update_data:
+        feature_flags = ["can_use_logo", "can_use_brand_name", "can_use_custom_color", "has_unlimited_renders"]
+        if any(flag in update_data for flag in feature_flags):
+            # Get final values (updated or existing)
+            final_can_use_logo = update_data.get("can_use_logo", plan.can_use_logo)
+            final_can_use_brand_name = update_data.get("can_use_brand_name", plan.can_use_brand_name)
+            final_can_use_custom_color = update_data.get("can_use_custom_color", plan.can_use_custom_color)
+            final_has_unlimited_renders = update_data.get("has_unlimited_renders", plan.has_unlimited_renders)
+            
+            generated_features = []
+            if final_can_use_logo:
+                generated_features.append("Custom Logo")
+            if final_can_use_brand_name:
+                generated_features.append("Custom Brand Name")
+                generated_features.append("Business Email")
+                generated_features.append("Custom Phone Number")
+            if final_can_use_custom_color:
+                generated_features.append("Custom Color")
+            if final_has_unlimited_renders:
+                generated_features.append("Unlimited AI Renders")
+            update_data["feature_points"] = generated_features if generated_features else None
 
     for field, value in update_data.items():
         setattr(plan, field, value)

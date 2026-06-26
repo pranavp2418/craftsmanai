@@ -586,11 +586,18 @@ def get_token_status(
 
         plan_name = None
         plan_monthly_renders = None
+        can_use_logo = None
+        can_use_brand_name = None
+        has_unlimited_renders = None
         if active_sub:
             plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == active_sub.plan_id).first()
             if plan:
                 plan_name = plan.name
                 plan_monthly_renders = plan.monthly_renders
+                can_use_logo = plan.can_use_logo
+                can_use_brand_name = plan.can_use_brand_name
+                can_use_custom_color = plan.can_use_custom_color
+                has_unlimited_renders = plan.has_unlimited_renders
 
         return {
             "status": "success",
@@ -598,14 +605,18 @@ def get_token_status(
                 "monthly_renders_used": used,
                 "monthly_renders_limit": limit,
                 "monthly_renders_remaining": remaining,
-                "is_unlimited": limit == -1 or limit == 999999,
+                "is_unlimited": limit == -1 or limit == 999999 or has_unlimited_renders,
                 "renders_reset_date": active_sub.start_date if active_sub else None,
                 "needs_reset": False,
                 "active_subscription": {
                     "plan_name": plan_name,
                     "plan_monthly_renders": plan_monthly_renders,
                     "end_date": active_sub.end_date if active_sub else None,
-                    "is_queued": active_sub.is_queued if active_sub else False
+                    "is_queued": active_sub.is_queued if active_sub else False,
+                    "can_use_logo": can_use_logo,
+                    "can_use_brand_name": can_use_brand_name,
+                    "can_use_custom_color": can_use_custom_color,
+                    "has_unlimited_renders": has_unlimited_renders
                 } if active_sub else None
             }
         }

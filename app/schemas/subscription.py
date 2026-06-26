@@ -12,8 +12,13 @@ class SubscriptionPlanBase(BaseModel):
     duration_days: Optional[int] = None
     is_active: bool = True
     is_most_popular: bool = False
-    feature_points: Optional[List[str]] = None
     monthly_renders: int = -1
+    feature_points: Optional[List[str]] = None
+    # Feature flags
+    can_use_logo: bool = False
+    can_use_brand_name: bool = False
+    can_use_custom_color: bool = False
+    has_unlimited_renders: bool = False
 
 class SubscriptionPlanCreate(SubscriptionPlanBase):
     pass
@@ -28,11 +33,17 @@ class SubscriptionPlanUpdate(BaseModel):
     is_most_popular: Optional[bool] = None
     feature_points: Optional[List[str]] = None
     monthly_renders: Optional[int] = None
+    # Feature flags
+    can_use_logo: Optional[bool] = None
+    can_use_brand_name: Optional[bool] = None
+    can_use_custom_color: Optional[bool] = None
+    has_unlimited_renders: Optional[bool] = None
 
 class SubscriptionPlanInDBBase(SubscriptionPlanBase):
     id: UUID4
     created_at: datetime
     updated_at: Optional[datetime] = None
+    feature_points: Optional[List[str]] = None
 
     model_config = ConfigDict(from_attributes=True)
 

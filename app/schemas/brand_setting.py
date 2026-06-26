@@ -25,8 +25,11 @@ class BrandSettingUpdateRequest(BaseModel):
     @field_validator('logo_url')
     @classmethod
     def validate_logo_url(cls, v: Optional[str]) -> Optional[str]:
-        """Sanitize URL to prevent javascript: schemes"""
+        """Sanitize URL to prevent javascript: schemes. Allow base64 data URIs for upload."""
         if v is None:
+            return v
+        # Allow base64 data URIs (they will be processed by the service layer)
+        if v.startswith("data:image/"):
             return v
         return validate_and_sanitize(v, field_type="url", max_length=500)
 
@@ -47,26 +50,10 @@ class BrandSettingResponse(BaseModel):
     primary_color: str
     powered_by_craftsman_ai: bool = True
     is_deactivated: bool = False
+    can_use_logo: bool = False
+    can_use_brand_name: bool = False
+    can_use_custom_color: bool = False
     updated_at: datetime
 
     class Config:
         from_attributes = True
-
-    @model_validator(mode="before")
-    @classmethod
-    def compute_fields(cls, data):
-        # Gracefully handle dynamic Pydantic mapping
-        if hasattr(data, "user") and data.user:
-            plan = data.user.subscription_plan or "Starter"
-            return {
-                "user_id": data.user_id,
-                "brand_name": data.brand_name,
-                "logo_url": data.logo_url,
-                "business_email": data.business_email,
-                "phone_number": data.phone_number,
-                "primary_color": data.primary_color,
-                "powered_by_craftsman_ai": plan in ("Starter", "Pro"),
-                "is_deactivated": getattr(data, "is_deactivated", False),
-                "updated_at": data.updated_at
-            }
-        return data

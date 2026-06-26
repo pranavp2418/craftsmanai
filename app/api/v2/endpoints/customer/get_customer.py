@@ -50,7 +50,7 @@ def get_customer(
                 LinkedProject(
                     id=design.id,
                     design_code=design.design_code,
-                    name=design.name,
+                    name=design.name or "",
                     jewellery_type=design.jewellery_type,
                     status="Awaiting Approval" if share.status == DesignShareStatus.PENDING else "Shared with Customer",
                     thumbnail_url=design.input_image_url,

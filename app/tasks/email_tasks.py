@@ -38,7 +38,7 @@ def _send_via_zeptomail_sync(
     if not settings.ZEPTOMAIL_API_KEY:
         raise ValueError("ZEPTOMAIL_API_KEY is not configured")
     
-    from_email = from_email or settings.ZEPTOMAIL_FROM_EMAIL or "noreply@craftmen.com"
+    from_email = from_email or settings.ZEPTOMAIL_FROM_EMAIL or "noreply@craftsmanai.com"
     from_name = settings.ZEPTOMAIL_FROM_NAME
     
     payload = {
@@ -109,7 +109,7 @@ def send_signup_otp_email(self, to: str, otp: str, user_name: str):
         email_log = EmailLog(
             to_email=to,
             template_name="signup_otp",
-            subject="Your Craftmen Signup OTP",
+            subject="Your Craftsman AI Signup OTP",
             template_variables=json.dumps({
                 "otp": otp,
                 "user_name": user_name,
@@ -203,7 +203,7 @@ def send_password_reset_email(self, to: str, otp: str, user_name: str):
         email_log = EmailLog(
             to_email=to,
             template_name="password_reset_otp",
-            subject="Your Craftmen Password Reset OTP",
+            subject="Your Craftsman AI Password Reset OTP",
             template_variables=json.dumps({
                 "otp": otp,
                 "user_name": user_name,
@@ -295,7 +295,7 @@ def send_welcome_email(self, to: str, user_name: str, dashboard_url: str = "#"):
         email_log = EmailLog(
             to_email=to,
             template_name="welcome_platform",
-            subject="Welcome to Craftmen",
+            subject="Welcome to Craftsman AI",
             template_variables=json.dumps({
                 "user_name": user_name,
                 "dashboard_url": dashboard_url,
@@ -390,7 +390,7 @@ def send_design_review_email(
         from app.core.database import SessionLocal
         from app.models.email_log import EmailLog, EmailStatus
 
-        subject = f"Review your Craftmen design: {design_name}"
+        subject = f"Review your Craftsman AI design: {design_name}"
 
         db = SessionLocal()
         retry_count = getattr(self.request, "retries", 0)
@@ -443,7 +443,7 @@ def send_design_review_email(
                     <tr>
                         <td align="center" style="padding: 40px 40px 20px 40px;">
                             <div style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); -webkit-background-clip: text; color: transparent; font-size: 32px; font-weight: 800; letter-spacing: -0.025em; margin-bottom: 8px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-                                CRAFTMEN
+                                Craftsman AI
                             </div>
                             <div style="height: 2px; width: 60px; background: linear-gradient(90deg, #6366f1 0%, #a855f7 100%); border-radius: 1px;"></div>
                         </td>
@@ -484,7 +484,7 @@ def send_design_review_email(
                     <tr>
                         <td align="center" style="padding: 24px 40px; background-color: rgba(0, 0, 0, 0.2); border-top: 1px solid rgba(255, 255, 255, 0.04);">
                             <p style="color: #4b5563; font-size: 12px; margin: 0;">
-                                &copy; 2026 Craftmen. All rights reserved.
+                                &copy; 2026 Craftsman AI. All rights reserved.
                             </p>
                         </td>
                     </tr>
@@ -500,7 +500,7 @@ def send_design_review_email(
             f"Hi {customer_name},\n\n"
             f"{design_name} ({safe_variant_name}) has been shared with you for review.\n\n"
             f"Open this link to review it:\n{review_url}\n\n"
-            "Best regards,\nThe Craftmen Team"
+            "Best regards,\nThe Craftsman AI Team"
         )
 
         # Send via ZeptoMail - design review emails use ZEPTOMAIL_CUSTOMER_EMAIL
@@ -856,7 +856,7 @@ def send_contact_notification_email(self, full_name: str, business_name: str, em
         logger.info(f"📧 Starting {task_name} from {full_name} ({email})")
 
         to_email = settings.CONTACT_NOTIFICATION_EMAIL
-        email_subject = f"New Contact Form Submission: {business_name} - Craftmen"
+        email_subject = f"New Contact Form Submission: {business_name} - Craftsman AI"
 
         html_content = f"""
         <html>
@@ -891,7 +891,7 @@ def send_contact_notification_email(self, full_name: str, business_name: str, em
             </table>
             <hr style="border: 1px solid #eee;">
             <p style="color: #999; font-size: 12px;">
-                This email was sent from the Craftmen contact form.
+                This email was sent from the Craftsman AI contact form.
             </p>
         </body>
         </html>
@@ -956,7 +956,7 @@ def send_team_invitation_email(self, to_email: str, team_name: str, variables: d
         
         db = SessionLocal()
         
-        subject = f"You're invited to join {team_name} on Craftmen"
+        subject = f"You're invited to join {team_name} on Craftsman AI"
         
         # Create email log
         email_log = EmailLog(
@@ -1045,7 +1045,7 @@ def _build_team_invitation_html(team_name: str, variables: dict) -> str:
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Team Invitation - Craftmen</title>
+    <title>Team Invitation - Craftsman AI</title>
 </head>
 <body style="margin: 0; padding: 0; background-color: #0b0f19; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f3f4f6; -webkit-font-smoothing: antialiased; width: 100% !important; height: 100% !important;">
     <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #0b0f19; padding: 40px 20px;">
@@ -1056,7 +1056,7 @@ def _build_team_invitation_html(team_name: str, variables: dict) -> str:
                     <tr>
                         <td align="center" style="padding: 40px 40px 20px 40px;">
                             <div style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); -webkit-background-clip: text; color: transparent; font-size: 32px; font-weight: 800; letter-spacing: -0.025em; margin-bottom: 8px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-                                CRAFTMEN
+                                Craftsman AI
                             </div>
                             <div style="height: 2px; width: 60px; background: linear-gradient(90deg, #6366f1 0%, #a855f7 100%); border-radius: 1px;"></div>
                         </td>
@@ -1074,7 +1074,7 @@ def _build_team_invitation_html(team_name: str, variables: dict) -> str:
                                 <br>
                                 <span style="font-size: 18px; font-weight: 600; color: #818cf8;">{team_name}</span>
                                 <br>
-                                on Craftmen
+                                on Craftsman AI
                             </p>
                             
                             <!-- Role Info -->
@@ -1118,7 +1118,7 @@ def _build_team_invitation_html(team_name: str, variables: dict) -> str:
                     <tr>
                         <td align="center" style="padding: 24px 40px; background-color: rgba(0, 0, 0, 0.2); border-top: 1px solid rgba(255, 255, 255, 0.04);">
                             <p style="color: #4b5563; font-size: 12px; margin: 0;">
-                                &copy; 2026 Craftmen. All rights reserved.
+                                &copy; 2026 Craftsman AI. All rights reserved.
                             </p>
                         </td>
                     </tr>
@@ -1144,7 +1144,7 @@ def _build_team_invitation_text(team_name: str, variables: dict) -> str:
     text = f"""
 Hi {invited_name},
 
-{invited_by_name} has invited you to join the team {team_name} on Craftmen.
+{invited_by_name} has invited you to join the team {team_name} on Craftsman AI.
 
 Your role: {role.title()}
 
@@ -1152,7 +1152,7 @@ Open this link to accept the invitation:
 {invitation_link}
 
 Best regards,
-The Craftmen Team
+The Craftsman AI Team
 """.strip()
     
     return text
