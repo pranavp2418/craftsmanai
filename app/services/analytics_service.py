@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
-from sqlalchemy import and_, func, select, distinct
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, func, or_, select, distinct
 from fastapi import HTTPException, status
 
-from app.models.design import Design, DesignShare, DesignShareStatus, DesignVariant, DesignVariantManufacturerShare, ManufacturerShareStatus
+from app.models.design import Design, DesignShare, DesignShareStatus, DesignStatus, DesignVariant, DesignVariantManufacturerShare, ManufacturerShareStatus
 from app.models.manufacturer import Manufacturer
 from app.models.order import Order, OrderStatus
 from app.models.user import User
@@ -24,7 +23,7 @@ from app.schemas.analytics import (
 class AnalyticsService:
     """Service class for analytics operations with proper validation and RBAC"""
 
-    def __init__(self, db: AsyncSession, user: User):
+    def __init__(self, db, user: User):
         self.db = db
         self.user = user
         self.owner_id = self._get_owner_id()
@@ -250,7 +249,7 @@ class AnalyticsService:
                     design_filter,
                 )
             )
-            rows = result.all()
+            rows = list(result.all())
 
             from collections import defaultdict
             counts = defaultdict(int)
@@ -296,7 +295,7 @@ class AnalyticsService:
         design_filter = self._get_design_filter()
 
         try:
-            result = await self.db.execute(
+            result = self.db.execute(
                 select(Order.created_at)
                 .join(Design, Order.design_id == Design.id)
                 .where(
@@ -445,7 +444,7 @@ class AnalyticsService:
                 return value
 
             approval_durations = []
-            for created_at, reviewed_at in approval_rows.all():
+            for created_at, reviewed_at in list(approval_rows.all()):
                 created = _to_aware(created_at)
                 reviewed = _to_aware(reviewed_at)
                 if created and reviewed and reviewed >= created:
@@ -531,7 +530,7 @@ class AnalyticsService:
                     return "Pendants"
                 return "Other"
 
-            for jewellery_type, count in result.all():
+            for jewellery_type, count in list(result.all()):
                 category = normalize_jewellery_type(jewellery_type)
                 category_counts[category] += count or 0
 
@@ -571,7 +570,7 @@ class AnalyticsService:
 
             # If no actor_type specified or invalid, return all data
             if not normalized_filter or normalized_filter not in ["manufacturer", "customer"]:
-                # Fetch both customer and manufacturer data
+            # Fetch both customer and manufacturer data
                 customer_result = await self.db.execute(
                     select(DesignShare, Design, Manufacturer.name)
                     .join(DesignShare.design_variant)
@@ -599,7 +598,7 @@ class AnalyticsService:
                         return design.design_code
                     return f"REQ-{fallback_id}"
 
-                for share, design, manufacturer_name in customer_result.all():
+                for share, design, manufacturer_name in list(customer_result.all()):
                     created_at = share.reviewed_at or share.created_at
                     if created_at is None:
                         continue
@@ -628,7 +627,7 @@ class AnalyticsService:
                     ManufacturerShareStatus.REJECTED: "Manufacturer Rejected",
                 }
 
-                for share, design, manufacturer_name in manufacturer_result.all():
+                for share, design, manufacturer_name in list(manufacturer_result.all()):
                     created_at = share.created_at
                     if created_at is None:
                         continue
@@ -668,7 +667,7 @@ class AnalyticsService:
                         return design.design_code
                     return f"REQ-{fallback_id}"
 
-                for share, design, manufacturer_name in customer_result.all():
+                for share, design, manufacturer_name in list(customer_result.all()):
                     created_at = share.reviewed_at or share.created_at
                     if created_at is None:
                         continue
@@ -708,7 +707,7 @@ class AnalyticsService:
                         return design.design_code
                     return f"REQ-{fallback_id}"
 
-                for share, design, manufacturer_name in manufacturer_result.all():
+                for share, design, manufacturer_name in list(manufacturer_result.all()):
                     created_at = share.created_at
                     if created_at is None:
                         continue

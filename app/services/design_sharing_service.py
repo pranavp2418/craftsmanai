@@ -161,7 +161,7 @@ class DesignSharingService:
                 notification_service = NotificationService(self.db)
                 
                 customer_name = share.customer.full_name if share.customer else "A customer"
-                design_name = variant.design.name if (variant and variant.design) else "design"
+                design_name = variant.design.name if (variant and variant.design and variant.design.name) else (variant.design.design_code if (variant and variant.design) else "design")
                 variant_name = variant.variant_name if variant else ""
                 
                 notification_title = ""

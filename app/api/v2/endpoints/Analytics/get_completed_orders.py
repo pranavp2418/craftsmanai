@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from app.api.deps import get_db, get_current_active_user
+from app.core.dependencies import get_db, get_current_active_user
 from app.models.user import User
 from app.schemas.analytics import CompletedOrdersFilter
 from app.services.analytics_service import AnalyticsService

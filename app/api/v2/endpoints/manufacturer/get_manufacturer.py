@@ -65,7 +65,7 @@ def get_manufacturer(
                 SentRequest(
                     id=share.id,
                     design_code=design.design_code,
-                    name=design.name,
+                    name=design.name or "",
                     jewellery_type=design.jewellery_type,
                     status=status_str,
                     created_at=share.created_at,

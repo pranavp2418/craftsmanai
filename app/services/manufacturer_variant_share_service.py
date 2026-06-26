@@ -207,7 +207,7 @@ class DesignVariantManufacturerShareService:
                 notification_service = NotificationService(self.db)
                 
                 manufacturer_name = share.manufacturer.name if share.manufacturer else "A manufacturer"
-                design_name = variant.design.name if (variant and variant.design) else "design"
+                design_name = variant.design.name if (variant and variant.design and variant.design.name) else (variant.design.design_code if (variant and variant.design) else "design")
                 variant_name = variant.variant_name if variant else ""
                 
                 notification_title = "Manufacturer Quote Submitted"
