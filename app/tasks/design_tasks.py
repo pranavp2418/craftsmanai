@@ -105,8 +105,10 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             # metal got second-guessed). Metal is read ONLY from the prompt text (cheap regex). If the
             # user gave NO prompt at all, read the written brief (and any font) out of the image so there
             # is something to generate from.
-            from app.services.openai_service import extract_image_instructions, extract_metal_from_prompt
-            input_metal = extract_metal_from_prompt(prompt) or "yellow_gold"
+            from app.services.openai_service import extract_image_instructions, extract_metal_from_prompt, detect_metal_color
+            _prompt_metal = extract_metal_from_prompt(prompt)
+            input_metal = _prompt_metal or "yellow_gold"
+            _metal_named = _prompt_metal is not None
             _internal = ""
             # READ THE IN-IMAGE BRIEF when the client uploaded a design / spec-sheet and gave NO real design
             # instruction — i.e. an EMPTY prompt OR a generic "make / same this" (they want the IMAGE built,
@@ -130,7 +132,10 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                         if _brief:
                             prompt = _brief
                             # pick up a metal named in the brief ("10KT White Gold") so we don't default to yellow
-                            input_metal = extract_metal_from_prompt(_brief) or input_metal
+                            _brief_metal = extract_metal_from_prompt(_brief)
+                            if _brief_metal:
+                                input_metal = _brief_metal
+                                _metal_named = True
                             logger.info("Read in-image brief for design_id=%s: %s", design_id, _brief[:200])
                             try:
                                 design.user_prompt = _brief
@@ -144,6 +149,23 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                             )
                 except Exception as _be:
                     logger.warning("in-image brief read failed for design_id=%s: %s", design_id, _be)
+
+            # No metal named anywhere (prompt or brief) but there IS a reference image -> DETECT the image's
+            # actual metal colour. Otherwise a silver / white-gold piece sent as "same to same" defaults to
+            # yellow gold, and the angle views then RECOLOUR it to gold (the "silver -> gold" bug). The
+            # reference's own colour must win when the user didn't name a metal.
+            if not _metal_named and reference_image_source:
+                try:
+                    _refs2 = reference_image_source if isinstance(reference_image_source, list) else [reference_image_source]
+                    _u2 = next((u for u in _refs2 if u), None)
+                    if _u2:
+                        _mb64 = base64.b64encode(requests.get(_u2, timeout=20).content).decode("utf-8")
+                        _dm = detect_metal_color(_mb64)
+                        if _dm:
+                            input_metal = _dm
+                            logger.info("Detected base-image metal=%s for design_id=%s (no metal named)", _dm, design_id)
+                except Exception as _me:
+                    logger.warning("base-image metal detect failed for design_id=%s: %s", design_id, _me)
 
             gen_prompt = (prompt or "") + _internal
 
@@ -167,6 +189,13 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             bucket_path = f"generated/base/{design.design_code}"
             generated_image_url = upload_image_to_supabase(final_image_bytes, bucket_path)
 
+            # Register the base image under its ACTUAL metal so the UI shows the correct base colour AND the
+            # angle views REUSE this image for that metal (recolor=False) instead of recolouring the base to a
+            # frontend-sent default metal (the "silver base -> gold angle views" bug). metal_variations_json
+            # is otherwise None (the pixel auto-seeder is disabled), so EVERY angle request recoloured.
+            if generated_image_url and input_metal:
+                metal_variations_json = {input_metal: generated_image_url}
+
         else:
             # ── Fallback: prompt-only generation (no reference image) ─
             generated_item = openai_service.generate_image_from_prompt(
@@ -177,6 +206,13 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
 
             bucket_path = f"generated/base/{design.design_code}"
             generated_image_url = upload_image_to_supabase(final_image_bytes, bucket_path)
+
+            # Prompt-only: register the base image under the prompt's metal (or yellow-gold default) so the
+            # angle views reuse it for that metal instead of recolouring.
+            from app.services.openai_service import extract_metal_from_prompt as _emfp
+            _tm = _emfp(prompt) or "yellow_gold"
+            if generated_image_url:
+                metal_variations_json = {_tm: generated_image_url}
 
         variant_service = DesignVariantService(db)
         variant = variant_service.create_initial_variant(
