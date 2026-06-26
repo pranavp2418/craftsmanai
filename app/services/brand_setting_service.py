@@ -32,27 +32,39 @@ class BrandSettingService:
 
             should_deactivate = False
             
-            if not active_sub:
-                # No active subscription means they have no branding allowed (defaults to Starter)
+            # Get plan object to check feature flags
+            plan_obj = active_sub.plan if (active_sub and active_sub.plan) else None
+            
+            if not plan_obj:
+                # No active subscription means they have no branding allowed
                 should_deactivate = True
             else:
-                plan = active_sub.plan.name if active_sub.plan else "Starter"
-                plan_lower = plan.strip().lower()
-                if plan_lower not in ("pro", "business"):
-                    # Non-paid or other plans have no branding allowed
-                    should_deactivate = True
-                elif plan_lower == "pro":
-                    # Pro plan only allows logo to be changed.
-                    # If they have non-default custom fields set, then they have downgraded from Business.
-                    has_custom_brand_name = False
-                    if setting.brand_name and setting.brand_name.strip().lower() != "craftsman ai":
-                        has_custom_brand_name = True
-                    has_custom_email = setting.business_email != setting.user.email and setting.business_email is not None
-                    has_custom_phone = setting.phone_number is not None
-                    has_custom_color = setting.primary_color != "#6366F1" and setting.primary_color is not None
-                    
-                    if has_custom_brand_name or has_custom_email or has_custom_phone or has_custom_color:
+                # Deactivate if plan doesn't allow logo at all
+                if not plan_obj.can_use_logo:
+                    # Check if user has any non-default branding set (downgraded from higher plan)
+                    has_any_branding = (
+                        (setting.brand_name and setting.brand_name.strip().lower() != "craftsman ai") or
+                        (setting.business_email != setting.user.email and setting.business_email is not None) or
+                        (setting.phone_number is not None) or
+                        (setting.primary_color != "#6366F1" and setting.primary_color is not None) or
+                        (setting.logo_url is not None)
+                    )
+                    if has_any_branding:
                         should_deactivate = True
+                else:
+                    # Logo is allowed - check if user has custom fields that their plan doesn't support
+                    if setting.brand_name and setting.brand_name.strip().lower() != "craftsman ai":
+                        if not plan_obj.can_use_brand_name:
+                            should_deactivate = True
+                    if setting.primary_color != "#6366F1" and setting.primary_color is not None:
+                        if not plan_obj.can_use_custom_color:
+                            should_deactivate = True
+                    if setting.business_email != setting.user.email and setting.business_email is not None:
+                        if not plan_obj.can_use_brand_name:
+                            should_deactivate = True
+                    if setting.phone_number is not None:
+                        if not plan_obj.can_use_brand_name:
+                            should_deactivate = True
             
             if should_deactivate and not setting.is_deactivated:
                 setting.is_deactivated = True
@@ -84,32 +96,55 @@ class BrandSettingService:
             )
         ).first()
         
-        plan = active_sub.plan.name if (active_sub and active_sub.plan) else "Starter"
-        plan_lower = plan.strip().lower()
+        # Get plan object to check feature flags
+        plan_obj = active_sub.plan if (active_sub and active_sub.plan) else None
 
-        # 1. Non-paid or invalid plans block all branding updates
-        if plan_lower not in ("pro", "business"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Custom branding is not available on your current plan. Please upgrade to Pro or Business."
-            )
-
-        # 2. Pro plan restrictions: ONLY logo is allowed, brand_name and others are blocked
-        if plan_lower == "pro":
-            unsupported_fields = []
-            if kwargs.get("brand_name") is not None:
-                unsupported_fields.append("Brand Name")
-            if kwargs.get("business_email") is not None:
-                unsupported_fields.append("Business Email")
-            if kwargs.get("phone_number") is not None:
-                unsupported_fields.append("Phone Number")
-            if kwargs.get("primary_color") is not None:
-                unsupported_fields.append("Primary Brand Color")
-
-            if unsupported_fields:
+        # 1. Check logo permission
+        if kwargs.get("logo_url") is not None:
+            if not plan_obj or not plan_obj.can_use_logo:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Only the logo can be updated on the Pro plan. The following fields are restricted: {', '.join(unsupported_fields)}. Please upgrade to the Business plan for full custom branding."
+                    detail="Logo customization is not available on your current plan. Please upgrade to a plan that supports custom logos."
+                )
+        
+        # 2. Check brand name permission
+        if kwargs.get("brand_name") is not None:
+            if not plan_obj or not plan_obj.can_use_brand_name:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Brand name customization is not available on your current plan. Please upgrade to a plan that supports custom brand names."
+                )
+        
+        # 3. Check custom color permission
+        if kwargs.get("primary_color") is not None:
+            if not plan_obj or not plan_obj.can_use_custom_color:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Custom color customization is not available on your current plan. Please upgrade to a plan that supports custom colors."
+                )
+        
+        # 4. Check business email permission
+        if kwargs.get("business_email") is not None:
+            if not plan_obj or not plan_obj.can_use_brand_name:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Business email customization is not available on your current plan. Please upgrade to a plan that supports full branding."
+                )
+        
+        # 5. Check phone number permission
+        if kwargs.get("phone_number") is not None:
+            if not plan_obj or not plan_obj.can_use_brand_name:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Phone number customization is not available on your current plan. Please upgrade to a plan that supports full branding."
+                )
+        
+        # 6. Check if any field is being updated without plan permissions
+        if not plan_obj:
+            if any(v is not None for v in kwargs.values()):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="An active subscription is required to update brand settings."
                 )
 
         # Process base64 logo_url upload if necessary

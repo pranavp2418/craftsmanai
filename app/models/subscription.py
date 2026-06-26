@@ -37,6 +37,11 @@ class SubscriptionPlan(Base):
     monthly_renders = Column(Integer, default=-1)
     customer_shares = Column(Integer, default=-1)
     manufacturer_quotes = Column(Integer, default=-1)
+    # Feature flags for plan-based access control
+    can_use_logo = Column(Boolean, default=False, nullable=False)
+    can_use_brand_name = Column(Boolean, default=False, nullable=False)
+    can_use_custom_color = Column(Boolean, default=False, nullable=False)
+    has_unlimited_renders = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

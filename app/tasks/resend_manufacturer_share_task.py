@@ -166,10 +166,15 @@ def resend_manufacturer_share_email(
         designer_name = owner.full_name or owner.username
         design_code = design.design_code
         
-        # Determine brand logo based on subscription plan
-        # Pro plan users get their brand logo; Starter plan users get the default CraftsmanAI logo
+        # Determine brand logo based on subscription plan feature flag
         brand_logo_url = None
-        if owner.subscription_plan and owner.subscription_plan.lower() == "pro":
+        from app.models.subscription import SubscriptionPlan
+        plan_obj = None
+        if hasattr(owner, 'subscriptions') and owner.subscriptions:
+            active_sub = owner.subscriptions[0] if owner.subscriptions else None
+            if active_sub and active_sub.plan_id:
+                plan_obj = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == active_sub.plan_id).first()
+        if plan_obj and plan_obj.can_use_logo:
             brand_logo_url = brand_setting.logo_url if brand_setting else None
 
         # ── 7. Log the resend in the email_logs table for traceability
