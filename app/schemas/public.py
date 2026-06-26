@@ -50,6 +50,7 @@ class PublicDesignFullResponse(BaseModel):
     production_sheet: Optional[ProductionSheetResponse] = None
     brand_logo_url: Optional[str] = None
     brand_primary_color: Optional[str] = None
+    powered_by: bool = False
 
     
 
