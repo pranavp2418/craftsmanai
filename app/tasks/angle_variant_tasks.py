@@ -179,151 +179,284 @@ def _front_recolor_prompt(metal: str) -> str:
             f"crisp and sharp, even studio lighting, pure solid white background (#FFFFFF). One image only.")
 
 
-def _build_angle_variant_prompt(angle_name: str, metal: str, jewellery_type: str = "pendant", recolor: bool = True, type_text: str = "", piece_override: str = "") -> str:
-    """Build a concise angle variant prompt — minimal for best gpt-image-2 results.
+# ---------------------------------------------------------------------------
+# Angle / metal-variant prompt — a FAITHFUL PORT of the Lovable prototype's
+# generate-variant edge function (CRAFTSMAN_MASTER_SYSTEM_PROMPT + buildVariantPrompt
+# + subtypeAngleHints + VIEW_PROMPTS). Same model (gemini-3.1-flash-image-preview).
+# The BACK view is a MODEL-rendered subtype-correct rear (NOT a programmatic flip),
+# exactly like Lovable — the client wants angles "same to same" as Lovable.
+# ---------------------------------------------------------------------------
+_CRAFTSMAN_MASTER = (
+    "CraftsmanAI Master Jewelry Render Controller - DERIVED-ANGLE / METAL-SWAP MODE.\n\n"
+    "You are NOT a generic image generator. You are a controlled jewelry render engine. In this mode you are "
+    "ONLY rotating the camera or swapping metal color on an ALREADY-APPROVED hero render. You are NEVER "
+    "redesigning.\n\n"
+    "MISSION: preserve input intent, preserve subtype accuracy, preserve reference identity, avoid "
+    "hallucination, generate approval-ready variants for jewelry retailers.\n\n"
+    "PRIORITY ORDER: structural accuracy -> subtype fidelity -> preservation of the approved hero's identity -> "
+    "realistic manufacturable jewelry logic -> controlled minimal change.\n\n"
+    "RENDER STYLE (always): CAD-styled jewelry render, realistic and premium, crisp, structurally clear, "
+    "practically manufacturable, PURE WHITE (#FFFFFF) seamless background with NO cast/ground/contact shadow, "
+    "NO gradient floor, NO reflection plate, symmetry-preserving, soft uniform studio lighting, approval-ready.\n\n"
+    "PRECISION-CRITICAL ELEMENTS (preserve exactly, never distort): names, initials, monograms, logos, "
+    "engraving, class years, custom lettering - identical shape, spelling, alignment, proportion, edge sharpness.\n\n"
+    "HARD CONSTRAINTS: no hallucinated components, no subtype drift, no extra ornaments, no melted geometry, no "
+    "floating stones, no impossible prongs, no warped engravings, no broken chain logic, no distorted typography, "
+    "no random asymmetry (unless the hero already has it), no non-manufacturable structures, no invented backside "
+    "engraving or hidden geometry. If hidden geometry is ambiguous, use conservative subtype defaults - never invent.\n\n"
+    "NO-DEFAULT-TEXT RULE (CRITICAL): NEVER add, engrave, stamp, etch, or emboss any text, letters, numbers, "
+    "monograms, brand names, watermarks, signatures, or logos onto the piece, packaging, or background UNLESS that "
+    "exact text is already present in the approved hero render (in which case preserve it verbatim). If the approved "
+    "hero has no engraved text, the variant must have no engraved text.\n\n"
+    "FINAL VALIDATION: type correct? subtype correct? hero identity preserved? text/logo exact? stone/metal logic "
+    "realistic? CAD-styled? approval-ready? If any answer is NO, correct before finalizing."
+)
 
-    recolor=False (preferred): the reference image is ALREADY the correct metal color,
-    so we keep the exact same color/design and ONLY change the viewing angle. This makes
-    the angle match the base image the user is viewing.
-    recolor=True (fallback): no correctly-colored reference exists, so we recolor to the
-    requested metal while changing the angle.
+_VIEW_DESCRIPTIONS = {
+    "side": ("TRUE SIDE PROFILE rotation of the EXACT same object - reveal real thickness, shank/bail/gallery "
+             "height, prong elevation, and side construction. This is a camera rotation, NOT a reimagined design."),
+    "back": ("REAR VIEW of the EXACT same object - show the actual back-plate construction implied by the front "
+             "geometry. Use subtype-correct rear logic only. Do NOT invent cutouts, engraving, or openings not "
+             "implied by the front."),
+    "worn": ("WORN view: place the EXACT same approved object naturally on the appropriate body area (neck for "
+             "pendants/chains, hand for rings, ear for earrings, wrist for bracelets/watches, teeth for grillz). "
+             "Object geometry, proportions, stones, text, and metal must remain identical to the approved hero "
+             "render. No redesign."),
+}
+
+
+def _subtype_angle_hints(item_type: str, view_type: str) -> str:
+    """Faithful port of Lovable's subtypeAngleHints - subtype-correct rear/side/worn templates so derived
+    angles don't hallucinate hidden geometry. (cufflink/brooch/buckle worn entries added so they aren't
+    forced into a neck pendant - Lovable gates those on the frontend instead.)"""
+    t = (item_type or "").lower()
+    is_chain_like = ("necklace" in t) or ("chain" in t) or ("bracelet" in t)
+    if view_type == "back":
+        if "pendant" in t:
+            return ("Back: solid or lightly recessed back plate matching the front silhouette exactly. Bail visible "
+                    "at top in correct orientation. No new engraving, no new openings.")
+        if "ring" in t:
+            return ("Back: continuous inner band, underside openness consistent with subtype (open gallery for prong "
+                    "settings, closed for signet/class style). No extra cutouts.")
+        if is_chain_like:
+            return ("Back: same link pattern continues identically - Cuban stays Cuban, Figaro ratio preserved, Rope "
+                    "twist consistent, Tennis spacing/prong rhythm preserved. Same link count.")
+        if "earring" in t:
+            return "Back: post/clutch or hoop closure mechanism appropriate to subtype. Mirror-symmetric to front silhouette."
+        if "grill" in t:
+            return "Back: tooth-cap interior surface, same tooth count and arch curvature as front. No invented teeth."
+        if "watch" in t:
+            return "Back: case back appropriate to watch subtype, same case diameter and lug structure."
+        if "cufflink" in t:
+            return "Back: cufflink swivel/toggle bar mechanism on a solid reverse plate. No invented openings."
+        if "brooch" in t:
+            return "Back: pin stem and catch/clasp mechanism on a solid reverse plate."
+        if "buckle" in t:
+            return "Back: buckle prong and bar mechanism on a solid reverse plate."
+    if view_type == "side":
+        if "pendant" in t:
+            return ("Side: reveal pendant thickness, bail orientation, frame/border depth, stone wall height. "
+                    "Silhouette outline must match front exactly when rotated.")
+        if "ring" in t:
+            return ("Side: preserve shank thickness, head height, shoulder taper, gallery/prong structure. For "
+                    "signet/class-style preserve flat planar face thickness.")
+        if is_chain_like:
+            return "Side: link profile and thickness preserved, pattern rhythm unchanged."
+        if "grill" in t:
+            return "Side: arch curvature and gumline fit preserved, same tooth separation style."
+        if "watch" in t:
+            return "Side: case profile, bezel coverage, crown placement, lug geometry preserved."
+    if view_type == "worn":
+        if "pendant" in t:
+            return "Worn: on neck via chain, pendant hanging naturally at chest. Object identical to approved hero."
+        if "ring" in t:
+            return "Worn: on finger, hero face oriented toward camera. Identical geometry."
+        if "earring" in t:
+            return "Worn: on ear, identical geometry."
+        if "bracelet" in t or "necklace" in t or "chain" in t:
+            return "Worn: on wrist/neck, link pattern and clasp identical."
+        if "grill" in t:
+            return "Worn: on teeth, tooth count and arch identical to approved."
+        if "watch" in t:
+            return "Worn: on wrist, case and bracelet identical to approved."
+        if "body" in t:
+            return "Worn: appropriate body placement (nose/septum/navel/etc), hardware identical to approved."
+        if "cufflink" in t:
+            return "Worn: fastened through a man's white dress-shirt cuff, identical geometry. NOT a neck pendant, no chain."
+        if "brooch" in t:
+            return "Worn: pinned on a jacket lapel/garment, identical geometry. NOT a neck pendant, no chain."
+        if "buckle" in t:
+            return "Worn: on a leather belt at the waist, identical geometry. NOT a neck pendant, no chain."
+    return ""
+
+
+def _build_angle_variant_prompt(angle_name: str, metal: str, jewellery_type: str = "pendant", recolor: bool = True, type_text: str = "", piece_override: str = "") -> str:
+    """FAITHFUL port of the Lovable prototype's buildVariantPrompt + CRAFTSMAN master controller. Returns ONE
+    combined text prompt (master + structured derived-angle prompt) that is sent together with the hero image -
+    exactly like Lovable. The back view is a MODEL-rendered subtype-correct rear (no programmatic flip).
+
+    recolor=False: the reference is already the correct metal - keep colour, only rotate the camera.
+    recolor=True:  recolour to `metal` while rotating.
     """
+    piece = _resolve_piece(jewellery_type, type_text, piece_override)
+    # Map to the Lovable canonical labels used by the subtype hints.
+    canonical = {"grill": "grillz", "body": "body_jewelry"}.get(piece, piece)
+    jt_label = (jewellery_type or "").strip() or piece
+
+    view_type = "worn" if "worn" in angle_name else ("back" if "back" in angle_name else "side")
+    view_desc = _VIEW_DESCRIPTIONS.get(view_type, _VIEW_DESCRIPTIONS["side"])
     metal_desc = METAL_DESCRIPTIONS.get(metal, f"{metal.replace('_', ' ').title()} metal with a high-polish finish")
-    is_worn = "worn" in angle_name
-    jt = jewellery_type or "jewelry piece"
 
     if recolor:
-        color_clause = f", rendered in {metal_desc}"
-        color_preserve = ""
-        change_clause = "Only the viewing angle and metal color change"
+        instruction = (f"Generate a {view_desc} of the EXACT same piece rendered in {metal_desc}. Preserve the "
+                       "identical design: same silhouette, stone arrangement, prong/setting logic, text/logo, "
+                       "border/frame, bail/head/shank structure. Only the viewpoint and metal color change.")
+        metal_preserve = ""
     else:
-        color_clause = ""
-        color_preserve = " same EXACT metal color and finish as the reference,"
-        change_clause = "ONLY the viewing angle changes — keep the exact same metal color, finish and design as the reference"
+        instruction = (f"Generate a {view_desc} of the EXACT same piece. Preserve the identical design: same "
+                       "silhouette, stone arrangement, prong/setting logic, text/logo, border/frame, "
+                       "bail/head/shank structure. Only the camera angle changes.")
+        metal_preserve = ", metal color"
 
-    # Resolve the piece type ONCE (used by both the worn and back views). The user's EXPLICIT
-    # jewellery_type WINS over the base-image vision (a selected "Cufflink"/"Ring" is never flipped to
-    # "pendant" just because its face looks square). See _resolve_piece.
-    piece = _resolve_piece(jewellery_type, type_text, piece_override)
-    is_neck_piece = piece in ("pendant", "necklace")
-    # 'Band' pieces are worn around a body part and have NO bail/hook (ring, bracelet, etc.).
-    is_band_piece = piece in ("ring", "bracelet", "anklet", "bangle", "watch")
-    # Components / sets / generic custom have no on-body shot — never force them onto a neck/pendant.
-    has_worn = piece in _WORN_BODYPART
-    # Use the resolved piece word so the prompt says "ring"/"bracelet" instead of "Custom".
-    worn_jt = piece if (jt == "jewelry piece" or (jewellery_type or "").strip().lower() in ("", "custom")) else jt
+    # Manufacturing reference views must show the SAME piece from every angle — the model otherwise drifts
+    # (drops icing to plain metal on rotation). Demand identical stone coverage across the view set.
+    instruction += (" CRITICAL - match the hero's STONE COVERAGE exactly: every diamond / pave-set surface on the "
+                    "approved hero stays FULLY set in this view (never turn an iced surface into plain metal, never "
+                    "add or thin stones); identical stone count, size and density on every visible face.")
 
-    stone_protection = (
-        "\n\nCRITICAL STONE PROTECTION: Do NOT change the color, shape, position, or type of any gemstones. "
-        "All gemstones (including clear diamonds and colored stones like green, red, pink, blue, etc.) must preserve their original color, vibrancy, saturation, and transparency exactly as seen in the reference image. "
-        "Do NOT recolor, desaturate, or turn colored gems into white/silver or metal. "
-        "Preserve the EXACT stone COUNT and FULL pavé / diamond coverage from the reference — do NOT drop, thin out, "
-        "shrink, simplify, or replace any pavé or stones with plain/blank metal; every diamond visible on the piece "
-        "must stay set, even when the piece appears smaller in a worn/lifestyle scene."
+    angle_hints = _subtype_angle_hints(canonical, view_type)
+    angle_block = f"SUBTYPE ANGLE TEMPLATE:\n{angle_hints}\n\n" if angle_hints else ""
+    house_first = ("- Worn view: object on body naturally, but the object itself is identical to the hero"
+                   if view_type == "worn"
+                   else "- Isolated jewelry on clean white / very light neutral background")
+
+    variant_prompt = (
+        "You are CraftsmanAI's derived-angle render engine. You are NOT designing a new piece.\n"
+        "You are generating a SUPPORT ANGLE of an ALREADY APPROVED hero render (attached as the first image). "
+        "The approved hero IS THE MASTER GEOMETRY TRUTH.\n\n"
+        "LOCKED DESIGN STATE - DO NOT MODIFY:\n"
+        f"- Item type: {jt_label} (canonical: {canonical})\n\n"
+        "VARIANT INSTRUCTION:\n"
+        f"{instruction}\n\n"
+        f"{angle_block}"
+        "DERIVED-ANGLE PRESERVATION RULES (mandatory):\n"
+        "- The attached hero render is the ABSOLUTE SOURCE OF TRUTH. Treat it as a 3D object you are merely "
+        "rotating or placing.\n"
+        "- Preserve EXACTLY: subtype, silhouette, proportions, thickness, stone count, stone arrangement, "
+        f"prong/setting logic, text/logo geometry, border/frame, bail/clasp/head/shank structure{metal_preserve}.\n"
+        "- Do NOT redesign, reinterpret, or 'improve' any part.\n"
+        "- Do NOT add or remove stones, letters, dates, icons, cutouts, or decorative elements.\n"
+        "- Do NOT alter link count (chains/bracelets), tooth count (grillz), or stone row count.\n"
+        "- Stone topology must match the hero exactly when projected to the new angle.\n"
+        "- If hidden geometry is ambiguous, use CONSERVATIVE subtype-template defaults - do NOT invent.\n\n"
+        "CRAFTSMAN HOUSE STYLE:\n"
+        f"{house_first}\n"
+        "- CAD-styled approval render\n"
+        "- Centered composition\n"
+        "- Crisp, premium, production-review friendly\n"
+        "- Symmetric where the hero is symmetric\n\n"
+        "ANTI-HALLUCINATION RULES:\n"
+        "- No melted prongs, no floating stones, no fused metal blobs\n"
+        "- No fake glitter, no generic diamond grids\n"
+        "- No invented backside engraving, no invented openings\n"
+        "- Preserve negative space and edge crispness\n\n"
+        "HARD NEGATIVE CONSTRAINTS (mandatory - never violate):\n"
+        "- Do NOT introduce hallucinated elements\n"
+        "- Do NOT change subtype\n"
+        "- Do NOT add extra stones, extra links, extra layers, extra motifs, or random decorative details\n"
+        "- Do NOT distort lettering, numbers, logos, monograms, or engraving\n"
+        "- Do NOT melt metal edges\n"
+        "- Do NOT create floating stones or impossible prong placements\n"
+        "- Do NOT break chain rhythm or clasp logic\n"
+        "- Do NOT produce asymmetrical layout unless the hero is intentionally asymmetric\n\n"
+        "One image only."
+    )
+    return f"{_CRAFTSMAN_MASTER}\n\n{variant_prompt}"
+
+
+# ---------------------------------------------------------------------------
+# MULTI-VIEW angle generation (the client's idea): generate ALL views of a piece in ONE image/context
+# (a 2x2 grid: front / side / back / worn of the SAME piece) and CROP it into the separate views. Because
+# the model draws all four together in one pass, they are mutually CONSISTENT — no per-angle drift (the old
+# approach re-imagined each angle separately and dropped icing / changed the design). DB shape is unchanged:
+# the base stays the front, and the side/back/worn crops become angles_json.
+# ---------------------------------------------------------------------------
+_MV_WORN = {
+    "pendant": "worn on a person's neck on a chain, resting on the chest",
+    "necklace": "worn on a person's neck",
+    "ring": "worn on a person's finger",
+    "earring": "worn on a person's ear",
+    "bracelet": "worn on a person's wrist",
+    "anklet": "worn on a person's ankle",
+    "watch": "worn on a person's wrist",
+    "grill": "worn on a person's teeth",
+    "cufflink": "fastened on a man's white dress-shirt cuff (NOT a neck pendant)",
+    "brooch": "pinned on a jacket lapel (NOT a neck pendant)",
+    "buckle": "on a leather belt at the waist (NOT a neck pendant)",
+    "body": "worn on the relevant pierced body area (NOT a neck pendant)",
+}
+_MV_BACK = {
+    "pendant": "a SOLID polished metal back plate (any lettering MIRRORED / reversed), the bail visible at top, NO stones on the back",
+    "necklace": "a solid metal back / clasp, no stones",
+    "ring": "the continuous inner band / shank seen from behind",
+    "earring": "the posts & butterfly clutches",
+    "bracelet": "the reverse of the links and the clasp",
+    "watch": "the case back",
+    "grill": "the tooth-cap interior surface",
+    "cufflink": "the swivel / toggle bar mechanism on a solid reverse plate",
+    "brooch": "the pin stem & catch on a solid reverse plate",
+    "buckle": "the prong & bar mechanism on a solid reverse plate",
+}
+
+
+def _build_multiview_prompt(piece: str, jt_label: str, metal_name: str, recolor: bool) -> str:
+    """Prompt for a single 2x2 multi-view sheet (front / side / back / worn) of the SAME piece."""
+    worn = _MV_WORN.get(piece, "worn on a person in the natural way for this kind of piece")
+    back = _MV_BACK.get(piece, "the solid metal reverse of the piece with its real findings / mechanism")
+    if recolor:
+        metal_desc = METAL_DESCRIPTIONS.get(metal_name, f"{metal_name.replace('_', ' ').title()} metal")
+        metal_clause = f", ALL rendered in {metal_desc}"
+    else:
+        metal_clause = ", keeping the EXACT same metal colour / finish as the attached reference"
+    return (
+        "IMPORTANT - RENDER ZERO TEXT: do NOT write any words, panel titles, captions, labels or annotations "
+        "anywhere in this image. The ONLY lettering allowed is the jewelry's OWN design on the piece itself.\n\n"
+        f"You are given the approved render of a {jt_label} (attached). Produce ONE clean image on a pure white "
+        f"background (#FFFFFF), split into a 2x2 grid of four equal panels - EVERY panel is the SAME EXACT piece "
+        f"(identical design, lettering, stones, proportions){metal_clause}:\n"
+        "- Top-left: the piece straight-on, its decorated face toward the camera (same as the attached reference).\n"
+        "- Top-right: the SAME piece rotated about 45 degrees to reveal its thickness and side depth, with the "
+        "decorated face fully visible and its EXACT surface finish preserved.\n"
+        f"- Bottom-left: the SAME piece seen from its reverse - {back}.\n"
+        f"- Bottom-right: the SAME piece {worn}.\n"
+        "Every panel is the SAME EXACT piece - keep the EXACT SAME SURFACE FINISH as the reference: if an area is "
+        "stone-set / diamond-set keep it fully set, and if an area is PLAIN polished metal keep it plain. Do NOT ADD "
+        "any stones/diamonds where the reference has none, and do NOT REMOVE stones where it has them. Identical "
+        "design, lettering, proportions and metal colour. CAD-style realistic jewelry render, crisp, even studio "
+        "lighting. The first three panels on pure white; only the last panel shows a person. NO text, captions, "
+        "titles, grid lines or borders anywhere - only the jewelry."
     )
 
-    if is_worn:
-        # SCENE-FIRST worn views — the model reflexively turns these into a neck pendant unless the body
-        # SCENE leads the prompt (the piece becomes a detail WITHIN the scene), so we describe the scene
-        # first and hard-exclude neck / chain / pendant. (cufflink → shirt cuff, brooch → lapel, etc.)
-        if piece == "cufflink":
-            return f"""A photorealistic editorial menswear close-up PHOTOGRAPH of a man's wrist and forearm wearing a crisp WHITE FRENCH-CUFF (double-cuff) dress shirt with the cuff folded back. A matching PAIR of these exact cufflinks{color_clause} fastens the shirt cuff — each cufflink pushed through the cuff buttonholes so its decorative face sits flat on the outside of the folded cuff. The shirt cuff and wrist FILL the frame. This is a CUFFLINK fastening a SHIRT CUFF: there is NO neck, NO chest, NO chain, NO bail and NO pendant anywhere in the image. Keep each cufflink's EXACT design, stones and metal{color_preserve} identical to the reference.{stone_protection}
 
-Photorealistic lifestyle photograph, natural lighting, sharp focus on the cufflinks. One image only."""
-        if piece == "brooch":
-            return f"""A photorealistic close-up PHOTOGRAPH of this exact brooch{color_clause} PINNED to a person's tailored jacket LAPEL / coat, its pin clearly fastened through the fabric. The lapel, shoulder and garment FILL the frame. This is a BROOCH worn on clothing: NOT a necklace or pendant — there is NO chain, NO bail and NO bare neck or chest in the image. Keep the brooch's EXACT design, stones and metal{color_preserve} identical to the reference.{stone_protection}
+def _crop_quadrants(image_bytes: bytes) -> dict:
+    """Split a (near-)square 2x2-grid multi-view image into its four panels (PNG bytes)."""
+    from PIL import Image
+    import io
+    im = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    W, H = im.size
+    hw, hh = W // 2, H // 2
 
-Photorealistic lifestyle photograph, natural lighting, sharp focus on the brooch. One image only."""
-        if piece == "buckle":
-            return f"""A photorealistic close-up PHOTOGRAPH of a LEATHER BELT worn at the waist, this exact buckle{color_clause} at the centre fastening the belt with the leather strap threaded through it. The belt and buckle FILL the frame. This is a BELT BUCKLE: NOT a pendant — there is NO chain, NO bail and NO neck in the image. Keep the buckle's EXACT design, stones and metal{color_preserve} identical to the reference.{stone_protection}
+    def _b(box):
+        buf = io.BytesIO()
+        im.crop(box).save(buf, "PNG")
+        return buf.getvalue()
 
-Photorealistic lifestyle photograph, natural lighting, sharp focus on the buckle. One image only."""
-        if piece == "body":
-            return f"""A photorealistic close-up PHOTOGRAPH of this exact body-jewelry piece{color_clause} worn on the relevant pierced body area (real body jewelry / piercing). The piercing area FILLS the frame. It is NOT a neck pendant and has NO hanging chain or bail. Keep its EXACT design, stones and metal{color_preserve} identical to the reference.{stone_protection}
-
-Photorealistic lifestyle photograph, natural lighting, sharp focus on the piece. One image only."""
-        if not has_worn:
-            # Pure components (clasp / bail), matching sets and generic 'custom' have no single on-body shot —
-            # show a clean studio product hero shot instead of forcing them onto a neck as a pendant.
-            return f"""Show this exact same {worn_jt}{color_clause} as a premium studio PRODUCT hero shot — a clean three-quarter beauty angle of the piece ITSELF on a pure solid white background (#FFFFFF). Do NOT place it on a person and do NOT turn it into a hanging pendant.{stone_protection}
-
-Keep the EXACT same design, components, stones, engraving/text, shape, proportions, borders,{color_preserve} and all details identical to the reference. Only the camera angle changes; do not redesign or alter any part of the piece.
-
-Clean CAD-style 3D jewelry render, sharp focus, even studio lighting. One image only."""
-        worn_desc = _WORN_BODYPART[piece]
-        chain_clause = ""
-        if piece == "pendant":
-            chain_clause = (
-                " The necklace CHAIN must pass through the pendant's bail/hook at the top and the pendant must "
-                "hang straight down from that chain, exactly the way a real necklace is worn — the chain clearly "
-                "threaded through the bail and connected, resting evenly on both sides of the neck. The pendant "
-                "must NOT float on its own; it hangs from the chain via its bail."
-            )
-        elif piece == "necklace":
-            chain_clause = (
-                " The necklace sits naturally around the neck and rests evenly on the collarbone/chest, clasped "
-                "at the back — exactly the way a real necklace is worn. It is the chain / nameplate ITSELF; do NOT "
-                "add a separate hanging pendant or a bail it does not have."
-            )
-        elif piece == "ring":
-            chain_clause = (
-                " The finger must pass THROUGH the ring's band/opening — the ring is worn ON the finger with the "
-                "finger clearly INSIDE the band, sitting snugly at the base of the finger exactly like a real ring. "
-                "Use correct, realistic ring proportions (a normal-sized ring; the band hugs the finger); the "
-                "decorative top of the ring faces up on top of the finger. Do NOT make the ring oversized and do "
-                "NOT just rest it on top of the finger — the finger goes through the band hole."
-            )
-        elif is_band_piece:
-            chain_clause = (
-                f" The {worn_jt} encircles the limb — the body part passes THROUGH the band/opening so the piece is "
-                "worn around it like in real life, with correct realistic proportions. Do not just rest it on top."
-            )
-        return f"""Show this exact same {worn_jt}{color_clause}, {worn_desc} — a realistic lifestyle photo of the piece being worn.{chain_clause}{stone_protection}
-
-Keep the EXACT same design, components, stones, engraving/text, shape, proportions, borders,{color_preserve} and all details identical to the reference. Only show it being worn; do not redesign or alter any part of the piece.
-
-Photorealistic lifestyle photograph, natural lighting, the jewelry in sharp focus. One image only."""
-
-    if "back" in angle_name:
-        same_metal = metal_desc if recolor else "the same metal colour and finish as the reference"
-        if is_band_piece:
-            # A ring/bracelet is a solid band — its back is simply the reverse of the band and the
-            # back of any motif. It has NO bail/hook/backplate; never add a hanging loop.
-            ring_word = worn_jt or "ring"
-            return f"""Show the BACK / REVERSE side of this exact same {ring_word} — rotate the piece to show the back of the band/shank and the BACK of the decorative motif (for example the back of the animal's head and body), in {same_metal}, on a pure solid white background (#FFFFFF) with NO background scene.{stone_protection}
-
-It is a solid {ring_word} — a continuous band/shank. There is NO bail, NO hook, NO loop and NO backplate: do NOT add any hanging loop, hook, ring-clip or attachment of any kind. Simply show the same piece from behind — the smooth reverse of the band and the rear of the design. Keep the EXACT same shape, size, proportions and band thickness as the reference; only the viewing side changes.
-
-Render it as a clean CAD-style 3D jewelry render (crisp, sharp, even studio lighting) — NOT a lifestyle photo, NOT a cartoon, no background scene. Pure solid white background (#FFFFFF).
-
-One image only."""
-        if is_neck_piece:
-            # Pendant / necklace / nameplate: a real finished one has a SOLID closed metal back.
-            return f"""Show the BACK / REVERSE side of this exact same {worn_jt} — as if you physically flipped the piece over front-to-back — in {same_metal}, on a pure solid white background (#FFFFFF) with NO background scene.{stone_protection}
-
-This is the REVERSE side, NOT the front. By DEFAULT give it a SOLID, smooth, closed, polished metal BACK — a solid filled back finish covering the whole reverse, gently flat or softly domed, the way real finished name pendants / plates / charms are made. Do NOT show open-work, hollow gallery cut-outs, or the open backs of the stone settings; the back is a clean solid metal surface. Show the back of the bail/hook ONLY if the piece actually has one. Keep the SAME outer silhouette, proportions and structure as the front. The front design must NOT appear on the back: the name, numbers, lettering, motifs and any enamel/colour from the front must NOT be readable on the solid back (a subtle hidden maker's mark is fine, but no readable front design and no mirrored text).
-
-Render it as a clean CAD-style 3D jewelry render (crisp, sharp, even studio lighting) — NOT a lifestyle photo, NOT a cartoon, no background scene. Pure solid white background (#FFFFFF).
-
-One image only."""
-        # Everything else (cufflink, brooch, buckle, earring, grill, body, set, custom, component):
-        # show the TRUE reverse of THIS piece — never invent a pendant backplate / bail.
-        return f"""Show the BACK / REAR of this exact same {worn_jt} in {same_metal}, on a pure solid white background (#FFFFFF) with NO background scene.{stone_protection}
-
-Match the FRONT's framing EXACTLY: if the front shows a matching PAIR, show BOTH pieces from the back, side by side at the SAME size and position as the front — do NOT zoom into a single piece. Keep the SAME UPRIGHT orientation as the front: do NOT flip the piece upside-down — the toggle / findings stay on the SAME side as on the front. This is the REAR (the closure side), NOT the flat front face. On the back the functional LOCK is visible: for a cufflink the hinged SWIVEL / TOGGLE bar (flips to fasten the cuff); for an earring the posts & clutches or hoop closure; for a brooch the pin & catch; for a buckle the prong & bar. The rear gallery and the undersides of the pavé / diamonds ARE fine and expected — keep them visible (do NOT blank them out). Do NOT show the flat pavé FRONT FACE. Any DECORATIVE MOTIF that sits on the FRONT (for example a butterfly, logo, letter, figure or applied charm) belongs to the FRONT — when the piece is flipped it goes BEHIND, so on the back it appears ONLY as its plain solid metal reverse / bump (NO enamel colour, NO front detailing, NOT the detailed front motif). Do NOT add a hanging bail / hook / loop or turn it into a pendant. Keep the SAME outer silhouette, proportions and structure as the front.
-
-Render it as a clean CAD-style 3D jewelry render (crisp, sharp, even studio lighting) — NOT a lifestyle photo, no background scene. Pure solid white background (#FFFFFF).
-
-One image only."""
-
-    view_desc = VIEW_PROMPTS.get(angle_name, VIEW_PROMPTS.get("side_view"))
-    return f"""Show this exact same {worn_jt} from a {view_desc}{color_clause}.{stone_protection}
-
-Keep the exact same design, components, stones, engraving/text, shape, proportions, borders,{color_preserve} and all details. {change_clause} — do not redesign or alter any part of the piece.
-
-Render it as a clean CAD-style 3D jewelry render (crisp, sharp, accurate metal and stones, even studio lighting) — NOT a lifestyle photo, NOT a cartoon, no background scene. Pure solid white background (#FFFFFF).
-
-One image only."""
+    return {
+        "front": _b((0, 0, hw, hh)),
+        "side_view": _b((hw, 0, W, hh)),
+        "back_view": _b((0, hh, hw, H)),
+        "worn_view": _b((hw, hh, W, H)),
+    }
 
 
 def _extract_image_data(data_item: Any) -> tuple[bytes, str]:
@@ -430,23 +563,18 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
             sse_manager.publish_close(channel)
             return
 
-        # Build flat list of all (metal, angle) jobs to run in parallel.
-        # Exactly three views per metal: side view, back view, and wearable (worn) view.
-        angle_jobs: list[tuple[str, str]] = []
-        for metal_name in missing_metals:
-            for angle_name in ANGLE_VIEWS:
-                angle_jobs.append((metal_name, angle_name))
-
-        # For each metal, pick the correctly-colored reference so the angle MATCHES the
-        # base image the user is viewing. If a metal-specific variant image exists, use it
-        # and only rotate (no recolor). Otherwise fall back to the base image and recolor.
+        # MULTI-VIEW generation (the client's idea): instead of 3 SEPARATE per-angle generations (which DRIFT
+        # — each re-imagines the piece and drops icing / changes the design), generate ONE 2x2 multi-view sheet
+        # per metal (front / side / back / worn of the SAME piece, in one context) and CROP it into the views.
+        # All angles are then mutually CONSISTENT. The base stays as-is; we store the side/back/worn crops.
+        # DB shape is unchanged (base + angles_json {side_view, back_view, worn_view}).
         metal_variations = variant.metal_variations_json or {}
 
         def _ref_for_metal(metal_name: str) -> tuple[str, bool]:
             url = metal_variations.get(metal_name)
             if url:
-                return url, False  # correctly-colored reference → rotate only
-            return variant.base_design_image_url, True  # fall back → recolor
+                return url, False  # correctly-colored reference → keep colour
+            return variant.base_design_image_url, True  # fall back → recolor in the sheet
 
         # Pre-download each unique reference image ONCE (shared across threads)
         ref_blob_cache: dict[str, list[bytes]] = {}
@@ -454,81 +582,43 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
             ref_url, _ = _ref_for_metal(metal_name)
             if ref_url not in ref_blob_cache:
                 ref_blob_cache[ref_url] = download_reference_images([ref_url])
-        logger.info("Pre-downloaded %d unique reference image(s) for parallel angle generation", len(ref_blob_cache))
 
-        def _generate_single_angle(metal_name: str, angle_name: str) -> tuple[str, str, str | None]:
-            """Generate a single angle for a single metal. Returns (metal, angle, url or None)."""
-            logger.info(
-                "Generating %s for metal=%s, variant_id=%s",
-                angle_name, metal_name, variant_id,
-            )
+        _piece = _resolve_piece(jewellery_type, type_text, worn_piece_type)
+        _jt_label = (jewellery_type or "").strip() or _piece
+
+        def _generate_metal_angles(metal_name: str) -> tuple[str, dict]:
+            """Generate ALL angle views for ONE metal from a SINGLE multi-view sheet, then crop. Returns
+            (metal, {side_view: url, back_view: url, worn_view: url})."""
+            out: dict[str, str] = {}
             try:
                 ref_url, need_recolor = _ref_for_metal(metal_name)
                 cached_blobs = ref_blob_cache.get(ref_url)
-                is_worn = "worn" in angle_name
-                is_back = "back" in angle_name
-                back_piece = _resolve_piece(jewellery_type, type_text, worn_piece_type) if is_back else ""
-                if is_back and back_piece in _FLIP_BACK_PIECES:
-                    # FLAT name / design piece (pendant / nameplate): the back IS the front in reverse, so make
-                    # it a TRUE MIRROR FLIP (words read backwards) — deterministic, exactly what the client
-                    # wants. If the reference isn't already in the requested metal, recolour the FRONT first
-                    # (no angle change), then flip it.
-                    if need_recolor:
-                        front_b64 = generate_primary_image(
-                            [ref_url], _front_recolor_prompt(metal_name),
-                            pre_downloaded_blobs=cached_blobs, whiten_output=True,
-                        )
-                        front_bytes = base64.b64decode(front_b64)
-                    else:
-                        front_bytes = (cached_blobs or download_reference_images([ref_url]))[0]
-                    image_bytes = _flip_horizontal(front_bytes)
-                else:
-                    # Side / worn for all types, AND the back for every piece with a distinct mechanical back
-                    # (cufflink swivel, ring band, earring posts, brooch pin, buckle prong…) — MODEL-render the
-                    # real subtype-correct view. A flip here would wrongly show a mirrored FRONT.
-                    prompt = _build_angle_variant_prompt(angle_name, metal_name, jewellery_type, recolor=need_recolor, type_text=type_text, piece_override=worn_piece_type)
-                    # Use the CONFIGURED provider (generate_primary_image respects settings.IMAGE_PROVIDER) so a
-                    # Gemini-only deployment renders angles with Gemini too — instead of hard-calling OpenAI,
-                    # which fails when OpenAI is unreachable/unset (the "api.openai.com" error). It still falls
-                    # back to OpenAI only if Gemini fails AND OpenAI is configured. Worn view is a lifestyle
-                    # photo with skin/background — do NOT white-flood-fill it (it would bleed into the photo).
-                    b64_json = generate_primary_image(
-                        [ref_url], prompt, pre_downloaded_blobs=cached_blobs, whiten_output=not is_worn,
-                    )
-                    image_bytes = base64.b64decode(b64_json)
-                content_type = "image/png"
-                _validate_image_bytes(image_bytes, content_type)
-
-                bucket_path = (
-                    f"generated/angles/{variant.design_id}/{variant.id}/"
-                    f"{metal_name}/{angle_name}"
-                )
-                image_url = upload_image_to_supabase(image_bytes, bucket_path)
-                logger.info(
-                    "%s/%s generated for variant_id=%s: %s",
-                    metal_name, angle_name, variant_id, image_url,
-                )
-                return metal_name, angle_name, image_url
+                prompt = _build_multiview_prompt(_piece, _jt_label, metal_name, need_recolor)
+                # whiten_output=False — the worn panel has a person/background; never flood-fill the sheet.
+                b64 = generate_primary_image([ref_url], prompt, pre_downloaded_blobs=cached_blobs, whiten_output=False)
+                panels = _crop_quadrants(base64.b64decode(b64))
+                for view in ("side_view", "back_view", "worn_view"):
+                    try:
+                        img_bytes = panels[view]
+                        _validate_image_bytes(img_bytes, "image/png")
+                        bucket_path = f"generated/angles/{variant.design_id}/{variant.id}/{metal_name}/{view}"
+                        out[view] = upload_image_to_supabase(img_bytes, bucket_path)
+                    except Exception as _ve:
+                        logger.warning("multi-view crop upload failed %s/%s for variant_id=%s: %s", metal_name, view, variant_id, _ve)
+                logger.info("Multi-view angles generated for metal=%s variant_id=%s: %s", metal_name, variant_id, list(out))
             except Exception as exc:
-                logger.exception(
-                    "Failed to generate %s/%s for variant_id=%s: %s",
-                    metal_name, angle_name, variant_id, exc,
-                )
-                return metal_name, angle_name, None
+                logger.exception("Failed multi-view angles for metal=%s variant_id=%s: %s", metal_name, variant_id, exc)
+            return metal_name, out
 
-        # Run ALL angle+metal combinations in parallel (I/O-bound — waiting on OpenAI API)
-        max_parallel = min(len(angle_jobs), 5)
+        # One multi-view generation per metal, in parallel.
+        max_parallel = min(len(missing_metals), 5) or 1
         with ThreadPoolExecutor(max_workers=max_parallel) as executor:
-            futures = {
-                executor.submit(_generate_single_angle, metal, angle): (metal, angle)
-                for metal, angle in angle_jobs
-            }
+            futures = {executor.submit(_generate_metal_angles, m): m for m in missing_metals}
             for future in as_completed(futures):
-                metal_name, angle_name, image_url = future.result()
+                metal_name, views = future.result()
                 if metal_name not in generated_angles:
                     generated_angles[metal_name] = {}
-                if image_url:
-                    generated_angles[metal_name][angle_name] = image_url
+                generated_angles[metal_name].update(views)
 
         # Merge back any metals that weren't requested but existed before
         for existing_metal, existing_metal_data in existing_angles.items():
