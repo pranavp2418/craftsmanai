@@ -161,16 +161,27 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         
         # Content Security Policy - prevents XSS attacks
         # Adjust the policy based on your application's needs
+        # csp_directives = [
+        #     "default-src 'self'",
+        #     "script-src 'self' 'unsafe-inline' 'unsafe-eval'",  # Adjust based on needs
+        #     "style-src 'self' 'unsafe-inline'",
+        #     "img-src 'self' data: https: http:",
+        #     "font-src 'self' data:",
+        #     "connect-src 'self' wss: https:",
+        #     "frame-ancestors 'none'",
+        #     "base-uri 'self'",
+        #     "form-action 'self'"
+        # ]
         csp_directives = [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'",  # Adjust based on needs
-            "style-src 'self' 'unsafe-inline'",
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net",
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
             "img-src 'self' data: https: http:",
-            "font-src 'self' data:",
-            "connect-src 'self' wss: https:",
+            "font-src 'self' data: https://cdn.jsdelivr.net",
+            "connect-src 'self' wss: https: http:",
             "frame-ancestors 'none'",
             "base-uri 'self'",
-            "form-action 'self'"
+            "form-action 'self'",
         ]
         response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
         
