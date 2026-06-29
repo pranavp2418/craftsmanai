@@ -106,16 +106,17 @@ def _send_customer_notifications(
 
             send_customer_share_email.delay(
                 to_email=primary_email,
-                customer_name=customer.full_name or "Customer",
+                customer_name=customer_name,
                 preview_url=preview_url,
-                designer_name=current_user.full_name or current_user.username,
+                designer_name=designer_name,
                 retailer_name=retailer_name,
                 render_image_url=render_image_url,
-                design_code=design.design_code,
+                design_code=design_code,
                 jewelry_type=jewelry_type,
                 version=version,
                 version_label=version_label,
                 brand_logo_url=brand_logo_url,
+                brand_primary_color=brand_primary_color
             )
 
     # --- SMS ---
