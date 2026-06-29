@@ -93,11 +93,12 @@ def customer_access_design(
         )
     ]
 
-    # Get the creator's name
+    # Get the creator's name (use created_by_user_id if available, otherwise user_id)
     created_by_name = None
-    if design.user_id:
+    creator_id = design.created_by_user_id or design.user_id
+    if creator_id:
         from app.models.user import User
-        creator = db.query(User).filter(User.id == design.user_id).first()
+        creator = db.query(User).filter(User.id == creator_id).first()
         if creator:
             created_by_name = creator.full_name or creator.email
 
@@ -142,24 +143,36 @@ def customer_access_design(
         if plan.can_use_logo and plan.can_use_brand_name and plan.can_use_custom_color:
             powered_by = True
 
-    # Get approved manufacturer name and delivery time if exists
+    # Get approved manufacturer name and deadline if exists
     approved_manufacturer = None
     order_repo = OrderRepository(db)
     latest_order = order_repo.get_latest_by_design_id(design.id)
     if latest_order and latest_order.current_manufacturer_id:
-        # Get the approved quote for delivery time
+        # Get the approved quote for delivery time and submission date
+        from sqlalchemy import cast, String
+        from app.models.order import ManufacturerQuoteStatus
         approved_quote = db.query(ManufacturerQuote).filter(
             ManufacturerQuote.order_id == latest_order.id,
             ManufacturerQuote.manufacturer_id == latest_order.current_manufacturer_id,
-            ManufacturerQuote.status == "APPROVED"
+            ManufacturerQuote.status == ManufacturerQuoteStatus.APPROVED
         ).first()
         
         manufacturer = db.query(Manufacturer).filter(Manufacturer.id == latest_order.current_manufacturer_id).first()
         if manufacturer:
             from app.schemas.public import PublicManufacturerAccessResponse
+            from datetime import timedelta
+            
+            # Calculate deadline: quote submission date + delivery days
+            deadline = None
+            if approved_quote and approved_quote.delivery_time_days:
+                # Use quote creation date as the submission date
+                base_date = approved_quote.created_at.date() if approved_quote.created_at else datetime.now(timezone.utc).date()
+                deadline_date = base_date + timedelta(days=approved_quote.delivery_time_days)
+                deadline = deadline_date.isoformat()
+            
             approved_manufacturer = PublicManufacturerAccessResponse(
                 name=manufacturer.name,
-                delivery_time_days=approved_quote.delivery_time_days if approved_quote else None,
+                deadline=deadline,
             )
 
     return PublicDesignFullResponse(

@@ -80,7 +80,7 @@ class PublicCustomerAccessResponse(BaseModel):
 
 class PublicManufacturerAccessResponse(BaseModel):
     name: str
-    delivery_time_days: Optional[int] = None
+    deadline: Optional[str] = None
 
     class Config:
         from_attributes = True
