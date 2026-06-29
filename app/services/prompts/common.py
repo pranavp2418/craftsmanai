@@ -194,6 +194,13 @@ def normalize_retailer_language(note: str) -> str:
         directives.append("Preserve ALL unspecified geometry, material and layout EXACTLY from the reference.")
     if _DIAMOND_CUT_RE.search(p):
         directives.append("'diamond cut'/'diamond-cut' = a faceted ENGRAVED METAL finish, NOT a border of diamonds — do not add stones for it.")
+    # Lovable edge-case handlers (parse-request / generate-render verbatim): bail style, metal-only, bail-freeze.
+    if re.search(r"puffy\s*heart\s*bail", p):
+        directives.append("Bail should be a puffy heart-shaped bail only; do not alter the rest of the piece unless requested.")
+    if re.search(r"metal\s+change\s+only|just\s+change\s+the\s+metal|only\s+(the\s+)?metal\b|only\s+(change|update)\s+(the\s+)?(metal|colou?r|tone|finish)", p):
+        directives.append("Change ONLY the metal color/tone — preserve every other geometric, structural and stone detail exactly.")
+    if re.search(r"don'?t\s+touch\s+the\s+bail|leave\s+the\s+bail|keep\s+the\s+bail", p):
+        directives.append("Bail must be preserved exactly — do NOT modify bail geometry, size or style.")
 
     if not directives:
         return ""

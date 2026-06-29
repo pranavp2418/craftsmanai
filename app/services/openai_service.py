@@ -4137,12 +4137,30 @@ def generate_with_fallback(
         if refinement_intent:
             logger.info("[refinement_intent] %s", json.dumps(refinement_intent)[:1500])
 
-    # Expected text for spelling verification — extracted from the user's change request.
+    # Expected text for spelling verification. LLM-FIRST (Lovable-style): the refinement interpreter above
+    # already UNDERSTOOD the change (it even reads the OLD name off the image into from_state), so trust its
+    # structured to_state for the EXACT new lettering. This catches phrasings the raw-prompt regex misses —
+    # e.g. "i want name 'SERGE'" — which previously left expected_texts EMPTY, so the spelling QA never ran,
+    # no retry fired, and the rename was silently dropped (the image dominated and the old name came back).
+    # The regex stays as a fail-open fallback (interpret_refinement is an LLM call that may return nothing).
     expected_texts: List[str] = []
     if is_refine and user_prompt:
-        expected_texts = [new for (_old, new) in extract_text_replacements(user_prompt) if new and new.strip()]
-        if expected_texts and not _llm_is_text_change(user_prompt):
-            expected_texts = []
+        ri = refinement_intent or {}
+        _attr = (ri.get("attribute_to_change") or "").lower()
+        if any(k in _attr for k in ("text", "letter", "name", "engrav", "number", "word", "spell", "digit")):
+            _to = ri.get("to_state") or ""
+            # to_state may be compound ("engraving_text: SERGE, size: 6 inch, ...") — pull the text value.
+            _m = re.search(r"(?:engrav\w*|letter\w*|text|name|word|number|digit)[^:=,]{0,16}[:=]\s*([^,;\n]{1,40})", _to, re.IGNORECASE)
+            if _m:
+                expected_texts = [_m.group(1).strip().strip("\"'“”‘’ ")]
+            else:
+                # no key:value in to_state — mine the LLM's clean normalized_prompt with the regex extractor.
+                expected_texts = [new for (_o, new) in extract_text_replacements(ri.get("normalized_prompt") or "") if new and new.strip()]
+        if not expected_texts:
+            # fallback: regex on the raw user prompt (also covers the LLM-unavailable / non-text-change case).
+            expected_texts = [new for (_old, new) in extract_text_replacements(user_prompt) if new and new.strip()]
+            if expected_texts and not _llm_is_text_change(user_prompt):
+                expected_texts = []
     vision_available = bool(os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY)
     needs_spelling_check = bool(expected_texts) and vision_available
 

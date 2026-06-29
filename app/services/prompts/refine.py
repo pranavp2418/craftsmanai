@@ -102,6 +102,34 @@ def build_refine_prompt(
     """Build the refinement prompt. Drop-in for _build_concise_refine_prompt (+ image_count)."""
     from app.services import openai_service as svc
 
+    # LOVABLE-EXACT refine prompt (single-image edit) — client's strict rule: use the prototype's VERBATIM
+    # prompt with NO regex / custom clauses. The dynamic target / region / attribute / change are filled from
+    # the refinement intent (interpret_refinement already understood the request). The multi-image combine /
+    # component-swap case keeps its dedicated path below; every normal refine returns Lovable's prompt directly.
+    if (image_count or 1) <= 1:
+        from app.services.prompts.lovable_prompts import LOVABLE_REFINE_PROMPT
+        ri = refinement_intent or {}
+        target = ", ".join(ri.get("target_components") or []) or "the requested component"
+        region = ", ".join(ri.get("target_regions") or []) or "the relevant region"
+        attribute = (ri.get("attribute_to_change") or "the requested attribute").strip()
+        frm = (ri.get("from_state") or "").strip()
+        to = (ri.get("to_state") or "").strip()
+        normalized = (ri.get("normalized_prompt") or user_prompt or "").strip()
+        if frm and to:
+            change_line = f'Change {attribute} from "{frm}" to "{to}".'
+        elif to:
+            change_line = f'Change {attribute} to "{to}".'
+        else:
+            change_line = f"Apply this change: {normalized}"
+        return (LOVABLE_REFINE_PROMPT
+                .replace("{attempt}", str(attempt))
+                .replace("{target}", target)
+                .replace("{region}", region)
+                .replace("{attribute}", attribute)
+                .replace("{change_line}", change_line)
+                .replace("{normalized}", normalized or (user_prompt or ""))
+                .replace("{base_prompt}", ""))
+
     # Detect a genuine TEXT change (regex + LLM intent gate).
     replacements = svc.extract_text_replacements(user_prompt)
     if replacements and not svc._llm_is_text_change(user_prompt):
