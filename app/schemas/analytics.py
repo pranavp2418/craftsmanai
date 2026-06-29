@@ -9,7 +9,7 @@ class ActivityLogFilter(BaseModel):
     """Validation schema for activity log filter parameter"""
     actor_type: Optional[str] = Field(
         default=None,
-        description="Filter by actor type: manufacturer or customer"
+        description="Filter by actor type: 'manufacturer' or 'customer'. Omit or set to 'all' for all types."
     )
     page: int = Field(
         default=1,
@@ -22,6 +22,17 @@ class ActivityLogFilter(BaseModel):
         le=100,
         description="Items per page"
     )
+
+    @validator("actor_type")
+    def validate_actor_type(cls, v):
+        allowed_values = {"manufacturer", "customer"}
+        if v is None or v.lower() == "all":
+            return None
+        if v.lower() not in allowed_values:
+            raise ValueError(
+                f"Invalid actor_type '{v}'. Allowed values: 'manufacturer', 'customer', or 'all' (defaults to all)."
+            )
+        return v.lower()
 
 
 class MetricsFilter(BaseModel):
