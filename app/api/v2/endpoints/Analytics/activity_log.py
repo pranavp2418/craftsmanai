@@ -18,6 +18,7 @@ class RecentActivityItem(BaseModel):
     request_id: str
     type: str
     manufacturer: Optional[str] = None
+    customer: Optional[str] = None
     date: datetime
     status: str
     actor_type: str
@@ -50,6 +51,16 @@ async def get_activity_log(
     
     Returns proper 422 validation errors for invalid filter payloads.
     """
+    if actor_type is not None:
+        normalized = actor_type.strip().lower()
+        if normalized not in ["manufacturer", "customer"]:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail="actor_type must be either 'manufacturer' or 'customer'"
+            )
+        actor_type = normalized
+
     service = AnalyticsService(db, admin)
     filter_data = ActivityLogFilter(actor_type=actor_type, page=page, page_size=page_size)
     return await service.get_activity_log(filter_data)
