@@ -70,6 +70,15 @@ def create_checkout_session(
     if not amount:
         amount = plan.price or 0
 
+    if amount == 0:
+        # Check if user has had any subscription before (active, expired, trial, anything)
+        has_any_sub = db.query(UserSubscription).filter(UserSubscription.user_id == current_user_id).first()
+        if has_any_sub:
+            raise HTTPException(
+                status_code=400,
+                detail="Free or trial plan is only available for first-time subscribers and can only be used once."
+            )
+
     stripe_amount = int(amount * 100)
 
     try:
@@ -232,7 +241,14 @@ def verify_payment(
                 UserSubscription.is_queued == False
             ).order_by(UserSubscription.end_date.desc()).first()
 
-            if active_subscription and active_subscription.end_date > datetime.now(timezone.utc):
+            is_active_sub_free = False
+            if active_subscription:
+                active_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == active_subscription.plan_id).first()
+                if active_plan:
+                    if (active_plan.monthly_price == 0 or active_plan.yearly_price == 0 or (active_plan.price or 0) == 0):
+                        is_active_sub_free = True
+
+            if active_subscription and not is_active_sub_free and active_subscription.end_date > datetime.now(timezone.utc):
                 # Queue the new subscription to start after the current active one expires
                 is_queued = True
                 activates_after_id = active_subscription.id

@@ -438,6 +438,36 @@ def _build_multiview_prompt(piece: str, jt_label: str, metal_name: str, recolor:
     )
 
 
+# Per-angle phrasing for a VARIATIONS grid (each angle view keeps the whole grid, every variation at that angle).
+_VARIATIONS_VIEW = {
+    "side_view": "rotated about 45 degrees to a three-quarter / side angle that reveals its thickness and side "
+                 "depth, with the decorated face still clearly visible",
+    "back_view": "from its REVERSE / back side",
+    "worn_view": "worn on a person in the natural way for that kind of piece",
+}
+
+
+def _build_variations_angle_prompt(jt_label: str, metal_name: str, recolor: bool, view_key: str) -> str:
+    """Prompt to re-render a GRID of design variations ALL at one viewing angle. Used when the base is a
+    'create N variations' grid: each angle view (side/back/worn) keeps the WHOLE grid and shows every
+    variation from that angle (NOT a single-piece multi-view)."""
+    vd = _VARIATIONS_VIEW.get(view_key, "from a slightly turned angle")
+    if recolor:
+        metal_clause = f", ALL pieces rendered in {METAL_DESCRIPTIONS.get(metal_name, metal_name.replace('_', ' ').title())}"
+    else:
+        metal_clause = ", keeping each piece's EXACT same metal colour / finish as the reference"
+    return (
+        "IMPORTANT - RENDER ZERO TEXT: do NOT write any words, labels, captions, panel titles or numbers "
+        "anywhere; the only lettering allowed is each piece's OWN design.\n\n"
+        f"The attached image is a GRID of several DIFFERENT {jt_label} design variations on a pure white "
+        "background. Reproduce the SAME grid — the SAME number of pieces, the SAME layout and positions, and "
+        f"each piece's EXACT design, stones, borders and proportions{metal_clause} — but show EVERY piece {vd}. "
+        "Do NOT change, merge, drop, add or redesign any variation; ONLY change the viewing angle of each piece. "
+        "Keep them clearly separated and evenly spaced on a pure white background (#FFFFFF). CAD-style realistic "
+        "jewelry render, crisp, even studio lighting."
+    )
+
+
 def _crop_quadrants(image_bytes: bytes) -> dict:
     """Split a (near-)square 2x2-grid multi-view image into its four panels (PNG bytes)."""
     from PIL import Image
@@ -585,14 +615,32 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
 
         _piece = _resolve_piece(jewellery_type, type_text, worn_piece_type)
         _jt_label = (jewellery_type or "").strip() or _piece
+        # VARIATIONS base ("create N variations" grid): each angle view must keep the WHOLE grid and show
+        # every variation at that angle, NOT a single-piece multi-view. Detect from the variant's own prompt.
+        from app.services.openai_service import _user_wants_variations
+        _is_variations = _user_wants_variations(getattr(variant, "prompt_used", "") or "")
 
         def _generate_metal_angles(metal_name: str) -> tuple[str, dict]:
-            """Generate ALL angle views for ONE metal from a SINGLE multi-view sheet, then crop. Returns
-            (metal, {side_view: url, back_view: url, worn_view: url})."""
+            """Generate ALL angle views for ONE metal. Normal piece: ONE 2x2 multi-view sheet then crop.
+            Variations grid: side/back/worn each as a FULL grid of all variations at that angle (no crop).
+            Returns (metal, {side_view: url, back_view: url, worn_view: url})."""
             out: dict[str, str] = {}
             try:
                 ref_url, need_recolor = _ref_for_metal(metal_name)
                 cached_blobs = ref_blob_cache.get(ref_url)
+                if _is_variations:
+                    # Each view is a GRID of ALL variations at that angle — 3 separate generations, no crop.
+                    for view in ("side_view", "back_view", "worn_view"):
+                        try:
+                            vprompt = _build_variations_angle_prompt(_jt_label, metal_name, need_recolor, view)
+                            vb64 = generate_primary_image([ref_url], vprompt, pre_downloaded_blobs=cached_blobs, whiten_output=False)
+                            ib = base64.b64decode(vb64)
+                            _validate_image_bytes(ib, "image/png")
+                            out[view] = upload_image_to_supabase(ib, f"generated/angles/{variant.design_id}/{variant.id}/{metal_name}/{view}")
+                        except Exception as _ve:
+                            logger.warning("variations-angle upload failed %s/%s for variant_id=%s: %s", metal_name, view, variant_id, _ve)
+                    logger.info("Variations-grid angles generated for metal=%s variant_id=%s: %s", metal_name, variant_id, list(out))
+                    return metal_name, out
                 prompt = _build_multiview_prompt(_piece, _jt_label, metal_name, need_recolor)
                 # whiten_output=False — the worn panel has a person/background; never flood-fill the sheet.
                 b64 = generate_primary_image([ref_url], prompt, pre_downloaded_blobs=cached_blobs, whiten_output=False)
