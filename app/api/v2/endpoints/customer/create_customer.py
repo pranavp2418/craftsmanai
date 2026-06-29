@@ -6,6 +6,7 @@ from app.schemas.customer import CustomerCreateRequest, CustomerResponse
 from app.services.customer_service import CustomerService
 from app.models.user import User
 
+
 router = APIRouter()
 
 @router.post("/", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED)
@@ -31,8 +32,6 @@ def create_customer(
         
     # Validate against manufacturers
     from app.models.manufacturer import Manufacturer
-    from sqlalchemy import or_
-    import json
     
     # Check phone number
     if request.phone_number:
@@ -69,22 +68,24 @@ def create_customer(
                 if m_email in req_emails:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address belongs to a manufacturer.")
 
-    # Validate against existing customers
+    # Validate against existing customers under the same retailer (same created_by_user_id)
     from app.models.customer import Customer
     
     if request.phone_number:
         customer_with_phone = db.query(Customer).filter(
             Customer.phone_number == request.phone_number.strip(),
-            Customer.is_deleted == False
+            Customer.is_deleted == False,
+            Customer.created_by_user_id == current_user.id
         ).first()
         if customer_with_phone:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This phone number already belongs to a customer.")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This phone number already belongs to a customer under your account.")
             
     if request.emails:
         req_emails = [e.email.lower().strip() for e in request.emails if getattr(e, 'email', None)]
         customers = db.query(Customer).filter(
             Customer.emails.isnot(None),
-            Customer.is_deleted == False
+            Customer.is_deleted == False,
+            Customer.created_by_user_id == current_user.id
         ).all()
         
         for c in customers:
@@ -94,15 +95,15 @@ def create_customer(
                     for c_email_obj in c_emails_data:
                         c_email = (c_email_obj.get("email") if isinstance(c_email_obj, dict) else str(c_email_obj)).lower().strip()
                         if c_email in req_emails:
-                            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address already belongs to a customer.")
+                            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address already belongs to a customer under your account.")
                 elif isinstance(c_emails_data, dict):
                     c_email = str(c_emails_data.get("email", "")).lower().strip()
                     if c_email in req_emails:
-                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address already belongs to a customer.")
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address already belongs to a customer under your account.")
             except (json.JSONDecodeError, TypeError):
                 c_email = str(c.emails).split(',')[0].strip().lower()
                 if c_email in req_emails:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address already belongs to a customer.")
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This email address already belongs to a customer under your account.")
 
     # Serialize the list of emails into a JSON string for the DB column
     email_db = None
