@@ -20,6 +20,7 @@ class PublicDesignAccessResponse(BaseModel):
     user_prompt: Optional[str] = None
     input_image_url: Optional[str] = None
     status: DesignStatus
+    created_by: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -51,6 +52,7 @@ class PublicDesignFullResponse(BaseModel):
     brand_logo_url: Optional[str] = None
     brand_primary_color: Optional[str] = None
     powered_by: bool = False
+    approved_manufacturer: Optional[PublicManufacturerAccessResponse] = None
 
     
 
@@ -77,12 +79,8 @@ class PublicCustomerAccessResponse(BaseModel):
 
 
 class PublicManufacturerAccessResponse(BaseModel):
-    id: int
     name: str
-    company_name: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    location: Optional[str] = None
+    delivery_time_days: Optional[int] = None
 
     class Config:
         from_attributes = True
