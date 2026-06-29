@@ -256,16 +256,16 @@ def share_variant_with_manufacturer(
                 for email in emails_to_send:
                     send_manufacturer_share_email.delay(
                         to_email=email,
-                        manufacturer_name=manufacturer_name,
-                        preview_url=preview_url,
-                        designer_name=designer_name,
+                        manufacturer_name=manufacturer.name,
+                        preview_url=review_url,
+                        designer_name=current_user.full_name or current_user.username,
                         retailer_name=retailer_name,
                         render_image_url=render_image_url,
-                        design_code=design_code,
+                        design_code=design.design_code,
                         jewelry_type=jewelry_type,
                         metal=metal,
                         brand_logo_url=brand_logo_url,
-                        brand_primary_color=brand_primary_color
+                        brand_primary_color=brand_setting.primary_color
                     )
                 
             if hasattr(manufacturer, 'phone_number') and manufacturer.phone_number:

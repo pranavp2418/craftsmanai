@@ -752,7 +752,7 @@ def send_manufacturer_share_sms(self, to_number: str, manufacturer_name: str, pr
 
 
 @create_task(name="send_manufacturer_share_email", max_retries=3)
-def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, metal: str = None, brand_logo_url: str = None):
+def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, metal: str = None, brand_logo_url: str = None, brand_primary_color: str = None):
     """
     Send an email to a manufacturer with a link to review a shared design using manufacturer_design_share template.
     """

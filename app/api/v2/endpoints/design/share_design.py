@@ -80,6 +80,12 @@ def _send_customer_notifications(
     brand_repo = BrandSettingRepository(db)
     brand_setting = brand_repo.get_by_user_id(current_user.id)
 
+    # Prepare common variables
+    customer_name = customer.full_name or "Customer"
+    designer_name = current_user.full_name or current_user.username
+    design_code = design.design_code
+    brand_primary_color = brand_setting.primary_color if brand_setting else "#6366F1"
+
     # --- Email ---
     if customer and hasattr(customer, 'emails') and customer.emails:
         try:
@@ -106,12 +112,12 @@ def _send_customer_notifications(
 
             send_customer_share_email.delay(
                 to_email=primary_email,
-                customer_name=customer_name,
+                customer_name=customer.full_name or "Customer",
                 preview_url=preview_url,
-                designer_name=designer_name,
+                designer_name=current_user.full_name or current_user.username,
                 retailer_name=retailer_name,
                 render_image_url=render_image_url,
-                design_code=design_code,
+                design_code=design.design_code,
                 jewelry_type=jewelry_type,
                 version=version,
                 version_label=version_label,
@@ -127,10 +133,10 @@ def _send_customer_notifications(
 
         send_customer_share_sms.delay(
             to_number=customer.phone_number,
-            customer_name=customer.full_name or "Customer",
+            customer_name=customer_name,
             preview_url=preview_url,
-            designer_name=current_user.full_name or current_user.username,
-            design_code=design.design_code,
+            designer_name=designer_name,
+            design_code=design_code,
             retailer_phone=retailer_phone or "",
             retailer_email=retailer_email or "",
             retailer_address=retailer_address,
