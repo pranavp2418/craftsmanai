@@ -168,7 +168,7 @@ def verify_payment(
         if not payment:
             raise HTTPException(status_code=404, detail="Payment record not found")
 
-        if session.payment_status == "paid":
+        if session.payment_status in ["paid", "no_payment_required"]:
             stripe_sub_id = getattr(session, 'subscription', '') or ''
             existing_sub = db.query(UserSubscription).filter(
                 UserSubscription.stripe_subscription_id == stripe_sub_id
@@ -238,6 +238,31 @@ def verify_payment(
                 activates_after_id = active_subscription.id
                 start_date = active_subscription.end_date
                 end_date = start_date + timedelta(days=duration)
+                
+                # Set cancel_at_period_end = True on the old active subscription on Stripe so it terminates
+                if active_subscription.stripe_subscription_id:
+                    try:
+                        logger.info(f"Setting cancel_at_period_end=True for old stripe subscription: {active_subscription.stripe_subscription_id}")
+                        stripe.Subscription.modify(
+                            active_subscription.stripe_subscription_id,
+                            cancel_at_period_end=True
+                        )
+                    except Exception as e:
+                        logger.error(f"Error modifying old stripe subscription: {e}")
+                
+                # Shift Stripe's next billing cycle anchor for the new subscription to the end date of the new cycle
+                if stripe_sub_id:
+                    try:
+                        anchor_timestamp = int(end_date.timestamp())
+                        logger.info(f"Shifting billing cycle anchor for new subscription {stripe_sub_id} to {end_date} (timestamp: {anchor_timestamp})")
+                        stripe.Subscription.modify(
+                            stripe_sub_id,
+                            billing_cycle_anchor=anchor_timestamp,
+                            proration_behavior="none"
+                        )
+                    except Exception as e:
+                        logger.error(f"Error shifting billing cycle anchor for new subscription {stripe_sub_id}: {e}")
+
                 logger.info(f"Subscription queued to activate after {active_subscription.id} on {start_date}")
             else:
                 is_queued = False
@@ -246,9 +271,18 @@ def verify_payment(
                 end_date = start_date + timedelta(days=duration)
 
                 if active_subscription:
-                    # Deactivate the old active subscription immediately since it is expired/invalid
+                    # Deactivate the old active subscription immediately since it is expired or has less than 48 hours left
                     active_subscription.status = SubscriptionStatus.EXPIRED
                     active_subscription.end_date = datetime.now(timezone.utc)
+                    
+                    # Cancel the old subscription on Stripe immediately to avoid double-charging
+                    if active_subscription.stripe_subscription_id:
+                        try:
+                            logger.info(f"Cancelling old stripe subscription immediately: {active_subscription.stripe_subscription_id}")
+                            stripe.Subscription.delete(active_subscription.stripe_subscription_id)
+                        except Exception as e:
+                            logger.error(f"Error deleting old stripe subscription: {e}")
+                            
                     logger.info(f"Previous active subscription {active_subscription.id} marked as EXPIRED")
 
             user_sub = UserSubscription(

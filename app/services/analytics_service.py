@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 
 from app.models.design import Design, DesignShare, DesignShareStatus, DesignStatus, DesignVariant, DesignVariantManufacturerShare, ManufacturerShareStatus
 from app.models.manufacturer import Manufacturer
+from app.models.customer import Customer
 from app.models.order import Order, OrderStatus
 from app.models.user import User
 from app.schemas.analytics import (
@@ -563,18 +564,26 @@ class AnalyticsService:
         """Get activity log with validation"""
         self._validate_user_permissions()
         normalized_filter = filter_data.actor_type
+        if normalized_filter is not None:
+            normalized_filter = normalized_filter.strip().lower()
+            if normalized_filter not in ["manufacturer", "customer"]:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="actor_type must be either 'manufacturer' or 'customer'"
+                )
         design_filter = self._get_design_filter()
 
         try:
             items = []
 
-            # If no actor_type specified or invalid, return all data
-            if not normalized_filter or normalized_filter not in ["manufacturer", "customer"]:
+            # If no actor_type specified, return all data
+            if not normalized_filter:
             # Fetch both customer and manufacturer data
                 customer_result = await self.db.execute(
-                    select(DesignShare, Design, Manufacturer.name)
+                    select(DesignShare, Design, Manufacturer.name, Customer.full_name)
                     .join(DesignShare.design_variant)
                     .join(DesignVariant.design)
+                    .outerjoin(Customer, DesignShare.customer_id == Customer.id)
                     .outerjoin(DesignShare.order)
                     .outerjoin(Order.manufacturer)
                     .where(design_filter)
@@ -598,7 +607,7 @@ class AnalyticsService:
                         return design.design_code
                     return f"REQ-{fallback_id}"
 
-                for share, design, manufacturer_name in list(customer_result.all()):
+                for share, design, manufacturer_name, customer_name in list(customer_result.all()):
                     created_at = share.reviewed_at or share.created_at
                     if created_at is None:
                         continue
@@ -606,6 +615,7 @@ class AnalyticsService:
                         "request_id": _request_id(design, share.id),
                         "type": _design_label(design),
                         "manufacturer": manufacturer_name,
+                        "customer": customer_name,
                         "date": created_at,
                         "status": CUSTOMER_STATUS_LABELS.get(share.status, "Customer Update"),
                         "actor_type": "customer",
@@ -635,15 +645,17 @@ class AnalyticsService:
                         "request_id": _request_id(design, share.id),
                         "type": _design_label(design),
                         "manufacturer": manufacturer_name,
+                        "customer": None,
                         "date": created_at,
                         "status": MANUFACTURER_STATUS_LABELS.get(share.status, "Manufacturer Update"),
                         "actor_type": "manufacturer",
                     })
             elif normalized_filter == "customer":
                 customer_result = await self.db.execute(
-                    select(DesignShare, Design, Manufacturer.name)
+                    select(DesignShare, Design, Manufacturer.name, Customer.full_name)
                     .join(DesignShare.design_variant)
                     .join(DesignVariant.design)
+                    .outerjoin(Customer, DesignShare.customer_id == Customer.id)
                     .outerjoin(DesignShare.order)
                     .outerjoin(Order.manufacturer)
                     .where(design_filter)
@@ -667,7 +679,7 @@ class AnalyticsService:
                         return design.design_code
                     return f"REQ-{fallback_id}"
 
-                for share, design, manufacturer_name in list(customer_result.all()):
+                for share, design, manufacturer_name, customer_name in list(customer_result.all()):
                     created_at = share.reviewed_at or share.created_at
                     if created_at is None:
                         continue
@@ -675,6 +687,7 @@ class AnalyticsService:
                         "request_id": _request_id(design, share.id),
                         "type": _design_label(design),
                         "manufacturer": manufacturer_name,
+                        "customer": customer_name,
                         "date": created_at,
                         "status": CUSTOMER_STATUS_LABELS.get(share.status, "Customer Update"),
                         "actor_type": "customer",
@@ -715,6 +728,7 @@ class AnalyticsService:
                         "request_id": _request_id(design, share.id),
                         "type": _design_label(design),
                         "manufacturer": manufacturer_name,
+                        "customer": None,
                         "date": created_at,
                         "status": MANUFACTURER_STATUS_LABELS.get(share.status, "Manufacturer Update"),
                         "actor_type": "manufacturer",
