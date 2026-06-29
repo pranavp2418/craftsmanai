@@ -121,6 +121,11 @@ def build_refine_prompt(
             change_line = f'Change {attribute} to "{to}".'
         else:
             change_line = f"Apply this change: {normalized}"
+        # Lovable-style edge-case directives (iced = every-surface, metal-only, stone rows, bail-freeze, …)
+        # apply to refines too — append them after the verbatim prompt (this is NOT the rename regex, which
+        # stays LLM-driven via interpret_refinement; these are the deterministic retailer-language handlers).
+        from app.services.prompts.common import normalize_retailer_language as _nrl
+        _edge = _nrl(user_prompt)
         return (LOVABLE_REFINE_PROMPT
                 .replace("{attempt}", str(attempt))
                 .replace("{target}", target)
@@ -128,7 +133,7 @@ def build_refine_prompt(
                 .replace("{attribute}", attribute)
                 .replace("{change_line}", change_line)
                 .replace("{normalized}", normalized or (user_prompt or ""))
-                .replace("{base_prompt}", ""))
+                .replace("{base_prompt}", "") + _edge)
 
     # Detect a genuine TEXT change (regex + LLM intent gate).
     replacements = svc.extract_text_replacements(user_prompt)

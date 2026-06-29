@@ -178,8 +178,15 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
     _note = (user_prompt or "").strip()
     user_request = f"User note: {_note}{normalize_retailer_language(user_prompt)}" if _note else ""
     design_subject = _note or "a jewelry piece"
-    stone_phrase = ("Stone setting: set the piece with the diamonds / stones described in the request."
-                    if _wants_stones(user_prompt) else "")
+    if _wants_stones(user_prompt):
+        stone_phrase = "Stone setting: set the piece with the diamonds / stones described in the request."
+    elif directive is CONVERT_TO_JEWELRY:
+        # Converting a non-jewelry image (logo / photo of a person/object): default to SOLID metal, NO stones
+        # unless asked — the model otherwise ices the whole figure with pavé diamonds (the golfer-pendant bug).
+        stone_phrase = ("Stones: NONE unless explicitly requested — render the converted subject in SOLID plain "
+                        "polished metal (a clean 3D metal relief / sculpted figure); do NOT add diamonds, pavé or gemstones.")
+    else:
+        stone_phrase = ""
 
     out = build_lovable_create(directive, design_subject=design_subject, item_type=item_type,
                                metal_phrase=mp, stone_phrase=stone_phrase, user_request=user_request)

@@ -180,8 +180,15 @@ def normalize_retailer_language(note: str) -> str:
     elif "double border" in p or "2 row" in p:
         directives.append("Stone row count requirement: 2 rows.")
 
-    if any(w in p for w in ["bust down", "bustdown", "flooded", "fully iced", "iced out", "make it icy", "all iced", "full iced"]):
-        directives.append("Increase stone coverage and density to FULL (iced-out) while keeping the arrangement clean, practical and region-appropriate.")
+    if any(w in p for w in ["bust down", "bustdown", "flooded", "fully iced", "iced out", "ice out", "iced-out",
+                            "make it icy", "all iced", "full iced", "full ice", "fully ice", "complete ice",
+                            "completely iced", "complete iced", "all over diamond", "all over iced"]):
+        directives.append(
+            "FULLY ICED-OUT — cover the ENTIRE piece in dense micro-pavé diamonds on EVERY surface. For a figure "
+            "or object pendant this means the WHOLE thing: the body, clothing, face, hair, hands, shoes AND every "
+            "accessory or element it holds (e.g. a golf club / stick / bat / ball / tool / instrument), PLUS the "
+            "bail and any frame. Leave NO part as plain bare metal anywhere — metal shows ONLY as the thin prong "
+            "walls between touching stones. Do NOT ice only the clothing and leave the rest plain.")
     if any(w in p for w in ["border only", "top only", "border-only"]):
         directives.append("Limit stone coverage to the specified region ONLY (e.g. border/top); leave other areas plain.")
     if any(w in p for w in ["micro pave", "micro-pave", "smaller stone", "finer diamond", "smaller pointer", "more rows fit"]):
