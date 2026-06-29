@@ -93,6 +93,15 @@ def customer_access_design(
         )
     ]
 
+    # Get the creator's name (use created_by_user_id if available, otherwise user_id)
+    created_by_name = None
+    creator_id = design.created_by_user_id or design.user_id
+    if creator_id:
+        from app.models.user import User
+        creator = db.query(User).filter(User.id == creator_id).first()
+        if creator:
+            created_by_name = creator.full_name or creator.email
+
     design_response = PublicDesignAccessResponse(
         design_id=design.id,
         design_code=design.design_code,
@@ -101,11 +110,15 @@ def customer_access_design(
         user_prompt=design.user_prompt,
         input_image_url=design.input_image_url,
         status=design.status,
+        created_by=created_by_name,
     )
 
 
     from app.repositories.brand_setting import BrandSettingRepository
     from app.models.subscription import UserSubscription, SubscriptionPlan, SubscriptionStatus
+    from app.repositories.order import OrderRepository
+    from app.models.manufacturer import Manufacturer
+    from app.models.order import ManufacturerQuote
     from sqlalchemy import or_
     from datetime import datetime, timezone
     
@@ -130,6 +143,38 @@ def customer_access_design(
         if plan.can_use_logo and plan.can_use_brand_name and plan.can_use_custom_color:
             powered_by = True
 
+    # Get approved manufacturer name and deadline if exists
+    approved_manufacturer = None
+    order_repo = OrderRepository(db)
+    latest_order = order_repo.get_latest_by_design_id(design.id)
+    if latest_order and latest_order.current_manufacturer_id:
+        # Get the approved quote for delivery time and submission date
+        from sqlalchemy import cast, String
+        from app.models.order import ManufacturerQuoteStatus
+        approved_quote = db.query(ManufacturerQuote).filter(
+            ManufacturerQuote.order_id == latest_order.id,
+            ManufacturerQuote.manufacturer_id == latest_order.current_manufacturer_id,
+            ManufacturerQuote.status == ManufacturerQuoteStatus.APPROVED
+        ).first()
+        
+        manufacturer = db.query(Manufacturer).filter(Manufacturer.id == latest_order.current_manufacturer_id).first()
+        if manufacturer:
+            from app.schemas.public import PublicManufacturerAccessResponse
+            from datetime import timedelta
+            
+            # Calculate deadline: quote submission date + delivery days
+            deadline = None
+            if approved_quote and approved_quote.delivery_time_days:
+                # Use quote creation date as the submission date
+                base_date = approved_quote.created_at.date() if approved_quote.created_at else datetime.now(timezone.utc).date()
+                deadline_date = base_date + timedelta(days=approved_quote.delivery_time_days)
+                deadline = deadline_date.isoformat()
+            
+            approved_manufacturer = PublicManufacturerAccessResponse(
+                name=manufacturer.name,
+                deadline=deadline,
+            )
+
     return PublicDesignFullResponse(
         design=design_response,
         variants=variant_responses,
@@ -139,4 +184,5 @@ def customer_access_design(
         brand_logo_url=brand_setting.logo_url if brand_setting else None,
         brand_primary_color=brand_setting.primary_color if brand_setting else "#6366F1",
         powered_by=powered_by,
+        approved_manufacturer=approved_manufacturer,
     )

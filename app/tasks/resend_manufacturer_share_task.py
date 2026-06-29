@@ -216,6 +216,7 @@ def resend_manufacturer_share_email(
                         jewelry_type=jewelry_type,
                         metal=metal,
                         brand_logo_url=brand_logo_url,
+                        brand_primary_color=brand_setting.primary_color if brand_setting else "#6366F1",
                     )
                 )
             finally:

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from uuid import UUID
 
@@ -56,3 +56,13 @@ class SystemSettingsLogResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class SystemSettingsLogsListResponse(BaseModel):
+    items: List[SystemSettingsLogResponse]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+    has_next: bool
+    has_prev: bool

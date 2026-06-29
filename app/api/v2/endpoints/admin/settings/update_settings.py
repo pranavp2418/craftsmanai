@@ -5,7 +5,7 @@ from typing import Any, List
 
 from app.api import deps
 from app.models.settings import SystemSettings, SystemSettingsLog
-from app.schemas.settings import SystemSettingsUpdate, SystemSettingsResponse, SystemSettingsLogResponse
+from app.schemas.settings import SystemSettingsUpdate, SystemSettingsResponse, SystemSettingsLogResponse, SystemSettingsLogsListResponse
 
 router = APIRouter()
 
@@ -86,7 +86,7 @@ async def get_settings(
         
     return db_settings
 
-@router.get("/logs", response_model=List[SystemSettingsLogResponse], summary="Get System Settings Change Logs")
+@router.get("/logs", response_model=SystemSettingsLogsListResponse, summary="Get System Settings Change Logs")
 async def get_settings_logs(
     db: AsyncSession = Depends(deps.get_db),
     current_admin: Any = Depends(deps.get_current_admin),
@@ -96,7 +96,16 @@ async def get_settings_logs(
     """
     Get recent changes to system settings.
     """
+    from sqlalchemy import func
+    from math import ceil
+
     skip = (page - 1) * limit
+    
+    # 1. Count total log entries
+    total_result = await db.execute(select(func.count(SystemSettingsLog.id)))
+    total = total_result.scalar_one()
+
+    # 2. Retrieve logs with limit & offset
     result = await db.execute(
         select(SystemSettingsLog)
         .order_by(SystemSettingsLog.created_at.desc())
@@ -104,4 +113,15 @@ async def get_settings_logs(
         .limit(limit)
     )
     logs = result.scalars().all()
-    return logs
+    
+    total_pages = ceil(total / limit) if limit > 0 else 1
+
+    return {
+        "items": logs,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages,
+        "has_next": page < total_pages,
+        "has_prev": page > 1
+    }
