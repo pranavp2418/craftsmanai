@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_DAYS_REMEMBER: int = 30
     
     # Device Management
-    MAX_ACTIVE_DEVICES: int = 5
+    MAX_ACTIVE_DEVICES: int = 1
     
     # Stripe Settings
     STRIPE_API_KEY: str = "sk_test_mock"

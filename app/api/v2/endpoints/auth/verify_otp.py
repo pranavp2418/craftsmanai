@@ -91,6 +91,30 @@ async def verify_otp(
         user.is_verified = True
         db.commit()
         
+        # Send notification to admins about new user verification
+        try:
+            from app.services.notification_service import NotificationService
+            from app.models.user import User
+            notification_service = NotificationService(db)
+            admins = db.query(User).filter(User.is_superuser == True).all()
+            for admin in admins:
+                notification_service.send_notification(
+                    user_id=admin.id,
+                    type="user_verification",
+                    title="New User Verified",
+                    message=f"User {user.full_name or user.email} has successfully verified their account.",
+                    source="auth",
+                    reference_id=user.id,
+                    data={
+                        "user_id": user.id,
+                        "user_email": user.email,
+                        "user_name": user.full_name or user.username,
+                    }
+                )
+            logger.info(f"Admin notifications sent for verified user: {user.email}")
+        except Exception as e:
+            logger.warning(f"Failed to send admin notification for user verification: {str(e)}")
+        
     # Create tokens and session
     from jose import jwt
     access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
