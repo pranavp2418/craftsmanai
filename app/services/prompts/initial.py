@@ -298,8 +298,17 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
     # model reverted to its default OUTLINED-cursive look (diamond border + polished letter faces); a short
     # prompt where the solid-diamond surface is the dominant theme fully-paves the letter faces, matching the
     # Lovable output. So for iced name/text pieces we bypass the heavy stack entirely.
-    _iced = any(w in lower for w in ("fully iced", "iced out", "ice out", "iced-out", "bust down",
-                                     "bustdown", "flooded", "frozen", "fully covered", "all iced"))
+    # FULL-COVERAGE detection — the image model has a strong prior for the "outlined letters" look (a diamond
+    # BORDER + plain-gold faces). A request to FULLY COVER / cover-with-diamonds / fully-diamond must route to
+    # the strong BUST-DOWN branch so the letter FACES are fully paved (not just outlined). "fully cover" (no d),
+    # "cover it with diamonds", "fully diamond", etc. were all missed before — hence ours only bordered the
+    # letters while Lovable fully iced them.
+    _iced = (any(w in lower for w in ("fully iced", "iced out", "ice out", "iced-out", "bust down", "bustdown",
+                                      "flooded", "frozen", "fully covered", "all iced", "full diamond",
+                                      "all diamond", "completely iced", "fully diamond", "covered in diamond",
+                                      "covered with diamond", "covered in stone"))
+             or ("cover" in lower and ("diamond" in lower or "stone" in lower or "ice" in lower))
+             or ("fully" in lower and ("diamond" in lower or "iced" in lower or "stone" in lower)))
     if _iced and _has_text_intent(user_prompt):
         metal_named = svc._detected_metal_phrase(user_prompt) or (effective_metal or "white gold")
         bail_line = " Add ONE simple loop bail at the top for a chain." if profile.bail_policy != "none" else ""

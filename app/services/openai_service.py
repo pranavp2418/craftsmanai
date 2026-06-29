@@ -2644,28 +2644,25 @@ def generate_primary_image(
             if _attempt < 2:
                 logger.warning("Gemini returned no image (attempt %d/3) — retrying", _attempt + 1)
         if g64:
-            if whiten_output:
-                try:
-                    g64 = base64.b64encode(
-                        _whiten_background(base64.b64decode(g64), tag="gemini_primary_white_bg")
-                    ).decode("utf-8")
-                except Exception as _w:
-                    logger.warning("Gemini output white-bg post-process skipped: %s", _w)
+            # GEMINI-ONLY: return the RAW render — NO _whiten_background flood-fill. Gemini already renders on a
+            # clean white background (Lovable returns it untouched too). The flood-fill was for OpenAI's textured
+            # backgrounds; on a Gemini render it INTERMITTENTLY left gray blobs / artifacts on the background (the
+            # "pixels bursting / pixel fat rahe" bug — TJX-162). whiten_output is now a no-op for the Gemini path.
             logger.info("Primary image generated via Gemini (%s)", getattr(settings, "GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"))
             return g64
-        # Gemini still failed after 3 attempts. Fall back to OpenAI ONLY if it is actually configured;
-        # otherwise raise a CLEAR Gemini-focused error instead of an opaque OpenAI DNS failure.
-        _openai_key = os.getenv("OPENAI_API_KEY") or getattr(settings, "OPENAI_API_KEY", None)
-        if not _openai_key:
-            raise RuntimeError(
-                "Image generation temporarily failed: Gemini returned no image after 3 attempts and no OpenAI "
-                "fallback is configured. Please try again."
-            )
-        logger.warning("Gemini failed after 3 attempts — falling back to OpenAI gpt-image-2")
+        # GEMINI-ONLY — no OpenAI image fallback (removed). Gemini returned no image after 3 attempts: this is
+        # almost always a CONTENT REFUSAL (e.g. a specific real person / celebrity named in the prompt, which the
+        # image model will not generate) or a transient error. Raise IMMEDIATELY so the task FAILS FAST instead
+        # of stalling for minutes on the slow OpenAI gpt-image-2 fallback (the "keeps loading" bug).
+        raise RuntimeError(
+            "Image generation failed: the model returned no image after 3 attempts. This usually means the "
+            "request was refused — e.g. a SPECIFIC REAL PERSON / CELEBRITY named in the prompt (the image model "
+            "will not generate a named real person). Describe it generically or upload a photo instead; if it was "
+            "a transient error, please try again."
+        )
 
-    return generate_with_openai_image(
-        image_urls, prompt_text, pre_downloaded_blobs=pre_downloaded_blobs, whiten_output=whiten_output,
-    )
+    # Non-gemini provider is no longer supported — OpenAI image generation has been removed (Gemini only).
+    raise RuntimeError("IMAGE_PROVIDER must be 'gemini' — OpenAI image generation has been removed.")
 
 
 def generate_with_openai_image(
@@ -3434,10 +3431,13 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
     if "bracelet" in t:
         sub = _sub((("tennis",), " As a TENNIS bracelet: ONE continuous row of identical small prong-set stones around the whole strand."),
                    (("charm",), " As a CHARM bracelet: a link strand with small charms hanging evenly along it."))
-        return (" Render as a wearable BRACELET laid out flat / gently open. It MUST be finished with a working "
-                "CLASP / lock closure at the two ends — e.g. a lobster-claw or box clasp with the matching end "
-                "link — so it can actually fasten. Show the clasp clearly; it is an openable strand, NOT a "
-                "seamless closed loop." + sub)
+        return (" Render as ONE single, CONTINUOUS, wearable BRACELET strand laid out flat / gently open, with "
+                "EXACTLY TWO ends and ONE working CLASP / lock closure (e.g. a lobster-claw or box clasp with the "
+                "matching end link) so it can actually fasten — show the clasp clearly; it is an openable strand, "
+                "NOT a seamless closed loop. If there is a centre design / motif / face / nameplate, integrate it "
+                "as the CENTREPIECE in the MIDDLE of the strand with the chain joining seamlessly to BOTH of its "
+                "sides to form ONE unbroken bracelet — do NOT leave the motif floating separately, do NOT split it "
+                "into TWO separate chains, and do NOT add extra clasps or loose chain ends." + sub)
     if "anklet" in t:
         return (" Render as a wearable ANKLET (ankle chain) finished with a working CLASP / lock closure at the "
                 "ends so it can fasten — show the clasp clearly.")
