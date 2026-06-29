@@ -180,8 +180,20 @@ def normalize_retailer_language(note: str) -> str:
     elif "double border" in p or "2 row" in p:
         directives.append("Stone row count requirement: 2 rows.")
 
-    if any(w in p for w in ["bust down", "bustdown", "flooded", "fully iced", "iced out", "make it icy", "all iced", "full iced"]):
-        directives.append("Increase stone coverage and density to FULL (iced-out) while keeping the arrangement clean, practical and region-appropriate.")
+    if (any(w in p for w in ["bust down", "bustdown", "flooded", "fully iced", "iced out", "ice out", "iced-out",
+                            "make it icy", "all iced", "full iced", "full ice", "fully ice", "complete ice",
+                            "completely iced", "complete iced", "all over diamond", "all over iced", "full diamond",
+                            "all diamond", "fully diamond", "covered in diamond", "covered with diamond"])
+            or ("cover" in p and ("diamond" in p or "stone" in p or "ice" in p))
+            or ("fully" in p and ("diamond" in p or "iced" in p or "stone" in p))):
+        directives.append(
+            "FULLY ICED-OUT — cover the ENTIRE piece in dense micro-pavé diamonds on EVERY surface. The letter "
+            "FACES (and every panel / layer) must be FULLY PAVED edge-to-edge with diamonds — NOT just a diamond "
+            "BORDER or outline around plain-metal letters. For a figure or object pendant this means the WHOLE "
+            "thing: the body, clothing, face, hair, hands, shoes AND every accessory or element it holds (e.g. a "
+            "golf club / stick / bat / ball / tool), PLUS the bail and any frame. If it is a two-layer / step-up "
+            "name, BOTH layers are equally fully iced. Leave NO part as plain bare metal anywhere — metal shows "
+            "ONLY as the thin prong walls between touching stones. Do NOT outline only / ice only part and leave the rest plain.")
     if any(w in p for w in ["border only", "top only", "border-only"]):
         directives.append("Limit stone coverage to the specified region ONLY (e.g. border/top); leave other areas plain.")
     if any(w in p for w in ["micro pave", "micro-pave", "smaller stone", "finer diamond", "smaller pointer", "more rows fit"]):
@@ -194,6 +206,13 @@ def normalize_retailer_language(note: str) -> str:
         directives.append("Preserve ALL unspecified geometry, material and layout EXACTLY from the reference.")
     if _DIAMOND_CUT_RE.search(p):
         directives.append("'diamond cut'/'diamond-cut' = a faceted ENGRAVED METAL finish, NOT a border of diamonds — do not add stones for it.")
+    # Lovable edge-case handlers (parse-request / generate-render verbatim): bail style, metal-only, bail-freeze.
+    if re.search(r"puffy\s*heart\s*bail", p):
+        directives.append("Bail should be a puffy heart-shaped bail only; do not alter the rest of the piece unless requested.")
+    if re.search(r"metal\s+change\s+only|just\s+change\s+the\s+metal|only\s+(the\s+)?metal\b|only\s+(change|update)\s+(the\s+)?(metal|colou?r|tone|finish)", p):
+        directives.append("Change ONLY the metal color/tone — preserve every other geometric, structural and stone detail exactly.")
+    if re.search(r"don'?t\s+touch\s+the\s+bail|leave\s+the\s+bail|keep\s+the\s+bail", p):
+        directives.append("Bail must be preserved exactly — do NOT modify bail geometry, size or style.")
 
     if not directives:
         return ""

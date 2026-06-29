@@ -105,7 +105,7 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             # metal got second-guessed). Metal is read ONLY from the prompt text (cheap regex). If the
             # user gave NO prompt at all, read the written brief (and any font) out of the image so there
             # is something to generate from.
-            from app.services.openai_service import extract_image_instructions, extract_metal_from_prompt, detect_metal_color
+            from app.services.openai_service import extract_image_instructions, extract_metal_from_prompt, classify_reference_image
             _prompt_metal = extract_metal_from_prompt(prompt)
             input_metal = _prompt_metal or "yellow_gold"
             _metal_named = _prompt_metal is not None
@@ -150,33 +150,47 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                 except Exception as _be:
                     logger.warning("in-image brief read failed for design_id=%s: %s", design_id, _be)
 
-            # No metal named anywhere (prompt or brief) but there IS a reference image -> DETECT the image's
-            # actual metal colour. Otherwise a silver / white-gold piece sent as "same to same" defaults to
-            # yellow gold, and the angle views then RECOLOUR it to gold (the "silver -> gold" bug). The
-            # reference's own colour must win when the user didn't name a metal.
+            # No metal named (prompt or brief) but there IS a reference image -> CLASSIFY it (one vision call
+            # that returns is_jewelry + metal). If it's a real FINISHED jewelry photo, use its OWN metal
+            # (same_as_reference) so a silver/white-gold piece sent "same to same" stays silver. If it's
+            # NON-jewelry (a logo, drawing, or a photo of a person/object/animal — e.g. a golfer photo), this
+            # is a CONVERT-to-jewelry job: default metal GOLD (do NOT read a "metal" off a non-metal photo, which
+            # mis-read the golfer photo as silver) and route to the convert directive (solid metal, no forced
+            # diamonds) via parsed_data.
+            _intent, _source_kind = "", ""
             if not _metal_named and reference_image_source:
                 try:
                     _refs2 = reference_image_source if isinstance(reference_image_source, list) else [reference_image_source]
                     _u2 = next((u for u in _refs2 if u), None)
                     if _u2:
                         _mb64 = base64.b64encode(requests.get(_u2, timeout=20).content).decode("utf-8")
-                        _dm = detect_metal_color(_mb64)
-                        if _dm:
-                            input_metal = _dm
-                            logger.info("Detected base-image metal=%s for design_id=%s (no metal named)", _dm, design_id)
+                        _cls = classify_reference_image(_mb64)
+                        if _cls.get("is_jewelry"):
+                            _dm = _cls.get("metal")
+                            if _dm and _dm != "gold":   # gold stays the yellow_gold default
+                                input_metal = _dm
+                            logger.info("Classified jewelry metal=%s for design_id=%s (no metal named)", _dm, design_id)
+                        else:
+                            input_metal = "yellow_gold"
+                            _intent, _source_kind = "convert_to_jewelry", "non_jewelry_reference"
+                            logger.info("Classified NON-jewelry -> convert, gold default for design_id=%s", design_id)
                 except Exception as _me:
-                    logger.warning("base-image metal detect failed for design_id=%s: %s", design_id, _me)
+                    logger.warning("base-image classify failed for design_id=%s: %s", design_id, _me)
 
             gen_prompt = (prompt or "") + _internal
 
-            # CREATE = ALWAYS initial; no parsed_data (item_type comes straight from jewellery_type).
+            # CREATE = ALWAYS initial. Pass intent/source_kind so a NON-jewelry image routes to the convert
+            # directive (gold default + solid metal); item_type comes from jewellery_type.
+            _pd = {"item_type": design.jewellery_type or ""}
+            if _intent:
+                _pd["intent"], _pd["source_kind"] = _intent, _source_kind
             generated_item = openai_service.generate_base_image(
                 image_source=reference_image_source,
                 user_prompt=gen_prompt,
                 jewellery_type=design.jewellery_type or "",
                 metal_tone=input_metal,
                 mode="initial",
-                parsed_data=None,
+                parsed_data=_pd,
             )
 
             # Retrieve the dynamically detected metal tone from the vision translator
