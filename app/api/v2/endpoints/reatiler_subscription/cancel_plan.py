@@ -132,6 +132,9 @@ def cancel_user_plan(
                 detail="No active subscription found for this user."
             )
 
+        # Get current plan details
+        current_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
+
         # Cancel on Stripe if there is a stripe_subscription_id
         if subscription.stripe_subscription_id:
             try:
@@ -165,6 +168,29 @@ def cancel_user_plan(
         db.commit()
         db.refresh(subscription)
 
+        # Send subscription cancellation confirmation email
+        try:
+            from app.tasks.email_tasks import send_subscription_cancellation_confirmation_email
+            
+            user_name = current_user.full_name or current_user.email.split("@")[0]
+            plan_name = subscription.plan_name or current_plan.name or "Current Plan"
+            access_end_date = subscription.end_date.strftime("%Y-%m-%d") if subscription.end_date else "N/A"
+            cancellation_date = subscription.cancellation_date.strftime("%Y-%m-%d") if subscription.cancellation_date else datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            manage_billing_url = f"{settings.FRONTEND_URL}/retailer/settings" if hasattr(settings, 'FRONTEND_URL') else "#"
+            
+            send_subscription_cancellation_confirmation_email.delay(
+                to=current_user.email,
+                user_name=user_name,
+                plan_name=plan_name,
+                access_end_date=access_end_date,
+                cancellation_date=cancellation_date,
+                manage_billing_url=manage_billing_url
+            )
+            logger.info(f"Queued subscription cancellation email for {current_user.email}")
+        except Exception as email_err:
+            logger.error(f"Failed to queue cancellation email for {current_user.email}: {email_err}")
+            # Don't fail the cancellation if email fails
+        
         return {
             "success": True,
             "message": "Subscription cancelled successfully",
