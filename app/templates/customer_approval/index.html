@@ -11,11 +11,8 @@
     <tr>
       <td align="center" class="outer-padding" style="padding:40px 16px;">
         <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" class="card-table" style="max-width:480px;width:100%;background-color:#0f0f2a;border-radius:16px;border:1px solid rgba(255,255,255,0.06);overflow:hidden;">
-          <tr><td style="padding:0;"><div style="height:4px;background:linear-gradient(90deg,{{brand_primary_color}} 0%,{{brand_primary_color}} 100%);"></div></td></tr>
+          <tr><td style="padding:0;"><div style="height:4px;background:linear-gradient(90deg,#7c3aed 0%,#7c3aed 100%);"></div></td></tr>
           <tr>
-            <!-- <td align="center" class="card-padding" style="padding:36px 40px 8px 40px;">
-              <img src="https://agfgngkpvckrobfecdkr.storage.supabase.co/storage/v1/object/public/craftman/email-assets/logo_6ed9d2a8.jpg" alt="Craftsman AI" height="44" style="display:block;height:44px;width:auto;max-width:100%;mix-blend-mode:lighten;" />
-            </td> -->
             <td align="center" class="card-padding" style="padding:36px 40px 8px 40px;">
               {% if brand_logo_url %}
               <img src="{{brand_logo_url}}" alt="Brand Logo" height="44" style="display:block;height:44px;width:auto;max-width:100%;" />
@@ -29,9 +26,9 @@
           <!-- Render Preview -->
           <tr>
             <td align="center" class="card-padding" style="padding:0 40px 16px 40px;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:linear-gradient(135deg,{{brand_primary_color}} 0%,{{brand_primary_color}} 100%);border-radius:12px;overflow:hidden;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:linear-gradient(135deg,#7c3aed 0%,#7c3aed 100%);border-radius:12px;overflow:hidden;">
                 <tr><td align="center" style="padding:20px;"><img src="{{render_image_url}}" alt="Custom jewelry render" width="200" style="display:block;max-width:200px;width:100%;height:auto;" /></td></tr>
-                <tr><td style="padding:0 16px 12px 16px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="font-size:12px;color:rgba(255,255,255,0.8);">Custom pendant approval preview</td><td align="right" style="font-size:12px;font-weight:600;color:#ffffff;">{{version}}</td></tr></table></td></tr>
+                <tr><td style="padding:0 16px 12px 16px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="font-size:12px;color:rgba(255,255,255,0.8);">Design approval preview</td><td align="right" style="font-size:12px;font-weight:600;color:#ffffff;">{{version_label}}</td></tr></table></td></tr>
               </table>
             </td>
           </tr>
@@ -41,19 +38,19 @@
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#151533;border:1px solid rgba(255,255,255,0.08);border-radius:12px;">
                 <tr><td style="padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.06);"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="detail-label" style="font-size:13px;color:#9ca3af;">Design Number</td><td align="right" class="detail-value" style="font-size:13px;font-weight:600;color:#ffffff;">{{design_number}}</td></tr></table></td></tr>
                 <tr><td style="padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.06);"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="detail-label" style="font-size:13px;color:#9ca3af;">Jewelry Type</td><td align="right" class="detail-value" style="font-size:13px;font-weight:600;color:#ffffff;">{{jewelry_type}}</td></tr></table></td></tr>
-                <tr><td style="padding:14px 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="detail-label" style="font-size:13px;color:#9ca3af;">Version</td><td align="right" class="detail-value" style="font-size:13px;font-weight:600;color:#ffffff;">{{version_label}}</td></tr></table></td></tr>
+                <tr><td style="padding:14px 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="detail-label" style="font-size:13px;color:#9ca3af;">Version</td><td align="right" class="detail-value" style="font-size:13px;font-weight:600;color:#ffffff;">{{version_name}}</td></tr></table></td></tr>
               </table>
             </td>
           </tr>
           <!-- CTA -->
           <tr>
             <td align="center" class="card-padding" style="padding:0 40px 16px 40px;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td align="center" style="border-radius:50px;background:linear-gradient(135deg,#7c3aed 0%,#a855f7 50%,#ec4899 100%);"><a href="{{approval_url}}" class="cta-button" style="display:inline-block;padding:14px 40px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:50px;width:100%;text-align:center;box-sizing:border-box;">Review &amp; Approve Design</a></td></tr></table>
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td align="center" style="border-radius:50px;background:linear-gradient(135deg,#7c3aed 0%,#a855f7 50%,#ec4899 100%);"><a href="{{approval_url}}" class="cta-button" style="display:inline-block;padding:14px 40px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:50px;width:100%;text-align:center;box-sizing:border-box;">Review & Approve Design</a></td></tr></table>
             </td>
           </tr>
           <tr><td align="center" class="card-padding" style="padding:0 40px 36px 40px;"><p style="margin:0;font-size:12px;color:#6b7280;line-height:1.5;">No account required. Review the render, approve the design, or request changes securely.</p></td></tr>
         </table>
-        <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" class="card-table" style="max-width:480px;width:100%;"><tr><td align="center" style="padding:24px 40px 16px 40px;"><p style="margin:0;font-size:12px;color:#4b5563;">© 2026 Craftsman AI. All rights reserved. • support@craftsmanai.app</p></td></tr></table>
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" class="card-table" style="max-width:480px;width:100%;"><tr><td align="center" style="padding:24px 40px 16px 40px;"><p style="margin:0;font-size:12px;color:#4b5563;">© 2026 CraftsmanAI. All rights reserved. • support@craftsmanai.app</p></td></tr></table>
       </td>
     </tr>
   </table>
@@ -63,7 +60,7 @@
       const defaults = {
         "retailer_name": "Johnny's Custom Jewelry",
         "render_image_url": "pendant_render.png",
-        "version": "v2.4",
+        "version_name": "v2.4",
         "design_number": "JCJ-024",
         "jewelry_type": "Custom Pendant",
         "version_label": "CAD Render Revision 2",
@@ -75,7 +72,7 @@
           let text = node.nodeValue;
           let replaced = false;
           for (const [key, val] of Object.entries(defaults)) {
-            const placeholder = `{% raw %}{{${key}}}{% endraw %}`;
+            const placeholder = "{{" + key + "}}";
             if (text.includes(placeholder)) {
               text = text.replaceAll(placeholder, val);
               replaced = true;
@@ -86,7 +83,7 @@
           for (let i = 0; i < node.attributes.length; i++) {
             let attr = node.attributes[i];
             for (const [key, val] of Object.entries(defaults)) {
-              const placeholder = `{% raw %}{{${key}}}{% endraw %}`;
+              const placeholder = "{{" + key + "}}";
               if (attr.value.includes(placeholder)) {
                 attr.value = attr.value.replaceAll(placeholder, val);
               }
@@ -96,7 +93,7 @@
         }
       }
       
-      if (document.body.innerHTML.includes("{% raw %}{{{% endraw %}")) {
+      if (document.body.innerHTML.includes("{{")) {
         replacePlaceholders(document.body);
       }
     });

@@ -9,7 +9,11 @@ from .email_tasks import (
     send_password_reset_email,
     send_welcome_email,
     send_customer_share_email,
-    send_manufacturer_share_email
+    send_manufacturer_share_email,
+    send_subscription_cancellation_confirmation_email,
+    send_plan_purchase_confirmation_email,
+    send_subscription_renewal_confirmation_email,
+    send_plan_upgrade_confirmation_email
 )
 
 # Cleanup tasks
@@ -51,6 +55,10 @@ __all__ = [
     "send_welcome_email",
     "send_customer_share_email",
     "send_manufacturer_share_email",
+    "send_subscription_cancellation_confirmation_email",
+    "send_plan_purchase_confirmation_email",
+    "send_plan_upgrade_confirmation_email",
+    "send_subscription_renewal_confirmation_email",
 
     # Cleanup tasks
     "cleanup_expired_otps",
