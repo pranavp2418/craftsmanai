@@ -219,7 +219,8 @@ def generate_and_store_invoice(db: Session, payment: Payment) -> Invoice:
         # Fallback creation of the invoice row if the PDF/Supabase layer fails
         # so the user never loses database-level invoice access.
         try:
-            invoice_number = payment.invoice_id or f"INV-{uuid.uuid4().hex[:8].upper()}"
+            # Generate a NEW unique invoice number to avoid duplicate key error
+            invoice_number = f"INV-{uuid.uuid4().hex[:8].upper()}"
             fallback_invoice = Invoice(
                 invoice_number=invoice_number,
                 payment_id=payment.id,
