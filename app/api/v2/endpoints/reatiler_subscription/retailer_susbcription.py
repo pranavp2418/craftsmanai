@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import uuid
 import stripe
 import logging
-
+from typing import Optional
 from app.core.dependencies import get_db, get_current_user, get_current_active_user
 from app.core.config import settings
 from app.core.rate_limiter import limiter
@@ -326,6 +326,42 @@ def verify_payment(
 
             db.add(user_sub)
 
+            # Create subscription activity log
+            try:
+                from app.models.subscription import SubscriptionActivityLog, SubscriptionEventType
+                
+                # Determine event type
+                event_type = SubscriptionEventType.CREATED
+                old_plan_name = None
+                
+                # Find old plan if there was an active subscription
+                if active_subscription:
+                    old_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == active_subscription.plan_id).first()
+                    if old_plan:
+                        old_plan_name = old_plan.name
+                        old_price = old_plan.monthly_price if old_plan.monthly_price is not None else (old_plan.price or 0)
+                        new_price = plan.monthly_price if plan.monthly_price is not None else (plan.price or 0)
+                        if new_price > old_price:
+                            event_type = SubscriptionEventType.UPGRADED
+                        elif new_price < old_price:
+                            event_type = SubscriptionEventType.DOWNGRADED
+                        else:
+                            event_type = SubscriptionEventType.UPGRADED
+                
+                log_entry = SubscriptionActivityLog(
+                    user_id=payment.user_id,
+                    event_type=event_type,
+                    plan_name=plan.name,
+                    old_plan_name=old_plan_name,
+                    triggered_by="Retailer",
+                    triggered_by_id=payment.user_id,
+                    details=f"Subscription processed via verification. Status: {user_sub.status}. Queued: {is_queued}."
+                )
+                db.add(log_entry)
+                logger.info(f"SubscriptionActivityLog added for user {payment.user_id}: {event_type}")
+            except Exception as log_err:
+                logger.error(f"Failed to create subscription activity log: {log_err}")
+
             db.commit()
 
             # Send in-app notifications
@@ -500,6 +536,27 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             ).first()
             if sub:
                 sub.status = SubscriptionStatus.CANCELLED
+                
+                # Log to activity log
+                try:
+                    from app.models.subscription import SubscriptionActivityLog, SubscriptionEventType
+                    plan_name = None
+                    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == sub.plan_id).first()
+                    if plan:
+                        plan_name = plan.name
+                    log_entry = SubscriptionActivityLog(
+                        user_id=sub.user_id,
+                        event_type=SubscriptionEventType.CANCELLED,
+                        plan_name=plan_name,
+                        old_plan_name=None,
+                        triggered_by="System",
+                        triggered_by_id=None,
+                        details="Subscription deleted/cancelled via Stripe Webhook."
+                    )
+                    db.add(log_entry)
+                except Exception as log_err:
+                    logger.error(f"Failed to create cancellation log in webhook: {log_err}")
+
                 db.commit()
                 logger.info(f"Subscription {sub.id} marked as CANCELLED via customer.subscription.deleted webhook")
                 
@@ -545,10 +602,33 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                         sub.cancellation_reason = CancellationReason.OTHER
                 
                 stripe_status = stripe_sub.get('status')
+                old_status = sub.status
                 if stripe_status == 'canceled':
                     sub.status = SubscriptionStatus.CANCELLED
                 elif stripe_status in ['unpaid', 'incomplete_expired']:
                     sub.status = SubscriptionStatus.EXPIRED
+                
+                # Log to activity log if status changed to CANCELLED or EXPIRED
+                if sub.status != old_status and sub.status in [SubscriptionStatus.CANCELLED, SubscriptionStatus.EXPIRED]:
+                    try:
+                        from app.models.subscription import SubscriptionActivityLog, SubscriptionEventType
+                        plan_name = None
+                        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == sub.plan_id).first()
+                        if plan:
+                            plan_name = plan.name
+                        log_entry = SubscriptionActivityLog(
+                            user_id=sub.user_id,
+                            event_type=SubscriptionEventType.CANCELLED,
+                            plan_name=plan_name,
+                            old_plan_name=None,
+                            triggered_by="System",
+                            triggered_by_id=None,
+                            details=f"Subscription updated to {sub.status} via Stripe Webhook (status in Stripe was {stripe_status})."
+                        )
+                        db.add(log_entry)
+                    except Exception as log_err:
+                        logger.error(f"Failed to create cancellation/expiry log in webhook update: {log_err}")
+
                 db.commit()
                 logger.info(f"Subscription {sub.id} updated via customer.subscription.updated webhook")
         except Exception as e:
@@ -641,6 +721,27 @@ def activate_queued_subscriptions(
 
                         queued_sub.used_monthly_renders = 0
                         queued_sub.initial_monthly_renders = plan.monthly_renders if plan.monthly_renders != -1 else 999999
+
+                        # Log to activity log
+                        try:
+                            from app.models.subscription import SubscriptionActivityLog, SubscriptionEventType
+                            parent_plan_name = None
+                            if parent_sub:
+                                parent_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == parent_sub.plan_id).first()
+                                if parent_plan:
+                                    parent_plan_name = parent_plan.name
+                            log_entry = SubscriptionActivityLog(
+                                user_id=queued_sub.user_id,
+                                event_type=SubscriptionEventType.CREATED,
+                                plan_name=plan.name,
+                                old_plan_name=parent_plan_name,
+                                triggered_by="System",
+                                triggered_by_id=None,
+                                details="Queued subscription activated automatically by the system."
+                            )
+                            db.add(log_entry)
+                        except Exception as log_err:
+                            logger.error(f"Failed to create activation log in background job: {log_err}")
 
                         logger.info(f"Activated queued subscription {queued_sub.id} for user {queued_sub.user_id}")
                         activated_count += 1
@@ -772,11 +873,13 @@ def get_my_subscriptions(
     current_user: User = Depends(get_current_active_user)
 ) -> Any:
     """
-    Get all active and past subscriptions for current retailer.
+    Get the current active subscription for current retailer.
     """
     from sqlalchemy.orm import joinedload
-    subs = db.query(UserSubscription).filter(
-        UserSubscription.user_id == current_user.id
-    ).options(joinedload(UserSubscription.plan)).all()
-    return subs
+    sub = db.query(UserSubscription).filter(
+        UserSubscription.user_id == current_user.id,
+        UserSubscription.status == SubscriptionStatus.ACTIVE,
+        UserSubscription.is_queued == False
+    ).options(joinedload(UserSubscription.plan)).first()
+    return [sub] if sub else []
 

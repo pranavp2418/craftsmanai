@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, or_, cast, String
 import uuid
 
-from app.core.dependencies import get_db, get_current_superuser as get_current_admin
+from app.core.dependencies import get_db, get_current_superuser as get_current_admin, get_current_user
 from app.models.user import User
 from app.models.subscription import SubscriptionPlan, UserSubscription, SubscriptionStatus
 from app.schemas.subscription import SubscriptionPlan as SubscriptionPlanSchema, SubscriptionPlanCreate, SubscriptionPlanUpdate
@@ -92,6 +92,90 @@ def read_subscription_plans(
     return db.query(SubscriptionPlan).offset(skip).limit(limit).all()
 
 
+@router.get("/topup-packs")
+def get_topup_packs(
+    only_active: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+) -> Any:
+    """
+    Retrieve all topup packs (Admin only).
+    """
+    from app.models.subscription import TopupPack
+
+    query = db.query(TopupPack)
+    if only_active:
+        query = query.filter(TopupPack.is_active == True)
+    
+    packs = query.order_by(TopupPack.price.asc()).all()
+    
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": str(pack.id),
+                "renders": pack.renders,
+                "price": float(pack.price),
+                "is_active": pack.is_active,
+                "created_at": pack.created_at.isoformat() if pack.created_at else None,
+                "updated_at": pack.updated_at.isoformat() if pack.updated_at else None
+            }
+            for pack in packs
+        ]
+    }
+
+
+@router.put("/topup-packs")
+def update_topup_pack(
+    pack_id: uuid.UUID = Query(..., alias="id"),
+    renders: Optional[int] = Query(None),
+    price: Optional[float] = Query(None),
+    is_active: Optional[bool] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+) -> Any:
+    """
+    Update a topup pack's renders, price, or is_active flag using its ID in query parameters (Admin only).
+    """
+    # Import TopupPack from subscription model
+    from app.models.subscription import TopupPack
+
+    pack = db.query(TopupPack).filter(TopupPack.id == pack_id).first()
+    if not pack:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Topup pack not found"
+        )
+
+    if renders is not None:
+        pack.renders = renders
+    if price is not None:
+        pack.price = price
+    if is_active is not None:
+        pack.is_active = is_active
+
+    try:
+        db.commit()
+        db.refresh(pack)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to update topup pack: {str(e)}"
+        )
+
+    return {
+        "success": True,
+        "message": "Topup pack updated successfully",
+        "data": {
+            "id": str(pack.id),
+            "renders": pack.renders,
+            "price": float(pack.price),
+            "is_active": pack.is_active
+        }
+    }
+
+
 @router.get("/{plan_id}", response_model=SubscriptionPlanSchema)
 def read_subscription_plan(
     plan_id: uuid.UUID,
@@ -104,63 +188,6 @@ def read_subscription_plan(
     plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == plan_id).first()
     if not plan:
         raise HTTPException(status_code=404, detail="Subscription plan not found")
-    return plan
-
-
-@router.put("/{plan_id}", response_model=SubscriptionPlanSchema)
-def update_subscription_plan(
-    plan_id: uuid.UUID,
-    *,
-    db: Session = Depends(get_db),
-    plan_in: SubscriptionPlanUpdate,
-    current_user: User = Depends(get_current_admin)
-) -> Any:
-    """
-    Update a subscription plan.
-    """
-    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == plan_id).first()
-    if not plan:
-        raise HTTPException(status_code=404, detail="Subscription plan not found")
-
-    update_data = plan_in.model_dump(exclude_unset=True)
-    
-    # Handle backward compatibility for price
-    if "monthly_price" in update_data and update_data["monthly_price"] is not None:
-        update_data["price"] = update_data["monthly_price"]
-
-    # If feature_points is explicitly provided, use it as-is
-    # Otherwise, if any feature flag is being updated, auto-regenerate feature_points
-    if "feature_points" not in update_data:
-        feature_flags = ["can_use_logo", "can_use_brand_name", "can_use_custom_color", "has_unlimited_renders"]
-        if any(flag in update_data for flag in feature_flags):
-            # Get final values (updated or existing)
-            final_can_use_logo = update_data.get("can_use_logo", plan.can_use_logo)
-            final_can_use_brand_name = update_data.get("can_use_brand_name", plan.can_use_brand_name)
-            final_can_use_custom_color = update_data.get("can_use_custom_color", plan.can_use_custom_color)
-            final_has_unlimited_renders = update_data.get("has_unlimited_renders", plan.has_unlimited_renders)
-            
-            generated_features = []
-            if final_can_use_logo:
-                generated_features.append("Custom Logo")
-            if final_can_use_brand_name:
-                generated_features.append("Custom Brand Name")
-                generated_features.append("Business Email")
-                generated_features.append("Custom Phone Number")
-            if final_can_use_custom_color:
-                generated_features.append("Custom Color")
-            if final_has_unlimited_renders:
-                generated_features.append("Unlimited AI Renders")
-            update_data["feature_points"] = generated_features if generated_features else None
-
-    for field, value in update_data.items():
-        setattr(plan, field, value)
-
-    try:
-        db.commit()
-        db.refresh(plan)
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
     return plan
 
 
@@ -298,3 +325,67 @@ def read_all_user_subscriptions(
             status_code=500,
             detail=f"An error occurred while fetching subscriptions: {str(e)}"
         )
+
+
+
+
+
+
+
+
+@router.put("/{plan_id}", response_model=SubscriptionPlanSchema)
+def update_subscription_plan(
+    plan_id: uuid.UUID,
+    *,
+    db: Session = Depends(get_db),
+    plan_in: SubscriptionPlanUpdate,
+    current_user: User = Depends(get_current_admin)
+) -> Any:
+    """
+    Update a subscription plan.
+    """
+    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Subscription plan not found")
+
+    update_data = plan_in.model_dump(exclude_unset=True)
+    
+    # Handle backward compatibility for price
+    if "monthly_price" in update_data and update_data["monthly_price"] is not None:
+        update_data["price"] = update_data["monthly_price"]
+
+    # If feature_points is explicitly provided, use it as-is
+    # Otherwise, if any feature flag is being updated, auto-regenerate feature_points
+    if "feature_points" not in update_data:
+        feature_flags = ["can_use_logo", "can_use_brand_name", "can_use_custom_color", "has_unlimited_renders"]
+        if any(flag in update_data for flag in feature_flags):
+            # Get final values (updated or existing)
+            final_can_use_logo = update_data.get("can_use_logo", plan.can_use_logo)
+            final_can_use_brand_name = update_data.get("can_use_brand_name", plan.can_use_brand_name)
+            final_can_use_custom_color = update_data.get("can_use_custom_color", plan.can_use_custom_color)
+            final_has_unlimited_renders = update_data.get("has_unlimited_renders", plan.has_unlimited_renders)
+            
+            generated_features = []
+            if final_can_use_logo:
+                generated_features.append("Custom Logo")
+            if final_can_use_brand_name:
+                generated_features.append("Custom Brand Name")
+                generated_features.append("Business Email")
+                generated_features.append("Custom Phone Number")
+            if final_can_use_custom_color:
+                generated_features.append("Custom Color")
+            if final_has_unlimited_renders:
+                generated_features.append("Unlimited AI Renders")
+            update_data["feature_points"] = generated_features if generated_features else None
+
+    for field, value in update_data.items():
+        setattr(plan, field, value)
+
+    try:
+        db.commit()
+        db.refresh(plan)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    return plan
+

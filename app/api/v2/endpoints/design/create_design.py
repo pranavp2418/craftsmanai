@@ -15,13 +15,15 @@ from app.tasks.design_tasks import generate_design_base_image
 # ---------------------------------------------------------------------------
 # Upload validation constants
 # ---------------------------------------------------------------------------
-_MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB per file
+_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB per file
 _ALLOWED_CONTENT_TYPES = {
     "image/png",
     "image/jpeg",
     "image/jpg",
     "image/gif",
     "image/webp",
+    "image/heic",
+    "image/heif",
 }
 _MAX_FILES = 2
 
@@ -58,12 +60,22 @@ async def create_design(
             # --- Early validation BEFORE reading into memory ---
 
             # 1. Content-type check from upload metadata
-            if file.content_type and file.content_type.lower() not in _ALLOWED_CONTENT_TYPES:
+            ext = ""
+            if file.filename:
+                ext = file.filename.split(".")[-1].lower()
+            
+            is_allowed_type = False
+            if file.content_type and file.content_type.lower() in _ALLOWED_CONTENT_TYPES:
+                is_allowed_type = True
+            elif ext in ["heic", "heif", "png", "jpeg", "jpg", "gif", "webp"]:
+                is_allowed_type = True
+                
+            if not is_allowed_type:
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        f"Unsupported image type: {file.content_type}. "
-                        f"Allowed: PNG, JPEG, GIF, WebP."
+                        f"Unsupported image type: {file.content_type or 'unknown'}. "
+                        f"Allowed: PNG, JPEG, GIF, WebP, HEIC, HEIF."
                     ),
                 )
 

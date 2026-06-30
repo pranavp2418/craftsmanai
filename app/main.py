@@ -1,6 +1,9 @@
 import asyncio
 from contextlib import asynccontextmanager
 import logging
+from pillow_heif import register_heif_opener
+
+register_heif_opener()
 
 import os
 from pathlib import Path
