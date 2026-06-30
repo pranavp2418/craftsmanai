@@ -2644,10 +2644,17 @@ def generate_primary_image(
             if _attempt < 2:
                 logger.warning("Gemini returned no image (attempt %d/3) — retrying", _attempt + 1)
         if g64:
-            # GEMINI-ONLY: return the RAW render — NO _whiten_background flood-fill. Gemini already renders on a
-            # clean white background (Lovable returns it untouched too). The flood-fill was for OpenAI's textured
-            # backgrounds; on a Gemini render it INTERMITTENTLY left gray blobs / artifacts on the background (the
-            # "pixels bursting / pixel fat rahe" bug — TJX-162). whiten_output is now a no-op for the Gemini path.
+            # WHITE BACKGROUND (reverted 2026-06-30): the CLIENT requires a pure white background on EVERY render,
+            # so the _whiten_background flood-fill on the Gemini output is re-enabled. (It was briefly removed
+            # because on a shadowed render it occasionally left gray blobs — the TJX-162 "pixels bursting" report —
+            # but the client prioritises a guaranteed white background over that rare artifact.)
+            if whiten_output:
+                try:
+                    g64 = base64.b64encode(
+                        _whiten_background(base64.b64decode(g64), tag="gemini_primary_white_bg")
+                    ).decode("utf-8")
+                except Exception as _w:
+                    logger.warning("Gemini output white-bg post-process skipped: %s", _w)
             logger.info("Primary image generated via Gemini (%s)", getattr(settings, "GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"))
             return g64
         # GEMINI-ONLY — no OpenAI image fallback (removed). Gemini returned no image after 3 attempts: this is
