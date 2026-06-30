@@ -35,8 +35,15 @@ def send_cancel_otp(
         entered_email = payload.email.strip().lower()
         user_email = current_user.email.strip().lower()
 
-        if user_email == entered_email:
-            generate_and_send_otp(db, current_user, otp_type="cancel_plan")
+        if user_email != entered_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The email address does not match your account."
+            )
+            
+        generate_and_send_otp(db, current_user, otp_type="cancel_plan")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error generating or sending OTP for user {current_user.id}: {e}")
         raise HTTPException(
@@ -47,13 +54,13 @@ def send_cancel_otp(
     return {"message": "if mail exists and connected otp is sent"}
 
 
-@router.get("/cancel/plans", response_model=List[SubscriptionPlanSchema], status_code=status.HTTP_200_OK)
+@router.get("/cancel/plans", status_code=status.HTTP_200_OK)
 def get_smaller_plans(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> Any:
     """
-    Retrieve active subscription plans that are priced lower than the user's current active plan.
+    Retrieve all active subscription plans and mark the user's current active plan.
     """
     try:
         # 1. Fetch user's active subscription
@@ -69,36 +76,48 @@ def get_smaller_plans(
             )
         ).order_by(UserSubscription.created_at.desc()).first()
 
-        subscription = SubscriptionService.check_and_update_subscription_expiry(db, subscription)
+        if subscription:
+            subscription = SubscriptionService.check_and_update_subscription_expiry(db, subscription)
 
-        if not subscription:
-            return []
-
-        # 2. Get current plan details
-        current_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
-        if not current_plan:
-            return []
-
-        current_price = current_plan.monthly_price or current_plan.price or Decimal("0.0")
-
-        # 3. Query all other active plans
+        # 2. Query all active plans
         active_plans = db.query(SubscriptionPlan).filter(
-            SubscriptionPlan.is_active == True,
-            SubscriptionPlan.id != current_plan.id
+            SubscriptionPlan.is_active == True
         ).all()
 
-        # 4. Filter plans with price less than current price
-        smaller_plans = []
+        # 3. Format plans with current_plan and current_pan flag
+        plans_data = []
         for plan in active_plans:
-            plan_price = plan.monthly_price or plan.price or Decimal("0.0")
-            if plan_price < current_price:
-                smaller_plans.append(plan)
+            is_current = False
+            if subscription and subscription.plan_id == plan.id:
+                is_current = True
+            
+            plans_data.append({
+                "id": str(plan.id),
+                "name": plan.name,
+                "description": plan.description,
+                "price": float(plan.price) if plan.price else None,
+                "monthly_price": float(plan.monthly_price) if plan.monthly_price else None,
+                "yearly_price": float(plan.yearly_price) if plan.yearly_price else None,
+                "duration_days": plan.duration_days,
+                "is_active": plan.is_active,
+                "is_most_popular": plan.is_most_popular,
+                "monthly_renders": plan.monthly_renders,
+                "feature_points": plan.feature_points,
+                "can_use_logo": plan.can_use_logo,
+                "can_use_brand_name": plan.can_use_brand_name,
+                "can_use_custom_color": plan.can_use_custom_color,
+                "has_unlimited_renders": plan.has_unlimited_renders,
+                "created_at": plan.created_at.isoformat() if plan.created_at else None,
+                "updated_at": plan.updated_at.isoformat() if plan.updated_at else None,
+                "current_plan": is_current,
+                "current_pan": is_current
+            })
 
         # Sort from highest price to lowest price
-        smaller_plans.sort(key=lambda p: p.monthly_price or p.price or Decimal("0.0"), reverse=True)
-        return smaller_plans
+        plans_data.sort(key=lambda p: p["monthly_price"] or p["price"] or 0.0, reverse=True)
+        return plans_data
     except Exception as e:
-        logger.error(f"Error fetching smaller plans for user {current_user.id}: {e}")
+        logger.error(f"Error fetching plans for user {current_user.id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"API Failure: {str(e)}"
@@ -157,10 +176,25 @@ def cancel_user_plan(
         if not reason_enum:
             reason_enum = CancellationReason.OTHER
 
-        from datetime import datetime, timezone
-        subscription.status = SubscriptionStatus.CANCELLED
-        subscription.cancellation_reason = reason_enum
-        subscription.cancellation_date = datetime.now(timezone.utc)
+        plan_name = None
+        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
+        if plan:
+            plan_name = plan.name
+
+        try:
+            from app.models.subscription import SubscriptionActivityLog, SubscriptionEventType
+            log_entry = SubscriptionActivityLog(
+                user_id=current_user.id,
+                event_type=SubscriptionEventType.CANCELLED,
+                plan_name=plan_name,
+                old_plan_name=None,
+                triggered_by="Retailer",
+                triggered_by_id=current_user.id,
+                details=f"Cancelled subscription. Reason: {reason_str}"
+            )
+            db.add(log_entry)
+        except Exception as log_err:
+            logger.error(f"Failed to log user subscription cancellation: {log_err}")
 
         db.commit()
         db.refresh(subscription)

@@ -44,6 +44,8 @@ def _detect_content_type(image: Union[str, bytes]) -> str:
         return "image/gif"
     if image[:4] == b"RIFF" and image[8:12] == b"WEBP":
         return "image/webp"
+    if len(image) > 12 and (b"ftypheic" in image[:30] or b"ftypmif1" in image[:30] or b"ftyphevc" in image[:30] or b"ftypheif" in image[:30]):
+        return "image/heic"
     return "image/png"  # default fallback
  
  
@@ -152,9 +154,11 @@ _ALLOWED_CONTENT_TYPES = {
     "image/jpg",
     "image/gif",
     "image/webp",
+    "image/heic",
+    "image/heif",
 }
 
-MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 from io import BytesIO
@@ -182,6 +186,8 @@ def _validate_image_bytes(image_bytes: bytes, content_type: str) -> None:
             "PNG": "image/png",
             "GIF": "image/gif",
             "WEBP": "image/webp",
+            "HEIF": "image/heic",
+            "HEIC": "image/heic",
         }
 
         actual_content_type = format_map.get(img.format)
