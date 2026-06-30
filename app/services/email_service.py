@@ -271,7 +271,7 @@ class EmailService:
             context = {
                 "retailer_name": retailer_name or designer_name,
                 "render_image_url": render_image_url or "",
-                "version": version or "v1.0",
+                "version_name": version or "v1.0",
                 "design_number": design_code or "",
                 "jewelry_type": jewelry_type or "Custom Jewelry",
                 "version_label": version_label or "Version 1",
@@ -334,7 +334,7 @@ class EmailService:
                 "render_image_url": render_image_url or "",
                 "design_number": design_code or "",
                 "jewelry_type": jewelry_type or "Custom Jewelry",
-                "metal": metal or "Not specified",
+                "metal_spec": metal or "Not specified",
                 "details_sheet_url": preview_url,
                 "brand_logo_url": brand_logo_url or "",
                 "brand_primary_color": brand_primary_color or "#6366F1"
@@ -649,6 +649,222 @@ Message:
             
         except Exception as e:
             logger.error(f"Failed to send welcome email to {to}: {str(e)}")
+            EmailService._update_email_log_status(
+                log_id=log_id,
+                status=EmailStatus.FAILED,
+                error_message=str(e)
+            )
+            raise e
+
+    @staticmethod
+    async def send_plan_purchase_confirmation_email(to: str, user_name: str, plan_name: str, amount: str, billing_date: str, billing_url: str = "#"):
+        """Send plan purchase confirmation email using plan_purchase_confirm_email_template."""
+        from app.models.email_log import EmailStatus
+        log_id = EmailService._create_email_log(
+            to_email=to,
+            template_name="plan_purchase_confirm_email_template/purchase_confirmed",
+            subject="Purchase confirmed — your CraftsmanAI plan is active",
+            variables={"user_name": user_name, "plan_name": plan_name, "amount": amount, "billing_date": billing_date, "billing_url": billing_url}
+        )
+        try:
+            logger.info(f"SENDING PLAN PURCHASE CONFIRMATION: To={to}, Plan={plan_name}")
+            
+            subject = "Purchase confirmed — your CraftsmanAI plan is active"
+            
+            html_content = await render_template(
+                "plan_purchase_confirm_email_template/purchase_confirmed",
+                context={
+                    "user_name": user_name,
+                    "plan_name": plan_name,
+                    "amount": amount,
+                    "billing_date": billing_date,
+                    "billing_url": billing_url
+                }
+            )
+            
+            text_body = f"Hi {user_name},\n\nYour {plan_name} plan is now active.\n\nPlan: {plan_name}\nAmount: {amount}\nBilling Date: {billing_date}\nStatus: Active\n\nView billing details: {billing_url}\n\nBest regards,\nThe Craftsman AI Team"
+            
+            result = await EmailService._send_via_zeptomail(
+                to_email=to,
+                subject=subject,
+                html_content=html_content,
+                text_body=text_body
+            )
+            
+            if result["success"]:
+                logger.info(f"Successfully sent plan purchase confirmation to {to}")
+                EmailService._update_email_log_status(
+                    log_id=log_id,
+                    status=EmailStatus.SENT,
+                    smtp_response=result["message"]
+                )
+            else:
+                raise Exception(result["message"])
+            
+        except Exception as e:
+            logger.error(f"Failed to send plan purchase confirmation to {to}: {str(e)}")
+            EmailService._update_email_log_status(
+                log_id=log_id,
+                status=EmailStatus.FAILED,
+                error_message=str(e)
+            )
+            raise e
+
+    @staticmethod
+    async def send_plan_upgrade_confirmation_email(to: str, user_name: str, new_plan: str, amount: str, next_invoice_date: str, plan_url: str = "#"):
+        """Send plan upgrade confirmation email using plan_upgrade_email_template."""
+        from app.models.email_log import EmailStatus
+        log_id = EmailService._create_email_log(
+            to_email=to,
+            template_name="plan_upgrade_email_template/plan_upgraded",
+            subject="Your CraftsmanAI plan was upgraded",
+            variables={"user_name": user_name, "new_plan": new_plan, "amount": amount, "next_invoice_date": next_invoice_date, "plan_url": plan_url}
+        )
+        try:
+            logger.info(f"SENDING PLAN UPGRADE CONFIRMATION: To={to}, New Plan={new_plan}")
+            
+            subject = "Your CraftsmanAI plan was upgraded"
+            
+            html_content = await render_template(
+                "plan_upgrade_email_template/plan_upgraded",
+                context={
+                    "user_name": user_name,
+                    "new_plan": new_plan,
+                    "amount": amount,
+                    "next_invoice_date": next_invoice_date,
+                    "plan_url": plan_url
+                }
+            )
+            
+            text_body = f"Hi {user_name},\n\nYour CraftsmanAI plan has been upgraded to {new_plan}.\n\nNew Plan: {new_plan}\nProrated Charge: {amount}\nNext Invoice Date: {next_invoice_date}\nStatus: Updated\n\nView Plan: {plan_url}\n\nBest regards,\nThe Craftsman AI Team"
+            
+            result = await EmailService._send_via_zeptomail(
+                to_email=to,
+                subject=subject,
+                html_content=html_content,
+                text_body=text_body
+            )
+            
+            if result["success"]:
+                logger.info(f"Successfully sent plan upgrade confirmation to {to}")
+                EmailService._update_email_log_status(
+                    log_id=log_id,
+                    status=EmailStatus.SENT,
+                    smtp_response=result["message"]
+                )
+            else:
+                raise Exception(result["message"])
+            
+        except Exception as e:
+            logger.error(f"Failed to send plan upgrade confirmation to {to}: {str(e)}")
+            EmailService._update_email_log_status(
+                log_id=log_id,
+                status=EmailStatus.FAILED,
+                error_message=str(e)
+            )
+            raise e
+
+    @staticmethod
+    async def send_subscription_renewal_confirmation(to: str, user_name: str, plan_name: str, amount: str, next_renewal_date: str, invoice_url: str = "#"):
+        """Send subscription renewal confirmation email using subscription_cancelled_email_template."""
+        from app.models.email_log import EmailStatus
+        log_id = EmailService._create_email_log(
+            to_email=to,
+            template_name="subscription_renewed_email_template/subscription_renewed",
+            subject="Your CraftsmanAI subscription renewed",
+            variables={"user_name": user_name, "plan_name": plan_name, "amount": amount, "next_renewal_date": next_renewal_date, "invoice_url": invoice_url}
+        )
+        try:
+            logger.info(f"SENDING SUBSCRIPTION RENEWAL: To={to}, Plan={plan_name}")
+            
+            subject = "Your CraftsmanAI subscription renewed"
+            
+            html_content = await render_template(
+                "subscription_renewed_email_template/subscription_renewed",
+                context={
+                    "user_name": user_name,
+                    "plan_name": plan_name,
+                    "amount": amount,
+                    "next_renewal_date": next_renewal_date,
+                    "invoice_url": invoice_url
+                }
+            )
+            
+            text_body = f"Hi {user_name},\n\nYour {plan_name} plan has renewed successfully.\n\nPlan: {plan_name}\nRenewal Amount: {amount}\nNext Renewal: {next_renewal_date}\nStatus: Renewed\n\nView Invoice: {invoice_url}\n\nBest regards,\nThe Craftsman AI Team"
+            
+            result = await EmailService._send_via_zeptomail(
+                to_email=to,
+                subject=subject,
+                html_content=html_content,
+                text_body=text_body
+            )
+            
+            if result["success"]:
+                logger.info(f"Successfully sent subscription renewal confirmation to {to}")
+                EmailService._update_email_log_status(
+                    log_id=log_id,
+                    status=EmailStatus.SENT,
+                    smtp_response=result["message"]
+                )
+            else:
+                raise Exception(result["message"])
+            
+        except Exception as e:
+            logger.error(f"Failed to send subscription renewal confirmation to {to}: {str(e)}")
+            EmailService._update_email_log_status(
+                log_id=log_id,
+                status=EmailStatus.FAILED,
+                error_message=str(e)
+            )
+            raise e
+
+    @staticmethod
+    async def send_subscription_cancellation_confirmation(to: str, user_name: str, plan_name: str, access_end_date: str, cancellation_date: str, manage_billing_url: str = "#"):
+        """Send subscription cancellation confirmation email using subscription_renewed_email_template."""
+        from app.models.email_log import EmailStatus
+        log_id = EmailService._create_email_log(
+            to_email=to,
+            template_name="subscription_cancelled_email_template/subscription_cancelled",
+            subject="Your CraftsmanAI subscription has been cancelled",
+            variables={"user_name": user_name, "plan_name": plan_name, "access_end_date": access_end_date, "cancellation_date": cancellation_date, "manage_billing_url": manage_billing_url}
+        )
+        try:
+            logger.info(f"SENDING SUBSCRIPTION CANCELLATION: To={to}, Plan={plan_name}")
+            
+            subject = "Your CraftsmanAI subscription has been cancelled"
+            
+            html_content = await render_template(
+                "subscription_cancelled_email_template/subscription_cancelled",
+                context={
+                    "user_name": user_name,
+                    "plan_name": plan_name,
+                    "access_end_date": access_end_date,
+                    "cancellation_date": cancellation_date,
+                    "manage_billing_url": manage_billing_url
+                }
+            )
+            
+            text_body = f"Hi {user_name},\n\nYour {plan_name} subscription has been cancelled.\n\nPlan: {plan_name}\nAccess Until: {access_end_date}\nCancellation Date: {cancellation_date}\nStatus: Cancelled\n\nYou can manage your billing here: {manage_billing_url}\n\nBest regards,\nThe Craftsman AI Team"
+            
+            result = await EmailService._send_via_zeptomail(
+                to_email=to,
+                subject=subject,
+                html_content=html_content,
+                text_body=text_body
+            )
+            
+            if result["success"]:
+                logger.info(f"Successfully sent subscription cancellation confirmation to {to}")
+                EmailService._update_email_log_status(
+                    log_id=log_id,
+                    status=EmailStatus.SENT,
+                    smtp_response=result["message"]
+                )
+            else:
+                raise Exception(result["message"])
+            
+        except Exception as e:
+            logger.error(f"Failed to send subscription cancellation confirmation to {to}: {str(e)}")
             EmailService._update_email_log_status(
                 log_id=log_id,
                 status=EmailStatus.FAILED,

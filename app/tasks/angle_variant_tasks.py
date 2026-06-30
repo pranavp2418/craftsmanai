@@ -55,6 +55,21 @@ METAL_DESCRIPTIONS = {
 }
 
 
+def _canonical_metal(m: str) -> str:
+    """Normalise metal names to a colour family so the base's STORED key matches a REQUESTED key.
+    The create path stores the base under e.g. 'yellow_gold' but the angles endpoint requests 'gold' —
+    without this they mismatch, _ref_for_metal recolours, and a non-standard base colour (e.g. a blue-enamel
+    + silver phoenix mis-recorded as 'yellow_gold') gets RECOLOURED to gold instead of preserved (TJX-173)."""
+    m = (m or "").strip().lower().replace(" ", "_")
+    if m in ("gold", "yellow_gold", "yellowgold"):
+        return "gold"
+    if m in ("white_gold", "whitegold", "silver", "platinum"):
+        return "silver"
+    if m in ("rose_gold", "rosegold", "rose", "pink_gold"):
+        return "rose"
+    return m
+
+
 VIEW_PROMPTS = {
     "side_view": "slightly turned view — rotate the piece only about 10 degrees from straight front (a very subtle turn that just hints at the side depth/thickness). This is NOT a full side profile; the front face must still be clearly visible, almost front-on, just gently angled by ~10 degrees",
     "back_view": "rear / back view shown with a SOLID, smooth, closed, polished metal back (a solid filled back finish) — clean solid metalwork, NOT open gallery work, NOT hollow under-settings or cut-outs",
@@ -601,10 +616,15 @@ def generate_remaining_variant_angles(self, variant_id: int, metals: list[str], 
         metal_variations = variant.metal_variations_json or {}
 
         def _ref_for_metal(metal_name: str) -> tuple[str, bool]:
-            url = metal_variations.get(metal_name)
-            if url:
-                return url, False  # correctly-colored reference → keep colour
-            return variant.base_design_image_url, True  # fall back → recolor in the sheet
+            # Match by COLOUR FAMILY (gold==yellow_gold, silver==white_gold==platinum, rose==rose_gold) so the
+            # base's STORED key matches a REQUESTED key. This preserves the base's ACTUAL colour — including a
+            # non-standard colour (e.g. blue-enamel + silver phoenix) that was mis-recorded under a standard
+            # metal key — instead of recolouring it to a standard metal (the TJX-173 bug).
+            want = _canonical_metal(metal_name)
+            for k, url in metal_variations.items():
+                if url and _canonical_metal(k) == want:
+                    return url, False  # base's own colour → keep it EXACTLY (no recolour)
+            return variant.base_design_image_url, True  # genuinely different metal requested → recolour
 
         # Pre-download each unique reference image ONCE (shared across threads)
         ref_blob_cache: dict[str, list[bytes]] = {}

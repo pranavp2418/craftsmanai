@@ -1154,5 +1154,175 @@ Open this link to accept the invitation:
 Best regards,
 The Craftsman AI Team
 """.strip()
-    
     return text
+
+
+@create_task(name="send_subscription_cancellation_confirmation_email", max_retries=3)
+def send_subscription_cancellation_confirmation_email(self, to: str, user_name: str, plan_name: str, access_end_date: str, cancellation_date: str, manage_billing_url: str = "#"):
+    """
+    Send subscription cancellation confirmation email using Celery.
+    
+    Args:
+        to: Recipient email address
+        user_name: User's name
+        plan_name: Name of the cancelled plan
+        access_end_date: Date until access remains active
+        cancellation_date: Date of cancellation
+        manage_billing_url: URL to manage billing
+    """
+    task_name = "send_subscription_cancellation_confirmation_email"
+    try:
+        logger.info(f"📧 Starting {task_name} for {to}")
+        
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            EmailService.send_subscription_cancellation_confirmation(to, user_name, plan_name, access_end_date, cancellation_date, manage_billing_url)
+        )
+        
+        logger.info(f"✅ {task_name} completed successfully for {to}")
+        return True
+    except Exception as exc:
+        logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
+        raise self.retry(
+            exc=exc, 
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3
+        )
+
+
+@create_task(name="send_plan_purchase_confirmation_email", max_retries=3)
+def send_plan_purchase_confirmation_email(self, to: str, user_name: str, plan_name: str, amount: str, billing_date: str, billing_url: str = "#"):
+    """
+    Send plan purchase confirmation email using Celery.
+    
+    Args:
+        to: Recipient email address
+        user_name: User's name
+        plan_name: Name of the purchased plan
+        amount: Plan amount
+        billing_date: Billing date
+        billing_url: URL to view billing details
+    """
+    task_name = "send_plan_purchase_confirmation_email"
+    try:
+        logger.info(f"📧 Starting {task_name} for {to}")
+        
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            EmailService.send_plan_purchase_confirmation_email(to, user_name, plan_name, amount, billing_date, billing_url)
+        )
+        
+        logger.info(f" {task_name} completed successfully for {to}")
+        return True
+    except Exception as exc:
+        logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
+        raise self.retry(
+            exc=exc, 
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3
+        )
+
+
+@create_task(name="send_plan_upgrade_confirmation_email", max_retries=3)
+def send_plan_upgrade_confirmation_email(self, to: str, user_name: str, new_plan: str, amount: str, next_invoice_date: str, plan_url: str = "#"):
+    """
+    Send plan upgrade confirmation email using Celery.
+    
+    Args:
+        to: Recipient email address
+        user_name: User's name
+        new_plan: Name of the upgraded plan
+        amount: Prorated charge amount
+        next_invoice_date: Next invoice date
+        plan_url: URL to view plan details
+    """
+    task_name = "send_plan_upgrade_confirmation_email"
+    try:
+        logger.info(f"📧 Starting {task_name} for {to}")
+        
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            EmailService.send_plan_upgrade_confirmation_email(to, user_name, new_plan, amount, next_invoice_date, plan_url)
+        )
+        
+        logger.info(f" {task_name} completed successfully for {to}")
+        return True
+    except Exception as exc:
+        logger.error(f" {task_name} failed for {to}: {str(exc)}")
+        raise self.retry(
+            exc=exc, 
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3
+        )
+
+
+@create_task(name="send_subscription_cancellation_confirmation_email", max_retries=3)
+def send_subscription_cancellation_confirmation_email(self, to: str, user_name: str, plan_name: str, access_end_date: str, cancellation_date: str, manage_billing_url: str = "#"):
+    """
+    Send subscription cancellation confirmation email using Celery.
+    
+    Args:
+        to: Recipient email address
+        user_name: User's name
+        plan_name: Name of the cancelled plan
+        access_end_date: Date until access remains active
+        cancellation_date: Date of cancellation
+        manage_billing_url: URL to manage billing
+    """
+    task_name = "send_subscription_cancellation_confirmation_email"
+    try:
+        logger.info(f"📧 Starting {task_name} for {to}")
+        
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            EmailService.send_subscription_cancellation_confirmation(to, user_name, plan_name, access_end_date, cancellation_date, manage_billing_url)
+        )
+        
+        logger.info(f"✅ {task_name} completed successfully for {to}")
+        return True
+    except Exception as exc:
+        logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
+        raise self.retry(
+            exc=exc, 
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3
+        )
+
+
+@create_task(name="send_subscription_renewal_confirmation_email", max_retries=3)
+def send_subscription_renewal_confirmation_email(self, to: str, user_name: str, plan_name: str, amount: str, next_renewal_date: str, invoice_url: str = "#"):
+    """
+    Send subscription renewal confirmation email using Celery.
+    
+    Args:
+        to: Recipient email address
+        user_name: User's name
+        plan_name: Name of the renewed plan
+        amount: Renewal amount
+        next_renewal_date: Next renewal date
+        invoice_url: URL to view invoice
+    """
+    task_name = "send_subscription_renewal_confirmation_email"
+    try:
+        logger.info(f"📧 Starting {task_name} for {to}")
+        
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            EmailService.send_subscription_renewal_confirmation(to, user_name, plan_name, amount, next_renewal_date, invoice_url)
+        )
+        
+        logger.info(f"✅ {task_name} completed successfully for {to}")
+        return True
+    except Exception as exc:
+        logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
+        raise self.retry(
+            exc=exc, 
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3
+        )
+

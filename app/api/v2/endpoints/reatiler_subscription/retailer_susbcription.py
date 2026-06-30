@@ -383,6 +383,27 @@ def verify_payment(
                         }
                     )
                     
+                    # Send plan purchase confirmation email
+                    try:
+                        from app.tasks.email_tasks import send_plan_purchase_confirmation_email
+                        user_name = retailer_user.full_name or retailer_user.email.split("@")[0]
+                        plan_name = plan.name
+                        formatted_amount = f"${float(payment.amount):.2f}" if payment.amount else "$0.00"
+                        billing_date = user_sub.start_date.strftime("%B %d, %Y") if user_sub.start_date else datetime.now(timezone.utc).strftime("%B %d, %Y")
+                        billing_url = f"{settings.FRONTEND_URL}/retailer/settings" if hasattr(settings, "FRONTEND_URL") else "#"
+                        
+                        send_plan_purchase_confirmation_email.delay(
+                            to=retailer_user.email,
+                            user_name=user_name,
+                            plan_name=plan_name,
+                            amount=formatted_amount,
+                            billing_date=billing_date,
+                            billing_url=billing_url
+                        )
+                        logger.info(f"Queued plan purchase confirmation email for {retailer_user.email}")
+                    except Exception as email_err:
+                        logger.error(f"Failed to queue plan purchase confirmation email: {str(email_err)}")
+                    
                     # Notify admins
                     admins = db.query(User).filter(User.is_superuser == True).all()
                     for admin in admins:
@@ -538,6 +559,30 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
                 db.commit()
                 logger.info(f"Subscription {sub.id} marked as CANCELLED via customer.subscription.deleted webhook")
+                
+                # Send subscription cancellation confirmation email
+                try:
+                    from app.tasks.email_tasks import send_subscription_cancellation_confirmation_email
+                    user = db.query(User).filter(User.id == sub.user_id).first()
+                    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == sub.plan_id).first()
+                    if user and plan:
+                        user_name = user.full_name or user.email.split("@")[0]
+                        plan_name = plan.name
+                        access_end_date = sub.end_date.strftime("%Y-%m-%d") if sub.end_date else "N/A"
+                        cancellation_date = sub.cancellation_date.strftime("%Y-%m-%d") if sub.cancellation_date else datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                        manage_billing_url = f"{settings.FRONTEND_URL}/retailer" if hasattr(settings, 'FRONTEND_URL') else "#"
+                        
+                        send_subscription_cancellation_confirmation_email.delay(
+                            to=user.email,
+                            user_name=user_name,
+                            plan_name=plan_name,
+                            access_end_date=access_end_date,
+                            cancellation_date=cancellation_date,
+                            manage_billing_url=manage_billing_url
+                        )
+                        logger.info(f"Queued subscription cancellation email via webhook for {user.email}")
+                except Exception as email_err:
+                    logger.error(f"Failed to queue subscription cancellation email in webhook: {email_err}")
         except Exception as e:
             logger.error(f"Error processing customer.subscription.deleted webhook: {str(e)}")
             db.rollback()
@@ -590,6 +635,52 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             logger.error(f"Error processing customer.subscription.updated webhook: {str(e)}")
             db.rollback()
             return {"status": "error", "message": str(e)}
+
+    elif event['type'] == 'invoice.payment_succeeded':
+        invoice = event['data']['object']
+        stripe_sub_id = invoice.get('subscription')
+        
+        # Only care about subscription cycle renewals
+        if stripe_sub_id and invoice.get('billing_reason') == 'subscription_cycle':
+            logger.info(f"Processing renewal for subscription: {stripe_sub_id}")
+            try:
+                sub = db.query(UserSubscription).filter(
+                    UserSubscription.stripe_subscription_id == stripe_sub_id
+                ).first()
+                if sub:
+                    user = db.query(User).filter(User.id == sub.user_id).first()
+                    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == sub.plan_id).first()
+                    if user and plan:
+                        user_name = user.full_name or user.email.split("@")[0]
+                        plan_name = plan.name
+                        
+                        amount_val = invoice.get('amount_paid', 0) / 100.0
+                        formatted_amount = f"${amount_val:.2f}"
+                        
+                        lines = invoice.get('lines', {}).get('data', [])
+                        next_renewal = None
+                        if lines:
+                            next_renewal_ts = lines[0].get('period', {}).get('end')
+                            if next_renewal_ts:
+                                next_renewal = datetime.fromtimestamp(next_renewal_ts, timezone.utc).strftime("%B %d, %Y")
+                        
+                        if not next_renewal:
+                            next_renewal = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%B %d, %Y")
+                            
+                        invoice_url = invoice.get('hosted_invoice_url') or f"{settings.FRONTEND_URL}/retailer/settings"
+                        
+                        from app.tasks.email_tasks import send_subscription_renewal_confirmation_email
+                        send_subscription_renewal_confirmation_email.delay(
+                            to=user.email,
+                            user_name=user_name,
+                            plan_name=plan_name,
+                            amount=formatted_amount,
+                            next_renewal_date=next_renewal,
+                            invoice_url=invoice_url
+                        )
+                        logger.info(f"Queued subscription renewal email for {user.email}")
+            except Exception as e:
+                logger.error(f"Error handling invoice.payment_succeeded: {str(e)}")
 
     return {"status": "success"}
 

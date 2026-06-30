@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
@@ -42,6 +40,14 @@ class PublicDesignVariantResponse(BaseModel):
 
 from app.schemas.production_sheet import ProductionSheetResponse
 
+class PublicManufacturerAccessResponse(BaseModel):
+    name: str
+    deadline: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class PublicDesignFullResponse(BaseModel):
     design: PublicDesignAccessResponse
     variants: List[PublicDesignVariantResponse]
@@ -78,9 +84,3 @@ class PublicCustomerAccessResponse(BaseModel):
         from_attributes = True
 
 
-class PublicManufacturerAccessResponse(BaseModel):
-    name: str
-    deadline: Optional[str] = None
-
-    class Config:
-        from_attributes = True
