@@ -110,22 +110,21 @@ class NotificationService:
                 )
 
         try:
+            # Get the current event loop or create one if needed
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
-                loop = None
-
-            if loop and loop.is_running():
-                # We're in an async context (e.g., FastAPI request handler)
+                # No loop running - create one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            if loop.is_running():
                 # Schedule the coroutine on the running loop
-                asyncio.create_task(_async_push())
+                # Use ensure_future with the correct loop reference
+                asyncio.ensure_future(_async_push(), loop=loop)
             else:
-                # No running event loop (e.g., CLI, tests, or synchronous context)
-                new_loop = asyncio.new_event_loop()
-                try:
-                    new_loop.run_until_complete(_async_push())
-                finally:
-                    new_loop.close()
+                # Run the coroutine on the loop
+                loop.run_until_complete(_async_push())
         except Exception as exc:
             # Fail silently - notification is already persisted
             logger.error(
