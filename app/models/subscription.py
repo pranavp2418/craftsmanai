@@ -86,6 +86,9 @@ class UserSubscription(Base):
     )
     initial_monthly_renders = Column(Integer, default=0, nullable=False)
     used_monthly_renders = Column(Integer, default=0, nullable=False)
+    topup_plan_id = Column(UUID(as_uuid=True), ForeignKey("topup_packs.id", ondelete="SET NULL"), nullable=True)
+    renders_added = Column(Integer, default=0, nullable=False)
+    active_topups = Column(JSON, default=list, nullable=True)
 
     # Relationships
     user = relationship("User", back_populates="subscriptions")
@@ -103,6 +106,7 @@ class Payment(Base):
     invoice_id = Column(String, unique=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     plan_id = Column(UUID(as_uuid=True), ForeignKey("subscription_plans.id", ondelete="SET NULL"), nullable=True, index=True)
+    topup_pack_id = Column(UUID(as_uuid=True), ForeignKey("topup_packs.id", ondelete="SET NULL"), nullable=True, index=True)
     amount = Column(Numeric(10, 2), nullable=False)
     currency = Column(String, default="USD")
     status = Column(Enum(PaymentStatus), default=PaymentStatus.PENDING, nullable=False)

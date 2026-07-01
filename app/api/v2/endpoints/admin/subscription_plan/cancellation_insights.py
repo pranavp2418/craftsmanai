@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 from datetime import datetime
+from typing import Any, Optional
 
 from app.core.dependencies import get_db, get_current_superuser as get_current_admin
 from app.models.subscription import UserSubscription, CancellationReason, SubscriptionStatus
@@ -221,4 +222,94 @@ def get_cancellation_trends(
     return {
         "success": True,
         "data": trends
+    }
+
+
+@router.get("/list", status_code=200)
+def get_cancelled_subscriptions(
+    db: Session = Depends(get_db),
+    reason: Optional[str] = Query(None, description="Filter by cancellation reason"),
+    search: Optional[str] = Query(None, description="Search by retailer name or email"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page"),
+    current_user: User = Depends(get_current_admin)
+) -> Any:
+    """
+    Get all cancelled subscriptions (Admin only).
+    Returns retailer name, plan name, status, cancellation reason and date.
+    """
+    from app.models.subscription import UserSubscription, SubscriptionPlan, SubscriptionStatus, CancellationReason
+    from app.models.user import User
+    from sqlalchemy.orm import joinedload
+    from sqlalchemy import desc, or_, cast, String
+    from typing import Any, Optional
+
+    query = db.query(UserSubscription).join(User, User.id == UserSubscription.user_id).filter(
+        UserSubscription.status == SubscriptionStatus.CANCELLED
+    )
+
+    # Search filter
+    if search:
+        query = query.filter(
+            or_(
+                User.full_name.ilike(f"%{search}%"),
+                User.email.ilike(f"%{search}%")
+            )
+        )
+
+    # Cancellation Reason filter
+    if reason and reason.lower() != "all":
+        # Map user input variations to database CancellationReason enum values
+        reason_map = {
+            "too expensive": CancellationReason.TOO_EXPENSIVE,
+            "not using the platform enough": CancellationReason.NOT_USING_ENOUGH,
+            "not using enough": CancellationReason.NOT_USING_ENOUGH,
+            "found an alternative solution": CancellationReason.FOUND_ALTERNATIVE,
+            "found alternative": CancellationReason.FOUND_ALTERNATIVE,
+            "store closed temporarily": CancellationReason.STORE_CLOSED,
+            "store closed": CancellationReason.STORE_CLOSED,
+            "other reason": CancellationReason.OTHER,
+            "other": CancellationReason.OTHER
+        }
+        
+        mapped_reason = reason_map.get(reason.strip().lower())
+        if mapped_reason:
+            query = query.filter(UserSubscription.cancellation_reason == mapped_reason)
+        else:
+            query = query.filter(cast(UserSubscription.cancellation_reason, String).ilike(f"%{reason}%"))
+
+    # Load relationship fields
+    query = query.options(
+        joinedload(UserSubscription.user),
+        joinedload(UserSubscription.plan)
+    ).order_by(desc(UserSubscription.cancellation_date))
+
+    # Pagination
+    total = query.count()
+    offset = (page - 1) * limit
+    subscriptions = query.offset(offset).limit(limit).all()
+
+    formatted_data = []
+    for sub in subscriptions:
+        user = sub.user
+        plan = sub.plan
+        formatted_data.append({
+            "id": str(sub.id),
+            "retailer_name": user.full_name or user.email if user else "Unknown User",
+            "plan_name": plan.name if plan else "Unknown Plan",
+            "status": "cancelled",
+            "cancellation_reason": sub.cancellation_reason.value if (sub.cancellation_reason and hasattr(sub.cancellation_reason, 'value')) else (str(sub.cancellation_reason) if sub.cancellation_reason else None),
+            "cancellation_date": sub.cancellation_date.isoformat() if sub.cancellation_date else None,
+            "end_date": sub.end_date.isoformat() if sub.end_date else None
+        })
+
+    return {
+        "success": True,
+        "data": formatted_data,
+        "pagination": {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": (total + limit - 1) // limit
+        }
     }

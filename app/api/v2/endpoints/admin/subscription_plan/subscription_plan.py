@@ -176,6 +176,279 @@ def update_topup_pack(
     }
 
 
+@router.get("/active-topups", status_code=status.HTTP_200_OK)
+def get_active_topup_users(
+    *,
+    db: Session = Depends(get_db),
+    plan_name: str = Query("all", description="Filter by plan name (Starter, Business, Pro)"),
+    search: Optional[str] = Query(None, description="Search by retailer name or email"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page"),
+    current_user: User = Depends(get_current_admin)
+) -> Any:
+    """
+    Get all users with active top-up plans (Admin only).
+    """
+    from sqlalchemy import or_, text
+    from datetime import datetime, timezone
+    from app.models.subscription import UserSubscription, SubscriptionPlan, TopupPack, Payment, PaymentStatus
+    from app.models.user import User
+
+    now = datetime.now(timezone.utc)
+
+    from sqlalchemy.orm import aliased
+    CurrentSub = aliased(UserSubscription, name="current_sub")
+
+    # Subquery to find the latest active/cancelled-but-not-expired subscription ID for a user
+    latest_sub_id_subquery = (
+        db.query(UserSubscription.id)
+        .filter(
+            UserSubscription.user_id == User.id,
+            UserSubscription.is_queued == False,
+            or_(
+                UserSubscription.status == SubscriptionStatus.ACTIVE,
+                (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= now)
+            )
+        )
+        .order_by(UserSubscription.created_at.desc())
+        .limit(1)
+        .correlate(User)
+        .scalar_subquery()
+    )
+
+    # Base query: subscriptions with non-empty active_topups JSON
+    query = (
+        db.query(UserSubscription)
+        .join(User, User.id == UserSubscription.user_id)
+        .outerjoin(CurrentSub, CurrentSub.id == latest_sub_id_subquery)
+        .filter(
+            UserSubscription.is_queued == False,
+            or_(
+                UserSubscription.status == SubscriptionStatus.ACTIVE,
+                (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= now)
+            ),
+            text("user_subscriptions.active_topups IS NOT NULL AND user_subscriptions.active_topups != '[]'::jsonb")
+        )
+    )
+
+    # Filter by user's current latest subscription plan name
+    if plan_name and plan_name.lower() != "all":
+        query = query.join(SubscriptionPlan, SubscriptionPlan.id == CurrentSub.plan_id).filter(
+            SubscriptionPlan.name.ilike(f"%{plan_name}%")
+        )
+
+    # Search by retailer name or email
+    if search:
+        query = query.filter(
+            or_(
+                User.full_name.ilike(f"%{search}%"),
+                User.email.ilike(f"%{search}%")
+            )
+        )
+
+    # Order by subscription end date (renewal date) desc
+    query = query.order_by(desc(UserSubscription.end_date))
+
+    # Pagination
+    total = query.count()
+    offset = (page - 1) * limit
+    subscriptions = query.offset(offset).limit(limit).all()
+
+    # Fetch all top-up packs in database to map details
+    topup_packs = db.query(TopupPack).all()
+    packs_map = {str(p.id): p for p in topup_packs}
+
+    formatted_users = []
+    for sub in subscriptions:
+        user = sub.user
+        
+        # Get the actual latest active/cancelled subscription of this user to show the true current plan name
+        latest_sub = db.query(UserSubscription).filter(
+            UserSubscription.user_id == user.id,
+            UserSubscription.is_queued == False,
+            or_(
+                UserSubscription.status == SubscriptionStatus.ACTIVE,
+                (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= now)
+            )
+        ).order_by(desc(UserSubscription.created_at)).first()
+        
+        current_plan_name = latest_sub.plan.name if (latest_sub and latest_sub.plan) else (sub.plan.name if sub.plan else "Unknown Plan")
+        
+        purchased_packs_details = []
+        monthly_renewal_price = 0.0
+        # Determine overall stripe status of top-ups (default to paid)
+        stripe_status = "paid"
+        
+        active_topups_list = sub.active_topups or []
+        for item in active_topups_list:
+            t_id = item.get("topup_pack_id")
+            renders = item.get("renders", 0)
+            pack = packs_map.get(str(t_id))
+            
+            if pack:
+                # pack_name = pack.name or f"Topup Pack - {renders} Renders"
+                price = float(pack.price) if pack.price else 0.0
+                monthly_renewal_price += price
+                
+                # Fetch latest payment for this user & top-up pack to check Stripe payment status
+                latest_payment = db.query(Payment).filter(
+                    Payment.user_id == sub.user_id,
+                    Payment.topup_pack_id == pack.id
+                ).order_by(desc(Payment.created_at)).first()
+                
+                pack_status = latest_payment.status.value.lower() if latest_payment else "paid"
+                # If any of the topup payments is failed/pending, escalate the status
+                if pack_status in ["failed", "pending"]:
+                    stripe_status = pack_status
+                
+                purchased_packs_details.append({
+                    "id": str(pack.id),
+                    # "name": pack_name,
+                    "renders": renders,
+                    "price": price,
+                    "status": "active" if pack_status == "paid" else "past_due"
+                })
+            else:
+                purchased_packs_details.append({
+                    "id": str(t_id),
+                    "name": f"Topup Pack - {renders} Renders",
+                    "renders": renders,
+                    "price": 0.0,
+                    "status": "unknown"
+                })
+
+        # Overall topup status is past_due if stripe_status is failed or main subscription is past_due
+        overall_status = "active"
+        if stripe_status == "failed" or sub.status == "past_due" or sub.status == "PAST_DUE":
+            overall_status = "past_due"
+
+        formatted_users.append({
+            "retailer_id": user.id,
+            "retailer_name": user.full_name or user.email,
+            "current_plan_name": current_plan_name,
+            "purchased_packs": purchased_packs_details,
+            "topup_renders": sub.renders_added,
+            "monthly_renewal_price": monthly_renewal_price,
+            "stripe_status": stripe_status,
+            "status": overall_status,
+            "renewal_date": sub.end_date.isoformat() if sub.end_date else None
+        })
+
+    return {
+        "success": True,
+        "data": formatted_users,
+        "pagination": {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": (total + limit - 1) // limit
+        }
+    }
+
+
+@router.get("/active-topups/{retailer_id}", status_code=status.HTTP_200_OK)
+def get_retailer_topup_details(
+    retailer_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+) -> Any:
+    """
+    Get detailed top-up and render usage information for a specific retailer by ID (Admin only).
+    """
+    from datetime import datetime, timezone
+    from app.models.subscription import UserSubscription, SubscriptionPlan, TopupPack
+    from app.models.user import User
+    from sqlalchemy import or_
+
+    user = db.query(User).filter(User.id == retailer_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    now = datetime.now(timezone.utc)
+    # Get active or cancelled-but-not-expired subscription
+    sub = db.query(UserSubscription).filter(
+        UserSubscription.user_id == retailer_id,
+        UserSubscription.is_queued == False,
+        or_(
+            UserSubscription.status == SubscriptionStatus.ACTIVE,
+            (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= now)
+        )
+    ).order_by(UserSubscription.end_date.desc()).first()
+
+    if not sub:
+        raise HTTPException(status_code=404, detail="No active subscription found for this user")
+
+    plan = sub.plan
+    base_plan_price = float(plan.price) if (plan and plan.price) else 0.0
+    if plan and plan.monthly_price:
+        base_plan_price = float(plan.monthly_price)
+
+    # Render Allocation calculations
+    topup_renders = sub.renders_added or 0
+    total_renders = sub.initial_monthly_renders or 0
+    base_plan_renders = total_renders - topup_renders
+    if base_plan_renders < 0:
+        base_plan_renders = 0
+
+    # Current Usage
+    used_renders = sub.used_monthly_renders or 0
+    remaining_renders = total_renders - used_renders
+    if remaining_renders < 0:
+        remaining_renders = 0
+
+    # Retrieve all top-up packs
+    topup_packs = db.query(TopupPack).all()
+    packs_map = {str(p.id): p for p in topup_packs}
+
+    active_topup_details = []
+    topup_renewal_total = 0.0
+
+    active_topups_list = sub.active_topups or []
+    for item in active_topups_list:
+        t_id = item.get("topup_pack_id")
+        renders = item.get("renders", 0)
+        pack = packs_map.get(str(t_id))
+        
+        if pack:
+            pack_name = pack.name or f"Topup Pack - {renders} Renders"
+            price = float(pack.price) if pack.price else 0.0
+            topup_renewal_total += price
+            active_topup_details.append({
+                "name": pack_name,
+                "status": "active" if item.get("status") == "active" else item.get("status", "active"),
+                "price": f"${price:.2f}/mo"
+            })
+        else:
+            active_topup_details.append({
+                "name": f"Topup Pack - {renders} Renders",
+                "status": "active",
+                "price": "$0.00/mo"
+            })
+
+    monthly_renewal_total = base_plan_price + topup_renewal_total
+
+    return {
+        "success": True,
+        "data": {
+            "retailer_id": user.id,
+            "retailer_name": user.full_name or user.email,
+            "render_allocation": {
+                "base_plan": base_plan_renders,
+                "top_up": topup_renders,
+                "total": total_renders
+            },
+            "current_usage": {
+                "renders_used": used_renders,
+                "total_renders": total_renders,
+                "remaining_renders": remaining_renders,
+                "renewal_status": sub.status.value if hasattr(sub.status, 'value') else str(sub.status)
+            },
+            "active_topup_packs": active_topup_details,
+            "monthly_renewal_total": f"${monthly_renewal_total:.2f}/mo"
+        }
+    }
+
+
 @router.get("/{plan_id}", response_model=SubscriptionPlanSchema)
 def read_subscription_plan(
     plan_id: uuid.UUID,
@@ -295,6 +568,12 @@ def read_all_user_subscriptions(
             business_name = row[3]
             plan_name = row[4]
             
+            # Calculate usage metrics
+            renders_used = sub.used_monthly_renders or 0
+            renders_total = sub.initial_monthly_renders or 0
+            renders_remaining = max(0, renders_total - renders_used)
+            topup_renders = sub.renders_added or 0
+
             data.append({
                 "id": str(sub.id),
                 "user_id": sub.user_id,
@@ -306,7 +585,13 @@ def read_all_user_subscriptions(
                 "status": sub.status.value if hasattr(sub.status, 'value') else sub.status,
                 "start_date": sub.start_date.isoformat() if sub.start_date else None,
                 "end_date": sub.end_date.isoformat() if sub.end_date else None,
-                "created_at": sub.created_at.isoformat() if sub.created_at else None
+                "created_at": sub.created_at.isoformat() if sub.created_at else None,
+                "usage": {
+                    "renders_used": renders_used,
+                    "renders_total": renders_total,
+                    "renders_remaining": renders_remaining,
+                    "topup_renders": topup_renders
+                }
             })
 
         return {
@@ -388,4 +673,7 @@ def update_subscription_plan(
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
     return plan
+
+
+
 

@@ -145,6 +145,118 @@ def create_checkout_session(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/create-topup-checkout-session")
+@limiter.limit(settings.RATE_LIMIT_PAYMENT)
+def create_topup_checkout_session(
+    *,
+    request: Request,
+    db: Session = Depends(get_db),
+    topup_pack_id: uuid.UUID,
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Create a Stripe checkout session for a topup pack.
+    Requires the user to have a current active subscription.
+    """
+    from app.models.subscription import TopupPack
+
+    current_user_id = current_user.id
+    current_user_email = current_user.email
+
+    # 1. Verify that user has an active subscription
+    active_subscription = db.query(UserSubscription).filter(
+        UserSubscription.user_id == current_user_id,
+        UserSubscription.status == SubscriptionStatus.ACTIVE,
+        UserSubscription.is_queued == False
+    ).order_by(UserSubscription.end_date.desc()).first()
+
+    if not active_subscription:
+        raise HTTPException(
+            status_code=400,
+            detail="You must have an active subscription to purchase a top-up pack."
+        )
+
+    # 2. Get the topup pack details
+    topup_pack = db.query(TopupPack).filter(TopupPack.id == topup_pack_id).first()
+    if not topup_pack:
+        raise HTTPException(status_code=404, detail="Topup pack not found")
+
+    if not topup_pack.is_active:
+        raise HTTPException(status_code=400, detail="This topup pack is not currently active")
+
+    stripe_customer_id = active_subscription.stripe_customer_id
+    if not stripe_customer_id:
+        pay = db.query(Payment).filter(Payment.user_id == current_user_id).first()
+        if pay:
+            stripe_customer_id = pay.stripe_customer_id
+
+    if not stripe_customer_id:
+        logger.info(f"Creating Stripe customer for user: {current_user_id}")
+        customer = stripe.Customer.create(
+            email=current_user_email,
+            metadata={"user_id": str(current_user_id)}
+        )
+        stripe_customer_id = customer.id
+        active_subscription.stripe_customer_id = stripe_customer_id
+        db.commit()
+
+    stripe_amount = int(topup_pack.price * 100)
+
+    try:
+        checkout_session = stripe.checkout.Session.create(
+            customer=stripe_customer_id,
+            payment_method_types=['card'],
+            payment_method_collection='if_required',
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'unit_amount': stripe_amount,
+                    'product_data': {
+                        'name': f"Topup Pack - {topup_pack.renders} Renders",
+                        'description': f"Adds recurring {topup_pack.renders} renders to your monthly subscription allowance."
+                    },
+                    'recurring': {
+                        'interval': 'month',
+                        'interval_count': 1
+                    }
+                },
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=f"{settings.FRONTEND_URL}/payment-success?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{settings.FRONTEND_URL}/payment-failed",
+            metadata={
+                "user_id": str(current_user_id),
+                "topup_pack_id": str(topup_pack.id),
+                "is_topup": "true"
+            }
+        )
+
+        # Create a pending payment record
+        current_year = datetime.now().year
+        invoice_id = f"INV-{current_year}-{str(uuid.uuid4())[:8].upper()}"
+
+        payment = Payment(
+            invoice_id=invoice_id,
+            user_id=current_user_id,
+            plan_id=None,
+            topup_pack_id=topup_pack.id,
+            amount=topup_pack.price,
+            status=PaymentStatus.PENDING,
+            stripe_session_id=checkout_session.id,
+            stripe_customer_id=stripe_customer_id
+        )
+
+        db.add(payment)
+        db.commit()
+
+        return {"checkout_url": checkout_session.url}
+    except Exception as e:
+        logger.error(f"Error creating topup checkout session: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/verify-payment/{session_id}")
 @limiter.limit(settings.RATE_LIMIT_PAYMENT)
 def verify_payment(
@@ -179,6 +291,54 @@ def verify_payment(
 
         if session.payment_status in ["paid", "no_payment_required"]:
             stripe_sub_id = getattr(session, 'subscription', '') or ''
+
+            # Check if this is a topup checkout session
+            is_topup = payment.topup_pack_id is not None
+            if is_topup:
+                if payment.status != PaymentStatus.PAID:
+                    payment.status = PaymentStatus.PAID
+                    payment.stripe_payment_intent_id = getattr(session, 'payment_intent', None) or session_id
+                    payment.payment_method = "card"
+                    
+                    active_sub = db.query(UserSubscription).filter(
+                        UserSubscription.user_id == payment.user_id,
+                        UserSubscription.status == SubscriptionStatus.ACTIVE,
+                        UserSubscription.is_queued == False
+                    ).first()
+                    
+                    if active_sub:
+                        from app.models.subscription import TopupPack
+                        topup_pack = db.query(TopupPack).filter(TopupPack.id == payment.topup_pack_id).first()
+                        if topup_pack:
+                            active_sub.topup_plan_id = topup_pack.id
+                            active_sub.renders_added = (active_sub.renders_added or 0) + topup_pack.renders
+                            active_sub.initial_monthly_renders += topup_pack.renders
+                            
+                            # Update active_topups JSON list - append each purchase as a separate entry
+                            current_topups = list(active_sub.active_topups or [])
+                            new_entry = {
+                                "topup_pack_id": str(topup_pack.id),
+                                "stripe_subscription_ids": [stripe_sub_id] if stripe_sub_id else [],
+                                "renders": topup_pack.renders,
+                                "status": "active"
+                            }
+                            current_topups.append(new_entry)
+                            active_sub.active_topups = current_topups
+                    
+                    db.commit()
+                
+                from app.models.subscription import TopupPack
+                topup_pack = db.query(TopupPack).filter(TopupPack.id == payment.topup_pack_id).first()
+                renders_count = topup_pack.renders if topup_pack else 0
+                return {
+                    "status": "success",
+                    "message": "Topup pack successfully purchased and activated",
+                    "amount": float(payment.amount) if payment.amount else 0.0,
+                    "payment_method": payment.payment_method or "card",
+                    "transaction_id": payment.stripe_payment_intent_id or session_id,
+                    "plan_name": f"Topup Pack - {renders_count} Renders"
+                }
+
             existing_sub = db.query(UserSubscription).filter(
                 UserSubscription.stripe_subscription_id == stripe_sub_id
             ).first() if stripe_sub_id else None
@@ -248,58 +408,35 @@ def verify_payment(
                     if (active_plan.monthly_price == 0 or active_plan.yearly_price == 0 or (active_plan.price or 0) == 0):
                         is_active_sub_free = True
 
-            if active_subscription and not is_active_sub_free and active_subscription.end_date > datetime.now(timezone.utc):
-                # Queue the new subscription to start after the current active one expires
-                is_queued = True
-                activates_after_id = active_subscription.id
-                start_date = active_subscription.end_date
-                end_date = start_date + timedelta(days=duration)
+            is_queued = False
+            activates_after_id = None
+            start_date = datetime.now(timezone.utc)
+            end_date = start_date + timedelta(days=duration)
+
+            if active_subscription:
+                # Deactivate the old active subscription immediately
+                active_subscription.status = SubscriptionStatus.EXPIRED
+                active_subscription.end_date = datetime.now(timezone.utc)
                 
-                # Set cancel_at_period_end = True on the old active subscription on Stripe so it terminates
+                # Cancel the old subscription on Stripe immediately to avoid double-charging
                 if active_subscription.stripe_subscription_id:
                     try:
-                        logger.info(f"Setting cancel_at_period_end=True for old stripe subscription: {active_subscription.stripe_subscription_id}")
-                        stripe.Subscription.modify(
-                            active_subscription.stripe_subscription_id,
-                            cancel_at_period_end=True
-                        )
+                        logger.info(f"Cancelling old stripe subscription immediately: {active_subscription.stripe_subscription_id}")
+                        stripe.Subscription.delete(active_subscription.stripe_subscription_id)
                     except Exception as e:
-                        logger.error(f"Error modifying old stripe subscription: {e}")
-                
-                # Shift Stripe's next billing cycle anchor for the new subscription to the end date of the new cycle
-                if stripe_sub_id:
-                    try:
-                        anchor_timestamp = int(end_date.timestamp())
-                        logger.info(f"Shifting billing cycle anchor for new subscription {stripe_sub_id} to {end_date} (timestamp: {anchor_timestamp})")
-                        stripe.Subscription.modify(
-                            stripe_sub_id,
-                            billing_cycle_anchor=anchor_timestamp,
-                            proration_behavior="none"
-                        )
-                    except Exception as e:
-                        logger.error(f"Error shifting billing cycle anchor for new subscription {stripe_sub_id}: {e}")
-
-                logger.info(f"Subscription queued to activate after {active_subscription.id} on {start_date}")
-            else:
-                is_queued = False
-                activates_after_id = None
-                start_date = datetime.now(timezone.utc)
-                end_date = start_date + timedelta(days=duration)
-
-                if active_subscription:
-                    # Deactivate the old active subscription immediately since it is expired or has less than 48 hours left
-                    active_subscription.status = SubscriptionStatus.EXPIRED
-                    active_subscription.end_date = datetime.now(timezone.utc)
-                    
-                    # Cancel the old subscription on Stripe immediately to avoid double-charging
-                    if active_subscription.stripe_subscription_id:
-                        try:
-                            logger.info(f"Cancelling old stripe subscription immediately: {active_subscription.stripe_subscription_id}")
-                            stripe.Subscription.delete(active_subscription.stripe_subscription_id)
-                        except Exception as e:
-                            logger.error(f"Error deleting old stripe subscription: {e}")
-                            
-                    logger.info(f"Previous active subscription {active_subscription.id} marked as EXPIRED")
+                        logger.error(f"Error deleting old stripe subscription: {e}")
+                        
+                # Also cancel all active top-ups on Stripe immediately to avoid double-charging
+                if active_subscription.active_topups:
+                    for topup_entry in active_subscription.active_topups:
+                        for sub_id in topup_entry.get("stripe_subscription_ids", []):
+                            try:
+                                logger.info(f"Cancelling top-up stripe subscription immediately: {sub_id}")
+                                stripe.Subscription.delete(sub_id)
+                            except Exception as topup_err:
+                                logger.error(f"Failed to delete top-up subscription {sub_id} on Stripe: {topup_err}")
+                                
+                logger.info(f"Previous active subscription {active_subscription.id} marked as EXPIRED")
 
             user_sub = UserSubscription(
                 user_id=payment.user_id,
@@ -514,6 +651,32 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 payment.payment_method = payment_method
                 payment.stripe_webhook_event_id = event_id
                 create_invoice_for_payment(db, payment)
+
+                if payment.topup_pack_id:
+                    active_sub = db.query(UserSubscription).filter(
+                        UserSubscription.user_id == payment.user_id,
+                        UserSubscription.status == SubscriptionStatus.ACTIVE,
+                        UserSubscription.is_queued == False
+                    ).first()
+                    if active_sub:
+                        from app.models.subscription import TopupPack
+                        topup_pack = db.query(TopupPack).filter(TopupPack.id == payment.topup_pack_id).first()
+                        if topup_pack:
+                            active_sub.topup_plan_id = topup_pack.id
+                            active_sub.renders_added = (active_sub.renders_added or 0) + topup_pack.renders
+                            active_sub.initial_monthly_renders += topup_pack.renders
+                            
+                            # Update active_topups JSON list - append each purchase as a separate entry
+                            stripe_sub_id = session.get('subscription')
+                            current_topups = list(active_sub.active_topups or [])
+                            new_entry = {
+                                "topup_pack_id": str(topup_pack.id),
+                                "stripe_subscription_ids": [stripe_sub_id] if stripe_sub_id else [],
+                                "renders": topup_pack.renders,
+                                "status": "active"
+                            }
+                            current_topups.append(new_entry)
+                            active_sub.active_topups = current_topups
 
                 db.commit()
                 logger.info(f"Payment {payment.id} status updated to PAID via webhook")
@@ -831,6 +994,12 @@ def get_token_status(
         can_use_logo = None
         can_use_brand_name = None
         has_unlimited_renders = None
+        topup_renders = active_sub.renders_added if (active_sub and active_sub.renders_added is not None) else 0
+        if limit in [-1, 999999]:
+            base_limit = limit
+        else:
+            base_limit = max(0, limit - topup_renders)
+
         if active_sub:
             plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == active_sub.plan_id).first()
             if plan:
@@ -845,7 +1014,8 @@ def get_token_status(
             "status": "success",
             "data": {
                 "monthly_renders_used": used,
-                "monthly_renders_limit": limit,
+                "monthly_renders_limit": base_limit,
+                "topup_renders": topup_renders,
                 "monthly_renders_remaining": remaining,
                 "is_unlimited": limit == -1 or limit == 999999 or has_unlimited_renders,
                 "renders_reset_date": active_sub.start_date if active_sub else None,
@@ -875,11 +1045,16 @@ def get_my_subscriptions(
     """
     Get the current active subscription for current retailer.
     """
+    from sqlalchemy import or_
     from sqlalchemy.orm import joinedload
+    now = datetime.now(timezone.utc)
     sub = db.query(UserSubscription).filter(
         UserSubscription.user_id == current_user.id,
-        UserSubscription.status == SubscriptionStatus.ACTIVE,
-        UserSubscription.is_queued == False
-    ).options(joinedload(UserSubscription.plan)).first()
+        UserSubscription.is_queued == False,
+        or_(
+            UserSubscription.status == SubscriptionStatus.ACTIVE,
+            (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= now)
+        )
+    ).options(joinedload(UserSubscription.plan)).order_by(UserSubscription.end_date.desc()).first()
     return [sub] if sub else []
 
