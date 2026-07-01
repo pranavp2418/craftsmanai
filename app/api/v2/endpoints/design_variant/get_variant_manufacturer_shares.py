@@ -84,6 +84,7 @@ def get_variant_manufacturer_shares(
                 ),
                 "public_token": share.public_token,
                 "shared_metal": share.shared_metal,
+                "shared_angles": share.shared_angles,
             }
         )
 

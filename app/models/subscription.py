@@ -93,6 +93,7 @@ class UserSubscription(Base):
     # Relationships
     user = relationship("User", back_populates="subscriptions")
     plan = relationship("SubscriptionPlan", back_populates="subscriptions")
+    topups = relationship("UserTopup", back_populates="subscription", cascade="all, delete-orphan")
 
     @property
     def plan_name(self) -> Optional[str]:
@@ -159,3 +160,26 @@ class TopupPack(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class UserTopup(Base):
+    __tablename__ = "user_topups"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_subscription_id = Column(UUID(as_uuid=True), ForeignKey("user_subscriptions.id", ondelete="CASCADE"), nullable=False, index=True)
+    topup_pack_id = Column(UUID(as_uuid=True), ForeignKey("topup_packs.id", ondelete="SET NULL"), nullable=True, index=True)
+    stripe_subscription_id = Column(String, nullable=True, unique=True, index=True)
+    status = Column(String, default="active", nullable=False, index=True)  # active, cancelled, expired, past_due
+    renders = Column(Integer, nullable=False, default=0)
+    price = Column(Numeric(10, 2), nullable=False)
+    
+    start_date = Column(DateTime(timezone=True), nullable=True)
+    end_date = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+    subscription = relationship("UserSubscription", back_populates="topups")
+    topup_pack = relationship("TopupPack")

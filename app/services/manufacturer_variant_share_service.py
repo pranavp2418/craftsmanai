@@ -66,6 +66,7 @@ class DesignVariantManufacturerShareService:
         design_variant_id: int,
         manufacturer_id: int,
         shared_metal: Optional[str] = None,
+        shared_angles: Optional[list[str]] = None,
     ) -> DesignVariantManufacturerShare:
         """Create a manufacturer share link for a design variant.
 
@@ -75,17 +76,34 @@ class DesignVariantManufacturerShareService:
             shared_metal: Optional specific metal to share (e.g. "gold", "rose_gold").
                          When set, the manufacturer view will only show images for this metal.
                          This value is typically inherited from the customer share record.
+            shared_angles: Optional specific angles to share (e.g. ["front", "side"]).
         """
         variant = self.variant_repo.get_by_id(design_variant_id)
         if not variant:
             raise ValueError(f"DesignVariant with id {design_variant_id} not found")
 
-        share = self.share_repo.create_share(
-            design_variant_id=design_variant_id,
-            manufacturer_id=manufacturer_id,
-            public_token=self._token(),
-            shared_metal=shared_metal,
-        )
+        # Check if this variant was already shared with this manufacturer
+        existing_shares = self.share_repo.list_for_variant(design_variant_id)
+        existing_share = next((s for s in existing_shares if s.manufacturer_id == manufacturer_id), None)
+        if existing_share:
+            existing_share.shared_metal = shared_metal
+            existing_share.shared_angles = shared_angles
+            existing_share.status = ManufacturerShareStatus.PENDING
+            existing_share.cost_price = None
+            existing_share.delivery_time_days = None
+            existing_share.notes = None
+            self.db.add(existing_share)
+            self.db.commit()
+            self.db.refresh(existing_share)
+            share = existing_share
+        else:
+            share = self.share_repo.create_share(
+                design_variant_id=design_variant_id,
+                manufacturer_id=manufacturer_id,
+                public_token=self._token(),
+                shared_metal=shared_metal,
+                shared_angles=shared_angles,
+            )
         review_url = self.build_review_url(share)
         self.activity_repo.log(
             design_id=variant.design_id,
@@ -98,6 +116,7 @@ class DesignVariantManufacturerShareService:
                 "share_id": share.id,
                 **({"review_url": review_url} if review_url else {}),
                 "shared_metal": shared_metal,
+                "shared_angles": shared_angles,
             },
         )
         return share

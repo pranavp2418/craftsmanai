@@ -324,6 +324,19 @@ def verify_payment(
                             }
                             current_topups.append(new_entry)
                             active_sub.active_topups = current_topups
+
+                            # Relational table sync
+                            from app.models.subscription import UserTopup
+                            user_topup = UserTopup(
+                                user_id=active_sub.user_id,
+                                user_subscription_id=active_sub.id,
+                                topup_pack_id=topup_pack.id,
+                                stripe_subscription_id=stripe_sub_id,
+                                status="active",
+                                renders=topup_pack.renders,
+                                price=topup_pack.price
+                            )
+                            db.add(user_topup)
                     
                     db.commit()
                 
@@ -452,14 +465,31 @@ def verify_payment(
                         logger.error(f"Error deleting old stripe subscription: {e}")
                         
                 # Also cancel all active top-ups on Stripe immediately to avoid double-charging
-                if active_subscription.active_topups:
-                    for topup_entry in active_subscription.active_topups:
-                        for sub_id in topup_entry.get("stripe_subscription_ids", []):
-                            try:
-                                logger.info(f"Cancelling top-up stripe subscription immediately: {sub_id}")
-                                stripe.Subscription.delete(sub_id)
-                            except Exception as topup_err:
-                                logger.error(f"Failed to delete top-up subscription {sub_id} on Stripe: {topup_err}")
+                from app.models.subscription import UserTopup
+                db_topups = db.query(UserTopup).filter(
+                    UserTopup.user_subscription_id == active_subscription.id,
+                    UserTopup.status == "active"
+                ).all()
+                
+                stripe_sub_ids = []
+                if db_topups:
+                    for t in db_topups:
+                        if t.stripe_subscription_id:
+                            stripe_sub_ids.append(t.stripe_subscription_id)
+                else:
+                    # Fallback to active_topups JSON list for legacy subscriptions
+                    if active_subscription.active_topups:
+                        for topup_entry in active_subscription.active_topups:
+                            for sub_id in topup_entry.get("stripe_subscription_ids", []):
+                                if sub_id:
+                                    stripe_sub_ids.append(sub_id)
+                                    
+                for sub_id in stripe_sub_ids:
+                    try:
+                        logger.info(f"Cancelling top-up stripe subscription immediately: {sub_id}")
+                        stripe.Subscription.delete(sub_id)
+                    except Exception as topup_err:
+                        logger.error(f"Failed to delete top-up subscription {sub_id} on Stripe: {topup_err}")
                                 
                 logger.info(f"Previous active subscription {active_subscription.id} marked as EXPIRED")
 
@@ -729,6 +759,19 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     except Exception as email_err:
                         logger.error(f"Failed to queue top-up purchase confirmation email in webhook: {str(email_err)}")
 
+                    # Relational table sync
+                    from app.models.subscription import UserTopup
+                    user_topup = UserTopup(
+                        user_id=active_sub.user_id,
+                        user_subscription_id=active_sub.id,
+                        topup_pack_id=topup_pack.id,
+                        stripe_subscription_id=stripe_sub_id,
+                        status="active",
+                        renders=topup_pack.renders,
+                        price=topup_pack.price
+                    )
+                    db.add(user_topup)
+
                 db.commit()
                 logger.info(f"Payment {payment.id} status updated to PAID via webhook")
             else:
@@ -773,6 +816,28 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
                 db.commit()
                 logger.info(f"Subscription {sub.id} marked as CANCELLED via customer.subscription.deleted webhook")
+            else:
+                # Check if it is a top-up subscription
+                from app.models.subscription import UserTopup
+                topup = db.query(UserTopup).filter(
+                    UserTopup.stripe_subscription_id == stripe_sub_id
+                ).first()
+                if topup:
+                    topup.status = "cancelled"
+                    parent_sub = topup.subscription
+                    if parent_sub:
+                        parent_sub.renders_added = max(0, (parent_sub.renders_added or 0) - topup.renders)
+                        parent_sub.initial_monthly_renders = max(0, (parent_sub.initial_monthly_renders or 0) - topup.renders)
+                        
+                        current_topups = list(parent_sub.active_topups or [])
+                        updated_topups = []
+                        for entry in current_topups:
+                            if entry.get("topup_pack_id") == str(topup.topup_pack_id) and stripe_sub_id in entry.get("stripe_subscription_ids", []):
+                                entry["status"] = "cancelled"
+                            updated_topups.append(entry)
+                        parent_sub.active_topups = updated_topups
+                    db.commit()
+                    logger.info(f"Top-up subscription {stripe_sub_id} marked as cancelled via webhook")
                 
                 # Send subscription cancellation confirmation email
                 try:

@@ -18,6 +18,7 @@ class ManufacturerVariantShareRequest(BaseModel):
 
     manufacturer_ids: list[int] = Field(..., min_length=1, description="List of IDs of the manufacturers to share with")
     emails: Optional[Dict[str, List[str]]] = Field(default=None, description="Map of manufacturer_id to list of email addresses to send to")
+    angles: Optional[List[str]] = Field(default=None, description="List of specific angles to share with the manufacturers (e.g. ['front', 'side'])")
 
 
 class ManufacturerVariantShareResponse(BaseModel):
@@ -31,6 +32,7 @@ class ManufacturerVariantShareResponse(BaseModel):
     delivery_time_days: Optional[int] = None
     notes: Optional[str] = None
     shared_metal: Optional[str] = None
+    shared_angles: Optional[List[str]] = None
     created_at: datetime
 
     class Config:
@@ -51,6 +53,7 @@ class ManufacturerVariantShareDetailResponse(BaseModel):
     status: str
     public_token: str
     shared_metal: Optional[str] = None
+    shared_angles: Optional[List[str]] = None
 
     class Config:
         from_attributes = True

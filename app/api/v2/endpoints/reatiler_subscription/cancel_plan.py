@@ -79,9 +79,10 @@ def get_smaller_plans(
         if subscription:
             subscription = SubscriptionService.check_and_update_subscription_expiry(db, subscription)
 
-        # 2. Query all active plans
+        # 2. Query all active plans (excluding trial plans)
         active_plans = db.query(SubscriptionPlan).filter(
-            SubscriptionPlan.is_active == True
+            SubscriptionPlan.is_active == True,
+            ~SubscriptionPlan.name.ilike('%trial%')
         ).all()
 
         # 3. Format plans with current_plan and current_pan flag
@@ -164,17 +165,34 @@ def cancel_user_plan(
                 )
                 
                 # Also cancel all active top-ups on Stripe at period end
-                if subscription.active_topups:
-                    for topup_entry in subscription.active_topups:
-                        for sub_id in topup_entry.get("stripe_subscription_ids", []):
-                            try:
-                                logger.info(f"Setting cancel_at_period_end=True for top-up stripe subscription: {sub_id}")
-                                stripe.Subscription.modify(
-                                    sub_id,
-                                    cancel_at_period_end=True
-                                )
-                            except Exception as topup_err:
-                                logger.error(f"Failed to cancel top-up subscription {sub_id} on Stripe: {topup_err}")
+                from app.models.subscription import UserTopup
+                db_topups = db.query(UserTopup).filter(
+                    UserTopup.user_subscription_id == subscription.id,
+                    UserTopup.status == "active"
+                ).all()
+                
+                stripe_sub_ids = []
+                if db_topups:
+                    for t in db_topups:
+                        if t.stripe_subscription_id:
+                            stripe_sub_ids.append(t.stripe_subscription_id)
+                else:
+                    # Fallback to active_topups JSON list for legacy subscriptions
+                    if subscription.active_topups:
+                        for topup_entry in subscription.active_topups:
+                            for sub_id in topup_entry.get("stripe_subscription_ids", []):
+                                if sub_id:
+                                    stripe_sub_ids.append(sub_id)
+                                    
+                for sub_id in stripe_sub_ids:
+                    try:
+                        logger.info(f"Setting cancel_at_period_end=True for top-up stripe subscription: {sub_id}")
+                        stripe.Subscription.modify(
+                            sub_id,
+                            cancel_at_period_end=True
+                        )
+                    except Exception as topup_err:
+                        logger.error(f"Failed to cancel top-up subscription {sub_id} on Stripe: {topup_err}")
             except Exception as stripe_err:
                 logger.error(f"Stripe cancel subscription failed for {subscription.stripe_subscription_id}: {stripe_err}")
                 raise HTTPException(

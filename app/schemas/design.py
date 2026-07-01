@@ -111,6 +111,10 @@ class DesignShareCreateRequest(BaseModel):
         description="Specific metal to share with the customer (e.g. 'gold', 'rose_gold', 'silver'). "
                     "When set, further manufacturer shares will use the same metal.",
     )
+    angles: Optional[list[str]] = Field(
+        default=None,
+        description="Specific angles to share with the customer (e.g. ['front', 'side']).",
+    )
 
     @field_validator('comment')
     @classmethod
@@ -129,6 +133,7 @@ class DesignShareResponse(BaseModel):
     status: DesignShareStatus
     comment: Optional[str]
     shared_metal: Optional[str] = None
+    shared_angles: Optional[list[str]] = None
     reviewed_at: Optional[datetime]
     created_at: datetime
    
