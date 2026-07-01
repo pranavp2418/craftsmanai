@@ -320,29 +320,28 @@ class EmailService:
         log_id = EmailService._create_email_log(
             to_email=to_email,
             template_name="manufacturer_design_share",
-            subject=f"Quote Request from {designer_name} - Craftsman AI",
+            subject="New costing request from CraftsmanAI",
             variables={"manufacturer_name": manufacturer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "metal": metal, "brand_logo_url": brand_logo_url, "brand_primary_color": brand_primary_color}
         )
         try:
             logger.info(f"SENDING MANUFACTURER SHARE EMAIL: To={to_email}, URL={preview_url}")
             
-            subject = f"Quote Request from {designer_name} - Craftsman AI"
+            subject = "New costing request from CraftsmanAI"
             
             # Render the manufacturer_design_share template
             context = {
-                "retailer_name": retailer_name or designer_name,
-                "render_image_url": render_image_url or "",
+                "manufacturer_name": manufacturer_name,
                 "design_number": design_code or "",
                 "jewelry_type": jewelry_type or "Custom Jewelry",
                 "metal_spec": metal or "Not specified",
-                "details_sheet_url": preview_url,
+                "quote_url": preview_url,
                 "brand_logo_url": brand_logo_url or "",
                 "brand_primary_color": brand_primary_color or "#6366F1"
             }
             
             html_content = await render_template("manufacturer_design_share", context)
             
-            text_body = f"Hi {manufacturer_name},\n\n{retailer_name or designer_name} sent a Details Sheet for manufacturer quote.\n\nDesign Number: {design_code or 'N/A'}\nJewelry Type: {jewelry_type or 'Custom Jewelry'}\nMetal: {metal or 'Not specified'}\n\nOpen the Details Sheet and submit costing here: {preview_url}\n\nBest regards,\nThe Craftsman AI Team"
+            text_body = f"Hi {manufacturer_name},\n\nCraftsmanAI has shared a Details Sheet for manufacturer quote review.\n\nDesign #{design_code or 'N/A'}\nJewelry Type: {jewelry_type or 'Custom Jewelry'}\nMetal: {metal or 'Not specified'}\n\nOpen the Details Sheet and submit your quote: {preview_url}\n\nBest regards,\nThe Craftsman AI Team"
             
             # Manufacturer quote emails use ZEPTOMAIL_QUOTES_EMAIL
             result = await EmailService._send_via_zeptomail(
@@ -865,6 +864,62 @@ Message:
             
         except Exception as e:
             logger.error(f"Failed to send subscription renewal confirmation to {to}: {str(e)}")
+            EmailService._update_email_log_status(
+                log_id=log_id,
+                status=EmailStatus.FAILED,
+                error_message=str(e)
+            )
+            raise e
+
+    @staticmethod
+    async def send_quote_submitted_email(to: str, retailer_name: str, manufacturer_name: str, design_number: str, estimated_cost: str, production_timeline: str, quote_url: str = "#", render_image_url: str = ""):
+        """Send quote submitted notification email to retailer using quote_submitted_template."""
+        from app.models.email_log import EmailStatus
+        log_id = EmailService._create_email_log(
+            to_email=to,
+            template_name="quote_submitted_template/quote_submitted",
+            subject=f"Quote received from {manufacturer_name} — Craftsman AI",
+            variables={"retailer_name": retailer_name, "manufacturer_name": manufacturer_name, "design_number": design_number, "estimated_cost": estimated_cost, "production_timeline": production_timeline, "quote_url": quote_url, "render_image_url": render_image_url}
+        )
+        try:
+            logger.info(f"SENDING QUOTE SUBMITTED EMAIL: To={to}, Manufacturer={manufacturer_name}, Design={design_number}")
+            
+            subject = f"Quote received from {manufacturer_name} — Craftsman AI"
+            
+            html_content = await render_template(
+                "quote_submitted_template/quote_submitted",
+                context={
+                    "retailer_name": retailer_name,
+                    "manufacturer_name": manufacturer_name,
+                    "design_number": design_number,
+                    "estimated_cost": estimated_cost,
+                    "production_timeline": production_timeline,
+                    "quote_url": quote_url,
+                    "render_image_url": render_image_url
+                }
+            )
+            
+            text_body = f"Hi {retailer_name},\n\n{manufacturer_name} has submitted a quote for your design.\n\nDesign #{design_number}\nEstimated Cost: {estimated_cost}\nTimeline: {production_timeline}\n\nReview the estimate, timeline, and notes so you can price the job and move the project forward.\n\nBest regards,\nThe Craftsman AI Team"
+            
+            result = await EmailService._send_via_zeptomail(
+                to_email=to,
+                subject=subject,
+                html_content=html_content,
+                text_body=text_body
+            )
+            
+            if result["success"]:
+                logger.info(f"Successfully sent quote submitted email to {to}")
+                EmailService._update_email_log_status(
+                    log_id=log_id,
+                    status=EmailStatus.SENT,
+                    smtp_response=result["message"]
+                )
+            else:
+                raise Exception(result["message"])
+            
+        except Exception as e:
+            logger.error(f"Failed to send quote submitted email to {to}: {str(e)}")
             EmailService._update_email_log_status(
                 log_id=log_id,
                 status=EmailStatus.FAILED,

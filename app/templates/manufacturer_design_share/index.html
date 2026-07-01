@@ -3,118 +3,139 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Quote received from {{manufacturer_name}} — Craftsman AI</title>
-  <link rel="stylesheet" href="styles.css" />
+  <title>New costing request from CraftsmanAI</title>
 </head>
-<body style="margin:0;padding:0;background-color:#08081a;font-family:'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#08081a;">
+<body style="margin:0;padding:0;background-color:#0b0c10;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0b0c10;">
     <tr>
-      <td align="center" class="outer-padding" style="padding:40px 16px;">
-        <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" class="card-table" style="max-width:480px;width:100%;background-color:#0f0f2a;border-radius:16px;border:1px solid rgba(255,255,255,0.06);overflow:hidden;">
-          <tr><td style="padding:0;"><div style="height:4px;background:linear-gradient(90deg,#7c3aed 0%,#7c3aed 100%);"></div></td></tr>
+      <td align="center" style="padding:40px 20px;">
+        <table role="presentation" width="100%" max-width="500" cellpadding="0" cellspacing="0" border="0" style="background-color:#15161e;border-radius:12px;border-top:2px solid #8b5cf6;max-width:500px;width:100%;box-shadow:0 4px 6px rgba(0,0,0,0.3);">
           <tr>
-            <td align="center" class="card-padding" style="padding:36px 40px 8px 40px;">
-              {% if brand_logo_url %}
-              <img src="{{brand_logo_url}}" alt="Brand Logo" height="44" style="display:block;height:44px;width:auto;max-width:100%;" />
-              {% else %}
-              <img src="https://craftsmanai.app/dark%20mode%20logo.png" alt="Craftsman AI" height="44" style="display:block;height:44px;width:auto;max-width:100%;mix-blend-mode:lighten;" />
-              {% endif %}
+            <td align="center" style="padding:40px 30px 20px 30px;">
+              <img src="https://craftsmanai.app/dark%20mode%20logo.png" alt="CraftsmanAI Logo" width="150" style="display:block;max-width:150px;height:auto;margin-bottom:30px;" />
             </td>
           </tr>
-          <tr><td align="center" class="card-padding" style="padding:16px 40px 6px 40px;"><h1 class="heading-text" style="margin:0;font-size:24px;font-weight:700;color:#ffffff;line-height:1.3;">Quote received</h1></td></tr>
-          <tr><td align="center" class="card-padding" style="padding:4px 40px 8px 40px;"><p class="subheading-text" style="margin:0;font-size:14px;color:#9ca3af;line-height:1.6;">{{manufacturer_name}} has submitted a quote for your design.</p></td></tr>
-          <tr><td align="center" class="card-padding" style="padding:4px 40px 20px 40px;"><p class="body-text" style="margin:0;font-size:14px;color:#d1d5db;line-height:1.6;">Review the estimate, timeline, and notes so you can price the job and move the project forward.</p></td></tr>
-          <!-- Render Preview -->
           <tr>
-            <td align="center" class="card-padding" style="padding:0 40px 16px 40px;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:linear-gradient(135deg,#7c3aed 0%,#7c3aed 100%);border-radius:12px;overflow:hidden;">
-                <tr><td align="center" style="padding:20px;"><img src="{{render_image_url}}" alt="Custom jewelry render" width="200" style="display:block;max-width:200px;width:100%;height:auto;" /></td></tr>
-                <tr><td style="padding:0 16px 12px 16px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="font-size:12px;color:rgba(255,255,255,0.8);">Design Package</td><td align="right" style="font-size:12px;font-weight:600;color:#ffffff;">Quote Received</td></tr></table></td></tr>
+            <td style="padding:0 30px;">
+              <h1 style="margin:0 0 10px 0;font-size:22px;font-weight:600;color:#ffffff;text-align:center;">New costing request</h1>
+              <p style="margin:0 0 24px 0;font-size:14px;color:#9ca3af;text-align:center;line-height:1.6;">CraftsmanAI has shared a Details Sheet for manufacturer quote review.</p>
+              <p style="margin:0 0 30px 0;font-size:14px;color:#d1d5db;text-align:center;line-height:1.6;">Hi {{manufacturer_name}}, please review the design package and submit your quote so the retailer can move forward quickly.</p>
+
+              <!-- Render Package Preview -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+                <tr>
+                  <td style="padding:12px 16px;background:linear-gradient(135deg,#8b5cf6 0%,#d946ef 100%);border-radius:8px;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td style="font-size:11px;color:rgba(255,255,255,0.75);text-transform:uppercase;letter-spacing:1px;">Render Package</td>
+                        <td align="right" style="font-size:11px;font-weight:600;color:#ffffff;">Quote Needed</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
               </table>
-            </td>
-          </tr>
-          <!-- Quote Summary -->
-          <tr>
-            <td class="card-padding" style="padding:0 40px 24px 40px;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#151533;border:1px solid rgba(255,255,255,0.08);border-radius:12px;">
-                <tr><td style="padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.06);"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="detail-label" style="font-size:13px;color:#9ca3af;">Design #</td><td align="right" class="detail-value" style="font-size:13px;font-weight:600;color:#ffffff;">{{design_number}}</td></tr></table></td></tr>
-                <tr><td style="padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.06);"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="detail-label" style="font-size:13px;color:#9ca3af;">Estimated Cost</td><td align="right" class="detail-value" style="font-size:13px;font-weight:600;color:#ffffff;">{{estimated_cost}}</td></tr></table></td></tr>
-                <tr><td style="padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.06);"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="detail-label" style="font-size:13px;color:#9ca3af;">Timeline</td><td align="right" class="detail-value" style="font-size:13px;font-weight:600;color:#ffffff;">{{production_timeline}}</td></tr></table></td></tr>
-                <tr><td style="padding:14px 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="detail-label" style="font-size:13px;color:#9ca3af;">Status</td><td align="right" class="detail-value" style="font-size:13px;font-weight:600;color:#22c55e;">Quote Received</td></tr></table></td></tr>
+
+              <!-- Details Sheet Table -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:30px;">
+                <tr>
+                  <td style="padding:12px 0;border-bottom:1px solid #2a2b3d;font-size:14px;color:#9ca3af;">Design #</td>
+                  <td align="right" style="padding:12px 0;border-bottom:1px solid #2a2b3d;font-size:14px;color:#ffffff;font-weight:500;">{{design_number}}</td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 0;border-bottom:1px solid #2a2b3d;font-size:14px;color:#9ca3af;">Type</td>
+                  <td align="right" style="padding:12px 0;border-bottom:1px solid #2a2b3d;font-size:14px;color:#ffffff;font-weight:500;">{{jewelry_type}}</td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 0;border-bottom:1px solid #2a2b3d;font-size:14px;color:#9ca3af;">Metal</td>
+                  <td align="right" style="padding:12px 0;border-bottom:1px solid #2a2b3d;font-size:14px;color:#ffffff;font-weight:500;">{{metal_spec}}</td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 0;font-size:14px;color:#9ca3af;">Status</td>
+                  <td align="right" style="padding:12px 0;font-size:14px;color:#f59e0b;font-weight:600;">Quote Needed</td>
+                </tr>
               </table>
-            </td>
-          </tr>
-          <!-- What's included -->
-          <tr>
-            <td class="card-padding" style="padding:0 40px 24px 40px;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#151533;border:1px solid rgba(255,255,255,0.08);border-radius:12px;">
-                <tr><td style="padding:16px 20px 8px 20px;"><p style="margin:0;font-size:14px;font-weight:700;color:#ffffff;">What's included</p></td></tr>
-                <tr><td style="padding:4px 20px 16px 20px;">
-                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                    <tr><td style="padding:5px 0;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="vertical-align:middle;width:18px;"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="9" fill="rgba(34,197,94,0.15)"/><path d="M5 9.5l2.5 2.5L13 6.5" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td><td class="action-item-text" style="padding-left:10px;font-size:13px;color:#d1d5db;vertical-align:middle;">Estimated manufacturing cost</td></tr></table></td></tr>
-                    <tr><td style="padding:5px 0;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="vertical-align:middle;width:18px;"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="9" fill="rgba(34,197,94,0.15)"/><path d="M5 9.5l2.5 2.5L13 6.5" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td><td class="action-item-text" style="padding-left:10px;font-size:13px;color:#d1d5db;vertical-align:middle;">Production timeline</td></tr></table></td></tr>
-                    <tr><td style="padding:5px 0;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="vertical-align:middle;width:18px;"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="9" fill="rgba(34,197,94,0.15)"/><path d="M5 9.5l2.5 2.5L13 6.5" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td><td class="action-item-text" style="padding-left:10px;font-size:13px;color:#d1d5db;vertical-align:middle;">Material and stone notes</td></tr></table></td></tr>
-                    <tr><td style="padding:5px 0;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="vertical-align:middle;width:18px;"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="9" fill="rgba(34,197,94,0.15)"/><path d="M5 9.5l2.5 2.5L13 6.5" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td><td class="action-item-text" style="padding-left:10px;font-size:13px;color:#d1d5db;vertical-align:middle;">Feasibility comments</td></tr></table></td></tr>
-                  </table>
-                </td></tr>
+
+              <!-- Manufacturer Action Needed -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;background-color:#1a1b2e;border-radius:8px;border:1px solid #2a2b3d;">
+                <tr>
+                  <td style="padding:16px 20px 12px 20px;">
+                    <h2 style="margin:0;font-size:15px;font-weight:600;color:#ffffff;">Manufacturer action needed</h2>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:4px 20px 16px 20px;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td style="padding:5px 0;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                              <td style="vertical-align:middle;width:18px;">
+                                <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="9" fill="rgba(139,92,246,0.2)"/><path d="M5 9.5l2.5 2.5L13 6.5" stroke="#8b5cf6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                              </td>
+                              <td style="padding-left:10px;font-size:13px;color:#d1d5db;vertical-align:middle;">Estimated manufacturing cost</td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:5px 0;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                              <td style="vertical-align:middle;width:18px;">
+                                <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="9" fill="rgba(139,92,246,0.2)"/><path d="M5 9.5l2.5 2.5L13 6.5" stroke="#8b5cf6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                              </td>
+                              <td style="padding-left:10px;font-size:13px;color:#d1d5db;vertical-align:middle;">Production timeline</td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:5px 0;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                              <td style="vertical-align:middle;width:18px;">
+                                <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="9" fill="rgba(139,92,246,0.2)"/><path d="M5 9.5l2.5 2.5L13 6.5" stroke="#8b5cf6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                              </td>
+                              <td style="padding-left:10px;font-size:13px;color:#d1d5db;vertical-align:middle;">Material or stone notes</td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:5px 0;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                              <td style="vertical-align:middle;width:18px;">
+                                <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="9" fill="rgba(139,92,246,0.2)"/><path d="M5 9.5l2.5 2.5L13 6.5" stroke="#8b5cf6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                              </td>
+                              <td style="padding-left:10px;font-size:13px;color:#d1d5db;vertical-align:middle;">Feasibility concerns</td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
               </table>
-            </td>
-          </tr>
-          <!-- CTA -->
-          <tr>
-            <td align="center" class="card-padding" style="padding:0 40px 36px 40px;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td align="center" style="border-radius:50px;background:linear-gradient(135deg,#7c3aed 0%,#a855f7 50%,#ec4899 100%);"><a href="{{quote_url}}" class="cta-button" style="display:inline-block;padding:14px 40px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:50px;width:100%;text-align:center;box-sizing:border-box;">Review Quote</a></td></tr></table>
+
+              <!-- CTA -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center">
+                    <a href="{{quote_url}}" style="display:inline-block;width:100%;padding:14px 0;background-color:#d946ef;background-image:linear-gradient(to right,#8b5cf6,#d946ef);border-radius:25px;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;text-align:center;box-sizing:border-box;">Open Details Sheet & Quote</a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Footer -->
+              <div style="margin-top:40px;font-size:12px;color:#6b7280;border-top:1px solid #2a2b3d;padding-top:20px;text-align:center;">
+                &copy; 2026 CraftsmanAI. All rights reserved. &bull; <a href="mailto:support@craftsmanai.app" style="color:#8b5cf6;text-decoration:none;">support@craftsmanai.app</a>
+              </div>
             </td>
           </tr>
         </table>
-        <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" class="card-table" style="max-width:480px;width:100%;"><tr><td align="center" style="padding:24px 40px 16px 40px;"><p style="margin:0;font-size:12px;color:#4b5563;">© 2026 CraftsmanAI. All rights reserved. • support@craftsmanai.app</p></td></tr></table>
       </td>
     </tr>
   </table>
-  {% raw %}
-  <script>
-    // Dynamic preview mode defaults
-    document.addEventListener("DOMContentLoaded", function() {
-      const defaults = {
-        "manufacturer_name": "CraftsmanAI Manufacturing",
-        "render_image_url": "in_pendant_render.png",
-        "design_number": "IN-024",
-        "estimated_cost": "$2,450",
-        "production_timeline": "8-10 business days",
-        "quote_url": "#"
-      };
-      
-      function replacePlaceholders(node) {
-        if (node.nodeType === Node.TEXT_NODE) {
-          let text = node.nodeValue;
-          let replaced = false;
-          for (const [key, val] of Object.entries(defaults)) {
-            const placeholder = "{{" + key + "}}";
-            if (text.includes(placeholder)) {
-              text = text.replaceAll(placeholder, val);
-              replaced = true;
-            }
-          }
-          if (replaced) node.nodeValue = text;
-        } else if (node.nodeType === Node.ELEMENT_NODE) {
-          for (let i = 0; i < node.attributes.length; i++) {
-            let attr = node.attributes[i];
-            for (const [key, val] of Object.entries(defaults)) {
-              const placeholder = "{{" + key + "}}";
-              if (attr.value.includes(placeholder)) {
-                attr.value = attr.value.replaceAll(placeholder, val);
-              }
-            }
-          }
-          node.childNodes.forEach(replacePlaceholders);
-        }
-      }
-      
-      if (document.body.innerHTML.includes("{{")) {
-        replacePlaceholders(document.body);
-      }
-    });
-  </script>
-  {% endraw %}
 </body>
 </html>

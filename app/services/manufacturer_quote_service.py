@@ -45,6 +45,73 @@ class ManufacturerQuoteService:
             message="Manufacturer submitted quote",
             metadata={"quote_id": quote.id, "manufacturer_id": manufacturer_id},
         )
+
+        # Notify the retailer via in-app notification and email
+        try:
+            from sqlalchemy.orm import joinedload
+            from app.models.design import Design
+            from app.models.user import User
+
+            order = (
+                self.db.query(Order)
+                .options(joinedload(Order.design))
+                .filter(Order.id == order_id)
+                .first()
+            )
+
+            recipient_user_id = None
+            if order and order.design_id:
+                design = self.db.query(Design).filter(Design.id == order.design_id).first()
+                if design:
+                    recipient_user_id = design.user_id
+
+            if recipient_user_id:
+                manufacturer_name = (
+                    quote.manufacturer.name if quote.manufacturer else f"Manufacturer #{manufacturer_id}"
+                )
+
+                self.notification_service.send_notification(
+                    user_id=recipient_user_id,
+                    type="quote_submitted",
+                    title="New quote submitted",
+                    message=f"{manufacturer_name} submitted a quote for Design #{design.design_code if design else ''}.",
+                    source="quote",
+                    reference_id=quote.id,
+                    data={
+                        "quote_id": quote.id,
+                        "order_id": order_id,
+                        "manufacturer_id": manufacturer_id,
+                        "manufacturer_name": manufacturer_name,
+                        "cost_price": cost_price,
+                        "delivery_time_days": delivery_time_days,
+                    },
+                )
+
+                from app.tasks.email_tasks import send_quote_submitted_email
+
+                retailer = self.db.query(User).filter(User.id == recipient_user_id).first()
+                if retailer:
+                    render_image_url = ""
+                    if order and order.share and order.share.design:
+                        render_image_url = (
+                            order.share.design.base_design_image_url
+                            or order.share.design.hero_image_url
+                            or ""
+                        )
+
+                    send_quote_submitted_email.delay(
+                        to=retailer.email,
+                        retailer_name=retailer.full_name or retailer.username,
+                        manufacturer_name=manufacturer_name,
+                        design_number=design.design_code if design else "",
+                        estimated_cost=f"${float(cost_price):,.2f}" if cost_price is not None else "Not provided",
+                        production_timeline=f"{delivery_time_days} days" if delivery_time_days else "Not provided",
+                        quote_url="#" ,
+                        render_image_url=render_image_url,
+                    )
+        except Exception as exc:
+            logger.error(f"Failed to send quote submission notification for quote {quote.id}: {exc}")
+
         return quote
 
     def list_quotes(self, order_id: int) -> List[ManufacturerQuote]:

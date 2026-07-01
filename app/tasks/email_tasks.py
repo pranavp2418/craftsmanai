@@ -1327,6 +1327,42 @@ def send_subscription_cancellation_confirmation_email(self, to: str, user_name: 
         )
 
 
+@create_task(name="send_quote_submitted_email", max_retries=3)
+def send_quote_submitted_email(self, to: str, retailer_name: str, manufacturer_name: str, design_number: str, estimated_cost: str, production_timeline: str, quote_url: str = "#", render_image_url: str = ""):
+    """
+    Send quote submitted notification email to retailer.
+    
+    Args:
+        to: Retailer email address
+        retailer_name: Retailer's name
+        manufacturer_name: Manufacturer's name
+        design_number: Design code/number
+        estimated_cost: Estimated cost string
+        production_timeline: Production timeline string
+        quote_url: URL to view the quote
+        render_image_url: URL of the design render image
+    """
+    task_name = "send_quote_submitted_email"
+    try:
+        logger.info(f"📧 Starting {task_name} for {to}")
+        
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            EmailService.send_quote_submitted_email(to, retailer_name, manufacturer_name, design_number, estimated_cost, production_timeline, quote_url, render_image_url)
+        )
+        
+        logger.info(f"✅ {task_name} completed successfully for {to}")
+        return True
+    except Exception as exc:
+        logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
+        raise self.retry(
+            exc=exc, 
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3
+        )
+
+
 @create_task(name="send_subscription_renewal_confirmation_email", max_retries=3)
 def send_subscription_renewal_confirmation_email(self, to: str, user_name: str, plan_name: str, amount: str, next_renewal_date: str, invoice_url: str = "#"):
     """
