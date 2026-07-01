@@ -82,13 +82,28 @@ class DesignVariantManufacturerShareService:
         if not variant:
             raise ValueError(f"DesignVariant with id {design_variant_id} not found")
 
-        share = self.share_repo.create_share(
-            design_variant_id=design_variant_id,
-            manufacturer_id=manufacturer_id,
-            public_token=self._token(),
-            shared_metal=shared_metal,
-            shared_angles=shared_angles,
-        )
+        # Check if this variant was already shared with this manufacturer
+        existing_shares = self.share_repo.list_for_variant(design_variant_id)
+        existing_share = next((s for s in existing_shares if s.manufacturer_id == manufacturer_id), None)
+        if existing_share:
+            existing_share.shared_metal = shared_metal
+            existing_share.shared_angles = shared_angles
+            existing_share.status = ManufacturerShareStatus.PENDING
+            existing_share.cost_price = None
+            existing_share.delivery_time_days = None
+            existing_share.notes = None
+            self.db.add(existing_share)
+            self.db.commit()
+            self.db.refresh(existing_share)
+            share = existing_share
+        else:
+            share = self.share_repo.create_share(
+                design_variant_id=design_variant_id,
+                manufacturer_id=manufacturer_id,
+                public_token=self._token(),
+                shared_metal=shared_metal,
+                shared_angles=shared_angles,
+            )
         review_url = self.build_review_url(share)
         self.activity_repo.log(
             design_id=variant.design_id,

@@ -759,18 +759,18 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     except Exception as email_err:
                         logger.error(f"Failed to queue top-up purchase confirmation email in webhook: {str(email_err)}")
 
-                            # Relational table sync
-                            from app.models.subscription import UserTopup
-                            user_topup = UserTopup(
-                                user_id=active_sub.user_id,
-                                user_subscription_id=active_sub.id,
-                                topup_pack_id=topup_pack.id,
-                                stripe_subscription_id=stripe_sub_id,
-                                status="active",
-                                renders=topup_pack.renders,
-                                price=topup_pack.price
-                            )
-                            db.add(user_topup)
+                    # Relational table sync
+                    from app.models.subscription import UserTopup
+                    user_topup = UserTopup(
+                        user_id=active_sub.user_id,
+                        user_subscription_id=active_sub.id,
+                        topup_pack_id=topup_pack.id,
+                        stripe_subscription_id=stripe_sub_id,
+                        status="active",
+                        renders=topup_pack.renders,
+                        price=topup_pack.price
+                    )
+                    db.add(user_topup)
 
                 db.commit()
                 logger.info(f"Payment {payment.id} status updated to PAID via webhook")
