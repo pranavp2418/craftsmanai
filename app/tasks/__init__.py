@@ -15,7 +15,7 @@ from .email_tasks import (
     send_subscription_renewal_confirmation_email,
     send_plan_upgrade_confirmation_email,
     send_topup_purchase_confirmation_email,
-    send_quote,
+    
     send_quote_submitted_email
 )
 
