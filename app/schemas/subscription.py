@@ -58,6 +58,9 @@ class UserSubscriptionBase(BaseModel):
     end_date: datetime
     status: str
     cancellation_reason: Optional[str] = None
+    topup_plan_id: Optional[UUID4] = None
+    renders_added: int = 0
+    active_topups: Optional[List] = None
 
 class UserSubscriptionCreate(UserSubscriptionBase):
     pass

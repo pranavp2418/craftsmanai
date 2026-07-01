@@ -162,6 +162,19 @@ def cancel_user_plan(
                     subscription.stripe_subscription_id,
                     cancel_at_period_end=True
                 )
+                
+                # Also cancel all active top-ups on Stripe at period end
+                if subscription.active_topups:
+                    for topup_entry in subscription.active_topups:
+                        for sub_id in topup_entry.get("stripe_subscription_ids", []):
+                            try:
+                                logger.info(f"Setting cancel_at_period_end=True for top-up stripe subscription: {sub_id}")
+                                stripe.Subscription.modify(
+                                    sub_id,
+                                    cancel_at_period_end=True
+                                )
+                            except Exception as topup_err:
+                                logger.error(f"Failed to cancel top-up subscription {sub_id} on Stripe: {topup_err}")
             except Exception as stripe_err:
                 logger.error(f"Stripe cancel subscription failed for {subscription.stripe_subscription_id}: {stripe_err}")
                 raise HTTPException(
@@ -179,17 +192,18 @@ def cancel_user_plan(
         if not reason_enum:
             reason_enum = CancellationReason.OTHER
 
-        plan_name = None
-        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
-        if plan:
-            plan_name = plan.name
+        # Update subscription status and cancellation details in database
+        subscription.status = SubscriptionStatus.CANCELLED
+        subscription.cancellation_reason = reason_enum
+        subscription.cancellation_date = datetime.now(timezone.utc)
 
+        # Log cancellation activity
         try:
             from app.models.subscription import SubscriptionActivityLog, SubscriptionEventType
             log_entry = SubscriptionActivityLog(
                 user_id=current_user.id,
                 event_type=SubscriptionEventType.CANCELLED,
-                plan_name=plan_name,
+                plan_name=current_plan.name if current_plan else None,
                 old_plan_name=None,
                 triggered_by="Retailer",
                 triggered_by_id=current_user.id,
