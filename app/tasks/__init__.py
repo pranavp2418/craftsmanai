@@ -13,7 +13,8 @@ from .email_tasks import (
     send_subscription_cancellation_confirmation_email,
     send_plan_purchase_confirmation_email,
     send_subscription_renewal_confirmation_email,
-    send_plan_upgrade_confirmation_email
+    send_plan_upgrade_confirmation_email,
+    send_topup_purchase_confirmation_email
 )
 
 # Cleanup tasks
@@ -59,6 +60,7 @@ __all__ = [
     "send_plan_purchase_confirmation_email",
     "send_plan_upgrade_confirmation_email",
     "send_subscription_renewal_confirmation_email",
+    "send_topup_purchase_confirmation_email",
 
     # Cleanup tasks
     "cleanup_expired_otps",
