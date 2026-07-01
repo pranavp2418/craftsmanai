@@ -340,6 +340,31 @@ def verify_payment(
                     
                     db.commit()
                 
+                # Send top-up purchase confirmation email
+                try:
+                    from app.tasks.email_tasks import send_topup_purchase_confirmation_email
+                    retailer_user = db.query(User).filter(User.id == payment.user_id).first()
+                    if retailer_user:
+                        user_name = retailer_user.full_name or retailer_user.email.split("@")[0]
+                        from app.models.subscription import TopupPack
+                        topup_pack = db.query(TopupPack).filter(TopupPack.id == payment.topup_pack_id).first()
+                        plan_name = f"Topup Pack - {topup_pack.renders} Renders" if topup_pack else "Topup Pack"
+                        formatted_amount = f"${float(payment.amount):.2f}" if payment.amount else "$0.00"
+                        billing_date = datetime.now(timezone.utc).strftime("%B %d, %Y")
+                        billing_url = f"{settings.FRONTEND_URL}/retailer/settings" if hasattr(settings, "FRONTEND_URL") else "#"
+                        
+                        send_topup_purchase_confirmation_email.delay(
+                            to=retailer_user.email,
+                            user_name=user_name,
+                            plan_name=plan_name,
+                            amount=formatted_amount,
+                            billing_date=billing_date,
+                            billing_url=billing_url
+                        )
+                        logger.info(f"Queued top-up purchase confirmation email for {retailer_user.email}")
+                except Exception as email_err:
+                    logger.error(f"Failed to queue top-up purchase confirmation email: {str(email_err)}")
+                
                 from app.models.subscription import TopupPack
                 topup_pack = db.query(TopupPack).filter(TopupPack.id == payment.topup_pack_id).first()
                 renders_count = topup_pack.renders if topup_pack else 0
@@ -707,6 +732,32 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                             }
                             current_topups.append(new_entry)
                             active_sub.active_topups = current_topups
+                            
+                    # Send top-up purchase confirmation email via webhook
+                    try:
+                        from app.tasks.email_tasks import send_topup_purchase_confirmation_email
+                        from app.models.user import User
+                        retailer_user = db.query(User).filter(User.id == payment.user_id).first()
+                        if retailer_user:
+                            user_name = retailer_user.full_name or retailer_user.email.split("@")[0]
+                            from app.models.subscription import TopupPack
+                            topup_pack = db.query(TopupPack).filter(TopupPack.id == payment.topup_pack_id).first()
+                            plan_name = f"Topup Pack - {topup_pack.renders} Renders" if topup_pack else "Topup Pack"
+                            formatted_amount = f"${float(payment.amount):.2f}" if payment.amount else "$0.00"
+                            billing_date = datetime.now(timezone.utc).strftime("%B %d, %Y")
+                            billing_url = f"{settings.FRONTEND_URL}/retailer/settings" if hasattr(settings, "FRONTEND_URL") else "#"
+                            
+                            send_topup_purchase_confirmation_email.delay(
+                                to=retailer_user.email,
+                                user_name=user_name,
+                                plan_name=plan_name,
+                                amount=formatted_amount,
+                                billing_date=billing_date,
+                                billing_url=billing_url
+                            )
+                            logger.info(f"Queued top-up purchase confirmation email via webhook for {retailer_user.email}")
+                    except Exception as email_err:
+                        logger.error(f"Failed to queue top-up purchase confirmation email in webhook: {str(email_err)}")
 
                             # Relational table sync
                             from app.models.subscription import UserTopup

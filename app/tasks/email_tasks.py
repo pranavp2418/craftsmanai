@@ -1225,6 +1225,40 @@ def send_plan_purchase_confirmation_email(self, to: str, user_name: str, plan_na
         )
 
 
+@create_task(name="send_topup_purchase_confirmation_email", max_retries=3)
+def send_topup_purchase_confirmation_email(self, to: str, user_name: str, plan_name: str, amount: str, billing_date: str, billing_url: str = "#"):
+    """
+    Send top-up pack purchase confirmation email using Celery.
+    
+    Args:
+        to: Recipient email address
+        user_name: User's name
+        plan_name: Name of the top-up pack
+        amount: Plan amount
+        billing_date: Billing date
+        billing_url: URL to view billing details
+    """
+    task_name = "send_topup_purchase_confirmation_email"
+    try:
+        logger.info(f"📧 Starting {task_name} for {to}")
+        
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            EmailService.send_topup_purchase_confirmation_email(to, user_name, plan_name, amount, billing_date, billing_url)
+        )
+        
+        logger.info(f"✅ {task_name} completed successfully for {to}")
+        return True
+    except Exception as exc:
+        logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
+        raise self.retry(
+            exc=exc, 
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3
+        )
+
+
 @create_task(name="send_plan_upgrade_confirmation_email", max_retries=3)
 def send_plan_upgrade_confirmation_email(self, to: str, user_name: str, new_plan: str, amount: str, next_invoice_date: str, plan_url: str = "#"):
     """

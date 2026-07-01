@@ -711,6 +711,60 @@ Message:
             raise e
 
     @staticmethod
+    async def send_topup_purchase_confirmation_email(to: str, user_name: str, plan_name: str, amount: str, billing_date: str, billing_url: str = "#"):
+        """Send top-up pack purchase confirmation email using plan_purchase_confirm_email_template."""
+        from app.models.email_log import EmailStatus
+        log_id = EmailService._create_email_log(
+            to_email=to,
+            template_name="plan_purchase_confirm_email_template/purchase_confirmed",
+            subject="Top-up pack confirmed — your CraftsmanAI plan is updated",
+            variables={"user_name": user_name, "plan_name": plan_name, "amount": amount, "billing_date": billing_date, "billing_url": billing_url}
+        )
+        try:
+            logger.info(f"SENDING TOP-UP PURCHASE CONFIRMATION: To={to}, Plan={plan_name}")
+            
+            subject = "Top-up pack confirmed — your CraftsmanAI plan is updated"
+            
+            html_content = await render_template(
+                "plan_purchase_confirm_email_template/purchase_confirmed",
+                context={
+                    "user_name": user_name,
+                    "plan_name": plan_name,
+                    "amount": amount,
+                    "billing_date": billing_date,
+                    "billing_url": billing_url
+                }
+            )
+            
+            text_body = f"Hi {user_name},\n\nYour {plan_name} top-up pack is now active.\n\nPlan: {plan_name}\nAmount: {amount}\nBilling Date: {billing_date}\nStatus: Active\n\nView billing details: {billing_url}\n\nBest regards,\nThe Craftsman AI Team"
+            
+            result = await EmailService._send_via_zeptomail(
+                to_email=to,
+                subject=subject,
+                html_content=html_content,
+                text_body=text_body
+            )
+            
+            if result["success"]:
+                logger.info(f"Successfully sent top-up purchase confirmation to {to}")
+                EmailService._update_email_log_status(
+                    log_id=log_id,
+                    status=EmailStatus.SENT,
+                    smtp_response=result["message"]
+                )
+            else:
+                raise Exception(result["message"])
+            
+        except Exception as e:
+            logger.error(f"Failed to send top-up purchase confirmation to {to}: {str(e)}")
+            EmailService._update_email_log_status(
+                log_id=log_id,
+                status=EmailStatus.FAILED,
+                error_message=str(e)
+            )
+            raise e
+
+    @staticmethod
     async def send_plan_upgrade_confirmation_email(to: str, user_name: str, new_plan: str, amount: str, next_invoice_date: str, plan_url: str = "#"):
         """Send plan upgrade confirmation email using plan_upgrade_email_template."""
         from app.models.email_log import EmailStatus

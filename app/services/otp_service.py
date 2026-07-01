@@ -22,7 +22,7 @@ def generate_and_send_otp(
     send_signup_otp_email.delay(
         to=user.email,
         otp=otp_code,
-        user_name=user.full_name or user.email,
+        user_name=user.business_name or user.email,
     )
 
     logger.info(
