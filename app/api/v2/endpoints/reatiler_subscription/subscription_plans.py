@@ -32,7 +32,17 @@ def read_subscription_plans(
         if active_plan:
             current_price = active_plan.monthly_price if active_plan.monthly_price is not None else (active_plan.price or 0)
 
+    # Check if the user has any previous or active subscriptions (trial or paid)
+    has_any_sub = db.query(UserSubscription).filter(
+        UserSubscription.user_id == current_user.id
+    ).first() is not None
+
     query = select(SubscriptionPlan).where(SubscriptionPlan.is_active == True)
+    
+    if has_any_sub:
+        # Exclude trial plans for existing users
+        query = query.where(~SubscriptionPlan.name.ilike('%trial%'))
+
     if current_price > 0:
         query = query.where(
             or_(

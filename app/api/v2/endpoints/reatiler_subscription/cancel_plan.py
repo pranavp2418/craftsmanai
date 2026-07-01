@@ -79,9 +79,10 @@ def get_smaller_plans(
         if subscription:
             subscription = SubscriptionService.check_and_update_subscription_expiry(db, subscription)
 
-        # 2. Query all active plans
+        # 2. Query all active plans (excluding trial plans)
         active_plans = db.query(SubscriptionPlan).filter(
-            SubscriptionPlan.is_active == True
+            SubscriptionPlan.is_active == True,
+            ~SubscriptionPlan.name.ilike('%trial%')
         ).all()
 
         # 3. Format plans with current_plan and current_pan flag
