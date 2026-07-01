@@ -279,18 +279,18 @@ def share_variant_with_manufacturer(
                 retailer_email = brand_setting.business_email if brand_setting else current_user.email
                 retailer_address = ""  # Address not currently stored in brand settings
                 
-                send_manufacturer_share_sms.delay(
-                    to_number=manufacturer.phone_number,
-                    manufacturer_name=manufacturer.name,
-                    preview_url=review_url,
-                    designer_name=current_user.full_name or current_user.username,
-                    retailer_name=retailer_name,
-                    design_code=design.design_code,
-                    retailer_phone=retailer_phone or "",
-                    retailer_email=retailer_email or "",
-                    retailer_address=retailer_address,
-                    render_image_url=variant.base_design_image_url or ""
-                )
+                # send_manufacturer_share_sms.delay(
+                #     to_number=manufacturer.phone_number,
+                #     manufacturer_name=manufacturer.name,
+                #     preview_url=review_url,
+                #     designer_name=current_user.full_name or current_user.username,
+                #     retailer_name=retailer_name,
+                #     design_code=design.design_code,
+                #     retailer_phone=retailer_phone or "",
+                #     retailer_email=retailer_email or "",
+                #     retailer_address=retailer_address,
+                #     render_image_url=variant.base_design_image_url or ""
+                # )
 
         shares_response.append({
             "id": share.id,
