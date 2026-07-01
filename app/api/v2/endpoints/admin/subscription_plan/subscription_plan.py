@@ -279,43 +279,79 @@ def get_active_topup_users(
         # Determine overall stripe status of top-ups (default to paid)
         stripe_status = "paid"
         
-        active_topups_list = sub.active_topups or []
-        for item in active_topups_list:
-            t_id = item.get("topup_pack_id")
-            renders = item.get("renders", 0)
-            pack = packs_map.get(str(t_id))
-            
-            if pack:
-                # pack_name = pack.name or f"Topup Pack - {renders} Renders"
-                price = float(pack.price) if pack.price else 0.0
-                monthly_renewal_price += price
+        # Retrieve active topups from user_topups table, falling back to active_topups JSON list if empty
+        from app.models.subscription import UserTopup
+        db_topups = db.query(UserTopup).filter(
+            UserTopup.user_subscription_id == sub.id,
+            UserTopup.status == "active"
+        ).all()
+
+        if db_topups:
+            for item in db_topups:
+                pack = item.topup_pack
+                price = float(item.price)
+                renders = item.renders
+                t_id = item.topup_pack_id
                 
-                # Fetch latest payment for this user & top-up pack to check Stripe payment status
-                latest_payment = db.query(Payment).filter(
-                    Payment.user_id == sub.user_id,
-                    Payment.topup_pack_id == pack.id
-                ).order_by(desc(Payment.created_at)).first()
+                if pack:
+                    monthly_renewal_price += price
+                    latest_payment = db.query(Payment).filter(
+                        Payment.user_id == sub.user_id,
+                        Payment.topup_pack_id == pack.id
+                    ).order_by(desc(Payment.created_at)).first()
+                    
+                    pack_status = latest_payment.status.value.lower() if latest_payment else "paid"
+                    if pack_status in ["failed", "pending"]:
+                        stripe_status = pack_status
+                    
+                    purchased_packs_details.append({
+                        "id": str(pack.id),
+                        "renders": renders,
+                        "price": price,
+                        "status": "active" if pack_status == "paid" else "past_due"
+                    })
+                else:
+                    purchased_packs_details.append({
+                        "id": str(t_id) if t_id else "",
+                        "name": f"Topup Pack - {renders} Renders",
+                        "renders": renders,
+                        "price": price,
+                        "status": "unknown"
+                    })
+        else:
+            # Fallback to active_topups JSON list for legacy data
+            active_topups_list = sub.active_topups or []
+            for item in active_topups_list:
+                t_id = item.get("topup_pack_id")
+                renders = item.get("renders", 0)
+                pack = packs_map.get(str(t_id))
                 
-                pack_status = latest_payment.status.value.lower() if latest_payment else "paid"
-                # If any of the topup payments is failed/pending, escalate the status
-                if pack_status in ["failed", "pending"]:
-                    stripe_status = pack_status
-                
-                purchased_packs_details.append({
-                    "id": str(pack.id),
-                    # "name": pack_name,
-                    "renders": renders,
-                    "price": price,
-                    "status": "active" if pack_status == "paid" else "past_due"
-                })
-            else:
-                purchased_packs_details.append({
-                    "id": str(t_id),
-                    "name": f"Topup Pack - {renders} Renders",
-                    "renders": renders,
-                    "price": 0.0,
-                    "status": "unknown"
-                })
+                if pack:
+                    price = float(pack.price) if pack.price else 0.0
+                    monthly_renewal_price += price
+                    latest_payment = db.query(Payment).filter(
+                        Payment.user_id == sub.user_id,
+                        Payment.topup_pack_id == pack.id
+                    ).order_by(desc(Payment.created_at)).first()
+                    
+                    pack_status = latest_payment.status.value.lower() if latest_payment else "paid"
+                    if pack_status in ["failed", "pending"]:
+                        stripe_status = pack_status
+                    
+                    purchased_packs_details.append({
+                        "id": str(pack.id),
+                        "renders": renders,
+                        "price": price,
+                        "status": "active" if pack_status == "paid" else "past_due"
+                    })
+                else:
+                    purchased_packs_details.append({
+                        "id": str(t_id),
+                        "name": f"Topup Pack - {renders} Renders",
+                        "renders": renders,
+                        "price": 0.0,
+                        "status": "unknown"
+                    })
 
         # Overall topup status is past_due if stripe_status is failed or main subscription is past_due
         overall_status = "active"
@@ -403,27 +439,46 @@ def get_retailer_topup_details(
     active_topup_details = []
     topup_renewal_total = 0.0
 
-    active_topups_list = sub.active_topups or []
-    for item in active_topups_list:
-        t_id = item.get("topup_pack_id")
-        renders = item.get("renders", 0)
-        pack = packs_map.get(str(t_id))
-        
-        if pack:
-            pack_name = pack.name or f"Topup Pack - {renders} Renders"
-            price = float(pack.price) if pack.price else 0.0
+    # Retrieve active topups from user_topups table, falling back to active_topups JSON list if empty
+    from app.models.subscription import UserTopup
+    db_topups = db.query(UserTopup).filter(
+        UserTopup.user_subscription_id == sub.id,
+        UserTopup.status == "active"
+    ).all()
+
+    if db_topups:
+        for topup in db_topups:
+            pack = topup.topup_pack
+            pack_name = pack.name if pack else f"Topup Pack - {topup.renders} Renders"
+            price = float(topup.price)
             topup_renewal_total += price
             active_topup_details.append({
                 "name": pack_name,
-                "status": "active" if item.get("status") == "active" else item.get("status", "active"),
+                "status": "active",
                 "price": f"${price:.2f}/mo"
             })
-        else:
-            active_topup_details.append({
-                "name": f"Topup Pack - {renders} Renders",
-                "status": "active",
-                "price": "$0.00/mo"
-            })
+    else:
+        active_topups_list = sub.active_topups or []
+        for item in active_topups_list:
+            t_id = item.get("topup_pack_id")
+            renders = item.get("renders", 0)
+            pack = packs_map.get(str(t_id))
+            
+            if pack:
+                pack_name = pack.name or f"Topup Pack - {renders} Renders"
+                price = float(pack.price) if pack.price else 0.0
+                topup_renewal_total += price
+                active_topup_details.append({
+                    "name": pack_name,
+                    "status": "active" if item.get("status") == "active" else item.get("status", "active"),
+                    "price": f"${price:.2f}/mo"
+                })
+            else:
+                active_topup_details.append({
+                    "name": f"Topup Pack - {renders} Renders",
+                    "status": "active",
+                    "price": "$0.00/mo"
+                })
 
     monthly_renewal_total = base_plan_price + topup_renewal_total
 

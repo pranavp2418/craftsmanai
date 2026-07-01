@@ -85,6 +85,22 @@ def manufacturer_access_shared_variant(
                     break
             filtered_angles = {shared_metal_lower: angles_value}
 
+    # Filter angles by share.shared_angles if specified
+    if share.shared_angles and isinstance(filtered_angles, dict):
+        shared_angles_set = {a.lower() for a in share.shared_angles}
+        new_filtered_angles = {}
+        for metal_key, angles_dict in filtered_angles.items():
+            if isinstance(angles_dict, dict):
+                new_angles_dict = {
+                    angle_key: angle_val
+                    for angle_key, angle_val in angles_dict.items()
+                    if angle_key.lower() in shared_angles_set
+                }
+                new_filtered_angles[metal_key] = new_angles_dict
+            else:
+                new_filtered_angles[metal_key] = angles_dict
+        filtered_angles = new_filtered_angles
+
     variant_responses = [
         PublicDesignVariantResponse(
             id=variant.id,

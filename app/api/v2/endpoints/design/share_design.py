@@ -223,6 +223,7 @@ def share_design_variant(
             customer_id=payload.customer_id,
             comment=payload.comment,
             shared_metal=metal,
+            shared_angles=payload.angles,
         )
     except ValueError as e:
         if str(e) in [

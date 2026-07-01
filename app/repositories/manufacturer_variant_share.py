@@ -17,6 +17,7 @@ class DesignVariantManufacturerShareRepository:
         public_token: str,
         status: ManufacturerShareStatus = ManufacturerShareStatus.PENDING,
         shared_metal: Optional[str] = None,
+        shared_angles: Optional[List[str]] = None,
     ) -> DesignVariantManufacturerShare:
         share = DesignVariantManufacturerShare(
             design_variant_id=design_variant_id,
@@ -24,6 +25,7 @@ class DesignVariantManufacturerShareRepository:
             public_token=public_token,
             status=status,
             shared_metal=shared_metal,
+            shared_angles=shared_angles,
         )
         self.db.add(share)
         self.db.commit()

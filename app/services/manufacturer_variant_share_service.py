@@ -66,6 +66,7 @@ class DesignVariantManufacturerShareService:
         design_variant_id: int,
         manufacturer_id: int,
         shared_metal: Optional[str] = None,
+        shared_angles: Optional[list[str]] = None,
     ) -> DesignVariantManufacturerShare:
         """Create a manufacturer share link for a design variant.
 
@@ -75,6 +76,7 @@ class DesignVariantManufacturerShareService:
             shared_metal: Optional specific metal to share (e.g. "gold", "rose_gold").
                          When set, the manufacturer view will only show images for this metal.
                          This value is typically inherited from the customer share record.
+            shared_angles: Optional specific angles to share (e.g. ["front", "side"]).
         """
         variant = self.variant_repo.get_by_id(design_variant_id)
         if not variant:
@@ -85,6 +87,7 @@ class DesignVariantManufacturerShareService:
             manufacturer_id=manufacturer_id,
             public_token=self._token(),
             shared_metal=shared_metal,
+            shared_angles=shared_angles,
         )
         review_url = self.build_review_url(share)
         self.activity_repo.log(
@@ -98,6 +101,7 @@ class DesignVariantManufacturerShareService:
                 "share_id": share.id,
                 **({"review_url": review_url} if review_url else {}),
                 "shared_metal": shared_metal,
+                "shared_angles": shared_angles,
             },
         )
         return share

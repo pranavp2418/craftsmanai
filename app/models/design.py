@@ -119,6 +119,7 @@ class DesignShare(Base):
     # The specific metal shared with the customer (e.g. "gold", "rose_gold", "silver")
     # When set, further manufacturer shares of this variant will use the same metal.
     shared_metal = Column(String(50), nullable=True, index=True)
+    shared_angles = Column(JSON, nullable=True)
     allow_feedback = Column(Boolean, nullable=False, default=True)
     allow_review_request = Column(Boolean, nullable=False, default=True)
     require_approval = Column(Boolean, nullable=False, default=False)
@@ -154,6 +155,7 @@ class DesignVariantManufacturerShare(Base):
     # The specific metal shared with the manufacturer (e.g. "gold", "rose_gold", "silver")
     # When set, the manufacturer view will only show images for this metal.
     shared_metal = Column(String(50), nullable=True, index=True)
+    shared_angles = Column(JSON, nullable=True)
     # The primary email address used for this share (first email from the emails array)
     sent_to_email = Column(String(255), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

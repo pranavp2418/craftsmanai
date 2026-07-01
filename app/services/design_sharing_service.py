@@ -31,6 +31,7 @@ class DesignSharingService:
         customer_id: Optional[int] = None,
         comment: Optional[str] = None,
         shared_metal: Optional[str] = None,
+        shared_angles: Optional[list[str]] = None,
         require_approval: bool = False,
         allow_feedback: bool = True,
         allow_review_request: bool = True
@@ -55,7 +56,23 @@ class DesignSharingService:
             # Security check: only return existing share if it's for the same customer
             if customer_id is not None and existing_shares[0].customer_id != customer_id:
                 raise ValueError("This variant is already shared with another customer.")
-            return existing_shares[0]
+            
+            existing_share = existing_shares[0]
+            existing_share.shared_metal = shared_metal
+            existing_share.shared_angles = shared_angles
+            existing_share.comment = comment
+            self.db.add(existing_share)
+            self.db.commit()
+            self.db.refresh(existing_share)
+
+            self.activity_repo.log(
+                design_id=variant.design_id,
+                action_type="DESIGN_SHARED_UPDATED",
+                message=f"Design share updated for external stakeholder"
+                        f"{f' (metal: {shared_metal})' if shared_metal else ''}",
+                metadata={"share_id": existing_share.id, "variant_id": design_variant_id, "customer_id": customer_id, "shared_metal": shared_metal, "shared_angles": shared_angles},
+            )
+            return existing_share
 
         # Check if any variant of this design has already been shared
         all_design_shares = self.share_repo.get_customer_shares_for_design(variant.design_id)
@@ -68,13 +85,14 @@ class DesignSharingService:
             public_token=self._token(),
             comment=comment,
             shared_metal=shared_metal,
+            shared_angles=shared_angles,
         )
         self.activity_repo.log(
             design_id=variant.design_id,
             action_type="DESIGN_SHARED",
             message=f"Design shared with external stakeholder"
                     f"{f' (metal: {shared_metal})' if shared_metal else ''}",
-            metadata={"share_id": share.id, "variant_id": design_variant_id, "customer_id": customer_id, "shared_metal": shared_metal},
+            metadata={"share_id": share.id, "variant_id": design_variant_id, "customer_id": customer_id, "shared_metal": shared_metal, "shared_angles": shared_angles},
         )
         return share
 

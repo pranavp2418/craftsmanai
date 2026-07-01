@@ -123,6 +123,7 @@ def share_variant_with_manufacturer(
         )
 
     shared_metal = latest_customer_share.shared_metal
+    shared_angles = payload.angles if payload.angles is not None else latest_customer_share.shared_angles
 
     if not payload.manufacturer_ids:
         raise HTTPException(
@@ -166,6 +167,7 @@ def share_variant_with_manufacturer(
             design_variant_id=variant.id,
             manufacturer_id=m_id,
             shared_metal=shared_metal,
+            shared_angles=shared_angles,
         )
         
         # Build review URL using share service logic
@@ -303,6 +305,7 @@ def share_variant_with_manufacturer(
             "delivery_time_days": share.delivery_time_days,
             "notes": share.notes,
             "shared_metal": share.shared_metal,
+            "shared_angles": share.shared_angles,
             "created_at": share.created_at,
         })
 

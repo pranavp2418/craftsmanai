@@ -19,6 +19,7 @@ class DesignShareRepository:
         status: DesignShareStatus = DesignShareStatus.PENDING,
         comment: Optional[str] = None,
         shared_metal: Optional[str] = None,
+        shared_angles: Optional[List[str]] = None,
     ) -> DesignShare:
         share = DesignShare(
             design_variant_id=design_variant_id,
@@ -27,6 +28,7 @@ class DesignShareRepository:
             status=status,
             comment=comment,
             shared_metal=shared_metal,
+            shared_angles=shared_angles,
         )
         self.db.add(share)
         self.db.commit()
