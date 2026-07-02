@@ -15,6 +15,16 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+def _validate_email_address(to_email: str) -> bool:
+    """Validate email address format before sending."""
+    import re
+    if not to_email or not isinstance(to_email, str):
+        return False
+    # Basic email validation regex
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return bool(re.match(pattern, to_email.strip()))
+
+
 def _send_via_zeptomail_sync(
     to_email: str,
     subject: str,
@@ -35,6 +45,12 @@ def _send_via_zeptomail_sync(
     Returns:
         dict with keys: success (bool), message (str)
     """
+    # Validate recipient email address before sending
+    if not _validate_email_address(to_email):
+        error_msg = f"Invalid recipient email address: {to_email}"
+        logger.error(error_msg)
+        return {"success": False, "message": error_msg}
+    
     if not settings.ZEPTOMAIL_API_KEY:
         raise ValueError("ZEPTOMAIL_API_KEY is not configured")
     
@@ -95,6 +111,12 @@ def send_signup_otp_email(self, to: str, otp: str, user_name: str):
     task_name = "send_signup_otp_email"
     db = None
     email_log_id = None
+    
+    # Validate email address before proceeding
+    if not _validate_email_address(to):
+        error_msg = f"Invalid recipient email address: {to}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
     
     try:
         logger.info(f"📧 Starting {task_name} for {to}")
@@ -190,6 +212,12 @@ def send_password_reset_email(self, to: str, otp: str, user_name: str):
     db = None
     email_log_id = None
     
+    # Validate email address before proceeding
+    if not _validate_email_address(to):
+        error_msg = f"Invalid recipient email address: {to}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
+    
     try:
         logger.info(f"📧 Starting {task_name} for {to}")
         
@@ -281,6 +309,12 @@ def send_welcome_email(self, to: str, user_name: str, dashboard_url: str = "#"):
     task_name = "send_welcome_email"
     db = None
     email_log_id = None
+    
+    # Validate email address before proceeding
+    if not _validate_email_address(to):
+        error_msg = f"Invalid recipient email address: {to}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
     
     try:
         logger.info(f"📧 Starting {task_name} for {to}")
@@ -658,6 +692,13 @@ def send_customer_share_email(self, to_email: str, customer_name: str, preview_u
     Send an email to a customer with a link to review a shared design using customer_approval template.
     """
     task_name = "send_customer_share_email"
+    
+    # Validate email address before proceeding
+    if not _validate_email_address(to_email):
+        error_msg = f"Invalid recipient email address: {to_email}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
+    
     try:
         logger.info(f"📧 Starting {task_name} for {to_email}")
         
@@ -757,6 +798,13 @@ def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, p
     Send an email to a manufacturer with a link to review a shared design using manufacturer_design_share template.
     """
     task_name = "send_manufacturer_share_email"
+    
+    # Validate email address before proceeding
+    if not _validate_email_address(to_email):
+        error_msg = f"Invalid recipient email address: {to_email}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
+    
     try:
         logger.info(f"📧 Starting {task_name} for {to_email}")
         
@@ -799,6 +847,13 @@ def send_customer_action_email_task(
     (approve, reject, or request refinement).
     """
     task_name = "send_customer_action_email_task"
+    
+    # Validate email address before proceeding
+    if not _validate_email_address(to_email):
+        error_msg = f"Invalid recipient email address: {to_email}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
+    
     try:
         logger.info(f"📧 Starting {task_name} for {to_email} - Action: {action}")
         
@@ -946,6 +1001,12 @@ def send_team_invitation_email(self, to_email: str, team_name: str, variables: d
         - 60s initial delay, exponential backoff
     """
     task_name = "send_team_invitation_email"
+    
+    # Validate email address before proceeding
+    if not _validate_email_address(to_email):
+        error_msg = f"Invalid recipient email address: {to_email}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
     
     try:
         logger.info(f"📧 Starting {task_name} for {to_email} to join {team_name}")
@@ -1171,6 +1232,13 @@ def send_subscription_cancellation_confirmation_email(self, to: str, user_name: 
         manage_billing_url: URL to manage billing
     """
     task_name = "send_subscription_cancellation_confirmation_email"
+    
+    # Validate email address before proceeding
+    if not _validate_email_address(to):
+        error_msg = f"Invalid recipient email address: {to}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
+    
     try:
         logger.info(f"📧 Starting {task_name} for {to}")
         
@@ -1205,6 +1273,13 @@ def send_plan_purchase_confirmation_email(self, to: str, user_name: str, plan_na
         billing_url: URL to view billing details
     """
     task_name = "send_plan_purchase_confirmation_email"
+    
+    # Validate email address before proceeding
+    if not _validate_email_address(to):
+        error_msg = f"Invalid recipient email address: {to}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
+    
     try:
         logger.info(f"📧 Starting {task_name} for {to}")
         
@@ -1214,7 +1289,7 @@ def send_plan_purchase_confirmation_email(self, to: str, user_name: str, plan_na
             EmailService.send_plan_purchase_confirmation_email(to, user_name, plan_name, amount, billing_date, billing_url)
         )
         
-        logger.info(f" {task_name} completed successfully for {to}")
+        logger.info(f"✅ {task_name} completed successfully for {to}")
         return True
     except Exception as exc:
         logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
@@ -1239,6 +1314,13 @@ def send_topup_purchase_confirmation_email(self, to: str, user_name: str, plan_n
         billing_url: URL to view billing details
     """
     task_name = "send_topup_purchase_confirmation_email"
+    
+    # Validate email address before proceeding
+    if not _validate_email_address(to):
+        error_msg = f"Invalid recipient email address: {to}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
+    
     try:
         logger.info(f"📧 Starting {task_name} for {to}")
         
@@ -1273,6 +1355,13 @@ def send_plan_upgrade_confirmation_email(self, to: str, user_name: str, new_plan
         plan_url: URL to view plan details
     """
     task_name = "send_plan_upgrade_confirmation_email"
+    
+    # Validate email address before proceeding
+    if not _validate_email_address(to):
+        error_msg = f"Invalid recipient email address: {to}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
+    
     try:
         logger.info(f"📧 Starting {task_name} for {to}")
         
@@ -1282,10 +1371,10 @@ def send_plan_upgrade_confirmation_email(self, to: str, user_name: str, new_plan
             EmailService.send_plan_upgrade_confirmation_email(to, user_name, new_plan, amount, next_invoice_date, plan_url)
         )
         
-        logger.info(f" {task_name} completed successfully for {to}")
+        logger.info(f"✅ {task_name} completed successfully for {to}")
         return True
     except Exception as exc:
-        logger.error(f" {task_name} failed for {to}: {str(exc)}")
+        logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
         raise self.retry(
             exc=exc, 
             countdown=60 * (2 ** self.request.retries),
@@ -1343,6 +1432,13 @@ def send_quote_submitted_email(self, to: str, retailer_name: str, manufacturer_n
         render_image_url: URL of the design render image
     """
     task_name = "send_quote_submitted_email"
+    
+    # Validate email address before proceeding
+    if not _validate_email_address(to):
+        error_msg = f"Invalid recipient email address: {to}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
+    
     try:
         logger.info(f"📧 Starting {task_name} for {to}")
         
@@ -1377,6 +1473,13 @@ def send_subscription_renewal_confirmation_email(self, to: str, user_name: str, 
         invoice_url: URL to view invoice
     """
     task_name = "send_subscription_renewal_confirmation_email"
+    
+    # Validate email address before proceeding
+    if not _validate_email_address(to):
+        error_msg = f"Invalid recipient email address: {to}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
+    
     try:
         logger.info(f"📧 Starting {task_name} for {to}")
         

@@ -17,10 +17,12 @@ class EmailService:
         from app.core.database import SessionLocal
         from app.models.email_log import EmailLog, EmailStatus
         from app.models.user import User
+        from sqlalchemy import func
         
         db = SessionLocal()
         try:
-            user = db.query(User).filter(User.email == to_email).first()
+            # Use case-insensitive match so "User@Example.com" matches "user@example.com"
+            user = db.query(User).filter(func.lower(User.email) == func.lower(to_email)).first()
             user_id = user.id if user else None
             
             email_log = EmailLog(
@@ -40,6 +42,20 @@ class EmailService:
             return None
         finally:
             db.close()
+
+    @staticmethod
+    def _create_email_log_safe(to_email: str, template_name: str, subject: str, variables: dict) -> Optional[str]:
+        """Create a pending email log, catching and logging errors without raising.
+        
+        Unlike _create_email_log, this wraps ALL operations in the widest possible
+        exception handling so that email sending is NEVER blocked by a logging failure.
+        Returns the log_id if created, or None if anything went wrong.
+        """
+        try:
+            return EmailService._create_email_log(to_email, template_name, subject, variables)
+        except Exception as e:
+            logger.error(f"Failed to create EmailLog for {to_email}: {str(e)}")
+            return None
 
     @staticmethod
     def _update_email_log_status(log_id: Optional[str], status: str, error_message: str = None, smtp_response: str = None):
@@ -65,6 +81,44 @@ class EmailService:
                 db.commit()
         except Exception as e:
             logger.error(f"Failed to update EmailLog status for {log_id}: {str(e)}")
+        finally:
+            db.close()
+
+    @staticmethod
+    def _create_sent_email_log_fallback(to_email: str, template_name: str, subject: str, variables: dict, smtp_response: str = None) -> Optional[str]:
+        """Create a SENT email log entry as a fallback when the initial PENDING log creation failed.
+
+        This ensures that even if _create_email_log() failed (e.g., DB error), we still have
+        a record of successfully sent emails.
+        """
+        from app.core.database import SessionLocal
+        from app.models.email_log import EmailLog, EmailStatus
+        from app.models.user import User
+        from sqlalchemy import func
+        from datetime import datetime, timezone
+
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(func.lower(User.email) == func.lower(to_email)).first()
+            user_id = user.id if user else None
+
+            email_log = EmailLog(
+                to_email=to_email,
+                template_name=template_name,
+                subject=subject,
+                template_variables=json.dumps(variables) if variables else None,
+                status=EmailStatus.SENT,
+                user_id=user_id,
+                sent_at=datetime.now(timezone.utc),
+                smtp_response=smtp_response,
+            )
+            db.add(email_log)
+            db.commit()
+            db.refresh(email_log)
+            return str(email_log.id)
+        except Exception as e:
+            logger.error(f"Failed to create fallback EmailLog for {to_email}: {str(e)}")
+            return None
         finally:
             db.close()
     
@@ -155,9 +209,9 @@ class EmailService:
         )
         try:
             logger.info(f"SENDING EMAIL: To={to}, OTP={otp}, User={user_name}")
-            
+
             subject = "Verify your email address - Craftsman AI"
-            
+
             # Render template using Jinja2
             html_content = await render_template(
                 "signup_otp",
@@ -168,26 +222,36 @@ class EmailService:
                     "verify_url": verify_url
                 }
             )
-            
+
             text_body = f"Hi {user_name},\n\nYour OTP code is: {otp}\n\nBest regards,\nThe Craftsman AI Team"
-            
+
             result = await EmailService._send_via_zeptomail(
                 to_email=to,
                 subject=subject,
                 html_content=html_content,
                 text_body=text_body
             )
-            
+
             if result["success"]:
                 logger.info(f"Successfully sent signup OTP email to {to}")
-                EmailService._update_email_log_status(
-                    log_id=log_id,
-                    status=EmailStatus.SENT,
-                    smtp_response=result["message"]
-                )
+                # If initial log creation failed, create a fallback SENT log
+                if not log_id:
+                    log_id = EmailService._create_sent_email_log_fallback(
+                        to_email=to,
+                        template_name="signup_otp",
+                        subject=subject,
+                        variables={"otp": otp, "user_name": user_name, "expires_minutes": expires_minutes, "verify_url": verify_url},
+                        smtp_response=result["message"]
+                    )
+                else:
+                    EmailService._update_email_log_status(
+                        log_id=log_id,
+                        status=EmailStatus.SENT,
+                        smtp_response=result["message"]
+                    )
             else:
                 raise Exception(result["message"])
-            
+
         except Exception as e:
             logger.error(f"Failed to send signup OTP to {to}: {str(e)}")
             EmailService._update_email_log_status(
@@ -209,9 +273,9 @@ class EmailService:
         )
         try:
             logger.info(f"SENDING PASSWORD RESET EMAIL: To={to}, OTP={otp}, User={user_name}")
-            
+
             subject = "Reset your password - Craftsman AI"
-            
+
             # Render template using Jinja2
             html_content = await render_template(
                 "password_reset_otp",
@@ -222,26 +286,36 @@ class EmailService:
                     "reset_url": reset_url
                 }
             )
-            
+
             text_body = f"Hi {user_name},\n\nYour security code is: {otp}\n\nBest regards,\nThe Craftsman AI Team"
-            
+
             result = await EmailService._send_via_zeptomail(
                 to_email=to,
                 subject=subject,
                 html_content=html_content,
                 text_body=text_body
             )
-            
+
             if result["success"]:
                 logger.info(f"Successfully sent password reset OTP email to {to}")
-                EmailService._update_email_log_status(
-                    log_id=log_id,
-                    status=EmailStatus.SENT,
-                    smtp_response=result["message"]
-                )
+                # If initial log creation failed, create a fallback SENT log
+                if not log_id:
+                    log_id = EmailService._create_sent_email_log_fallback(
+                        to_email=to,
+                        template_name="password_reset_otp",
+                        subject=subject,
+                        variables={"otp": otp, "user_name": user_name, "expires_minutes": expires_minutes, "reset_url": reset_url},
+                        smtp_response=result["message"]
+                    )
+                else:
+                    EmailService._update_email_log_status(
+                        log_id=log_id,
+                        status=EmailStatus.SENT,
+                        smtp_response=result["message"]
+                    )
             else:
                 raise Exception(result["message"])
-            
+
         except Exception as e:
             logger.error(f"Failed to send password reset OTP to {to}: {str(e)}")
             EmailService._update_email_log_status(
@@ -255,7 +329,7 @@ class EmailService:
     async def send_customer_share(to_email: str, customer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, version: str = None, version_label: str = None, brand_logo_url: str = None, brand_primary_color: str = None):
         """Send an email to a customer with a link to review a shared design using customer_approval template."""
         from app.models.email_log import EmailStatus
-        
+
         log_id = EmailService._create_email_log(
             to_email=to_email,
             template_name="customer_approval",
@@ -264,9 +338,9 @@ class EmailService:
         )
         try:
             logger.info(f"SENDING CUSTOMER SHARE EMAIL: To={to_email}, URL={preview_url}")
-            
+
             subject = f"{designer_name} shared a design with you - Craftsman AI"
-            
+
             # Render the customer_approval template
             context = {
                 "retailer_name": retailer_name or designer_name,
@@ -279,11 +353,11 @@ class EmailService:
                 "brand_logo_url": brand_logo_url or "",
                 "brand_primary_color": brand_primary_color or "#6366F1"
             }
-            
+
             html_content = await render_template("customer_approval", context)
-            
+
             text_body = f"Hi {customer_name},\n\n{retailer_name or designer_name} has shared a custom jewelry design with you.\n\nDesign Number: {design_code or 'N/A'}\nJewelry Type: {jewelry_type or 'Custom Jewelry'}\nVersion: {version or 'v1.0'}\n\nReview it here: {preview_url}\n\nBest regards,\nThe Craftsman AI Team"
-            
+
             # Customer design share emails use ZEPTOMAIL_CUSTOMER_EMAIL
             result = await EmailService._send_via_zeptomail(
                 to_email=to_email,
@@ -292,17 +366,27 @@ class EmailService:
                 text_body=text_body,
                 from_email=settings.ZEPTOMAIL_CUSTOMER_EMAIL
             )
-            
+
             if result["success"]:
                 logger.info(f"Successfully sent customer share email to {to_email}")
-                EmailService._update_email_log_status(
-                    log_id=log_id,
-                    status=EmailStatus.SENT,
-                    smtp_response=result["message"]
-                )
+                # If initial log creation failed, create a fallback SENT log
+                if not log_id:
+                    log_id = EmailService._create_sent_email_log_fallback(
+                        to_email=to_email,
+                        template_name="customer_approval",
+                        subject=subject,
+                        variables={"customer_name": customer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "version": version, "version_label": version_label, "brand_logo_url": brand_logo_url, "brand_primary_color": brand_primary_color},
+                        smtp_response=result["message"]
+                    )
+                else:
+                    EmailService._update_email_log_status(
+                        log_id=log_id,
+                        status=EmailStatus.SENT,
+                        smtp_response=result["message"]
+                    )
             else:
                 raise Exception(result["message"])
-                
+
         except Exception as e:
             logger.error(f"Failed to send customer share email to {to_email}: {str(e)}")
             EmailService._update_email_log_status(
@@ -316,7 +400,7 @@ class EmailService:
     async def send_manufacturer_share(to_email: str, manufacturer_name: str, preview_url: str, designer_name: str, retailer_name: str = None, render_image_url: str = None, design_code: str = None, jewelry_type: str = None, metal: str = None, brand_logo_url: str = None, brand_primary_color: str = None):
         """Send an email to a manufacturer with a link to review a shared design for quote using manufacturer_design_share template."""
         from app.models.email_log import EmailStatus
-        
+
         log_id = EmailService._create_email_log(
             to_email=to_email,
             template_name="manufacturer_design_share",
@@ -325,9 +409,9 @@ class EmailService:
         )
         try:
             logger.info(f"SENDING MANUFACTURER SHARE EMAIL: To={to_email}, URL={preview_url}")
-            
+
             subject = "New costing request from CraftsmanAI"
-            
+
             # Render the manufacturer_design_share template
             context = {
                 "manufacturer_name": manufacturer_name,
@@ -338,11 +422,11 @@ class EmailService:
                 "brand_logo_url": brand_logo_url or "",
                 "brand_primary_color": brand_primary_color or "#6366F1"
             }
-            
+
             html_content = await render_template("manufacturer_design_share", context)
-            
+
             text_body = f"Hi {manufacturer_name},\n\nCraftsmanAI has shared a Details Sheet for manufacturer quote review.\n\nDesign #{design_code or 'N/A'}\nJewelry Type: {jewelry_type or 'Custom Jewelry'}\nMetal: {metal or 'Not specified'}\n\nOpen the Details Sheet and submit your quote: {preview_url}\n\nBest regards,\nThe Craftsman AI Team"
-            
+
             # Manufacturer quote emails use ZEPTOMAIL_QUOTES_EMAIL
             result = await EmailService._send_via_zeptomail(
                 to_email=to_email,
@@ -351,17 +435,27 @@ class EmailService:
                 text_body=text_body,
                 from_email=settings.ZEPTOMAIL_QUOTES_EMAIL
             )
-            
+
             if result["success"]:
                 logger.info(f"Successfully sent manufacturer share email to {to_email}")
-                EmailService._update_email_log_status(
-                    log_id=log_id,
-                    status=EmailStatus.SENT,
-                    smtp_response=result["message"]
-                )
+                # If initial log creation failed, create a fallback SENT log
+                if not log_id:
+                    log_id = EmailService._create_sent_email_log_fallback(
+                        to_email=to_email,
+                        template_name="manufacturer_design_share",
+                        subject=subject,
+                        variables={"manufacturer_name": manufacturer_name, "preview_url": preview_url, "designer_name": designer_name, "retailer_name": retailer_name, "render_image_url": render_image_url, "design_code": design_code, "jewelry_type": jewelry_type, "metal": metal, "brand_logo_url": brand_logo_url, "brand_primary_color": brand_primary_color},
+                        smtp_response=result["message"]
+                    )
+                else:
+                    EmailService._update_email_log_status(
+                        log_id=log_id,
+                        status=EmailStatus.SENT,
+                        smtp_response=result["message"]
+                    )
             else:
                 raise Exception(result["message"])
-                
+
         except Exception as e:
             logger.error(f"Failed to send manufacturer share email to {to_email}: {str(e)}")
             EmailService._update_email_log_status(
@@ -457,11 +551,21 @@ Message:
 
             if result["success"]:
                 logger.info(f"Successfully sent contact notification email to {to_email}")
-                EmailService._update_email_log_status(
-                    log_id=log_id,
-                    status=EmailStatus.SENT,
-                    smtp_response=result["message"],
-                )
+                # If initial log creation failed, create a fallback SENT log
+                if not log_id:
+                    log_id = EmailService._create_sent_email_log_fallback(
+                        to_email=to_email,
+                        template_name="contact_notification",
+                        subject=email_subject,
+                        variables={"name": name, "email": email, "phone": phone or "Not provided", "subject": subject, "message": message},
+                        smtp_response=result["message"]
+                    )
+                else:
+                    EmailService._update_email_log_status(
+                        log_id=log_id,
+                        status=EmailStatus.SENT,
+                        smtp_response=result["message"],
+                    )
             else:
                 raise Exception(result["message"])
 
@@ -494,7 +598,7 @@ Message:
         Send an email to the retailer when a customer takes action on a shared design
         (approve, reject, or request refinement).
         Uses the customer_action_notification template.
-        
+
         Args:
             to_email: Retailer's email address
             retailer_name: Retailer's brand/display name
@@ -511,15 +615,15 @@ Message:
             comment: Optional comment from the customer
         """
         from app.models.email_log import EmailStatus
-        
+
         action_display = {
             "approved": "Approved",
             "rejected": "Rejected",
             "refinement_requested": "Requested Changes",
         }.get(action, action)
-        
+
         subject = f"Customer {action_display}: {design_name or 'Design'} - Craftsman AI"
-        
+
         log_id = EmailService._create_email_log(
             to_email=to_email,
             template_name="customer_action_notification",
@@ -541,7 +645,7 @@ Message:
         )
         try:
             logger.info(f"SENDING CUSTOMER ACTION EMAIL: To={to_email}, Action={action}, Customer={customer_name}")
-            
+
             # Build context for the template
             context = {
                 "action": action,
@@ -557,15 +661,15 @@ Message:
                 "comment": comment or "",
                 "dashboard_url": "#",
             }
-            
+
             html_content = await render_template("customer_action_notification", context)
-            
+
             action_past_tense = {
                 "approved": "approved",
                 "rejected": "rejected",
                 "refinement_requested": "requested changes to",
             }.get(action, "taken action on")
-            
+
             text_body = (
                 f"Hi {retailer_name},\n\n"
                 f"Your customer {customer_name} has {action_past_tense} the design.\n\n"
@@ -577,24 +681,47 @@ Message:
                 + "\nCheck the design in your Craftsman AI dashboard for more details.\n\n"
                 "Best regards,\nThe Craftsman AI Team"
             )
-            
+
             result = await EmailService._send_via_zeptomail(
                 to_email=to_email,
                 subject=subject,
                 html_content=html_content,
                 text_body=text_body
             )
-            
+
             if result["success"]:
                 logger.info(f"Successfully sent customer action email to {to_email}")
-                EmailService._update_email_log_status(
-                    log_id=log_id,
-                    status=EmailStatus.SENT,
-                    smtp_response=result["message"]
-                )
+                # If initial log creation failed, create a fallback SENT log
+                if not log_id:
+                    log_id = EmailService._create_sent_email_log_fallback(
+                        to_email=to_email,
+                        template_name="customer_action_notification",
+                        subject=subject,
+                        variables={
+                            "retailer_name": retailer_name,
+                            "customer_name": customer_name,
+                            "action": action,
+                            "design_name": design_name,
+                            "variant_name": variant_name,
+                            "design_code": design_code,
+                            "jewelry_type": jewelry_type,
+                            "version": version,
+                            "version_label": version_label,
+                            "render_image_url": render_image_url,
+                            "brand_logo_url": brand_logo_url,
+                            "comment": comment,
+                        },
+                        smtp_response=result["message"]
+                    )
+                else:
+                    EmailService._update_email_log_status(
+                        log_id=log_id,
+                        status=EmailStatus.SENT,
+                        smtp_response=result["message"]
+                    )
             else:
                 raise Exception(result["message"])
-                
+
         except Exception as e:
             logger.error(f"Failed to send customer action email to {to_email}: {str(e)}")
             EmailService._update_email_log_status(
@@ -616,9 +743,9 @@ Message:
         )
         try:
             logger.info(f"SENDING WELCOME EMAIL: To={to}, User={user_name}")
-            
+
             subject = "Welcome to Craftsman AI!"
-            
+
             # Render template using Jinja2
             html_content = await render_template(
                 "welcome_platform",
@@ -626,26 +753,36 @@ Message:
                     "dashboard_url": dashboard_url
                 }
             )
-            
+
             text_body = f"Hi {user_name},\n\nWelcome to Craftsman AI! Your email address has been successfully verified.\n\nBest regards,\nThe Craftsman AI Team"
-            
+
             result = await EmailService._send_via_zeptomail(
                 to_email=to,
                 subject=subject,
                 html_content=html_content,
                 text_body=text_body
             )
-            
+
             if result["success"]:
                 logger.info(f"Successfully sent welcome email to {to}")
-                EmailService._update_email_log_status(
-                    log_id=log_id,
-                    status=EmailStatus.SENT,
-                    smtp_response=result["message"]
-                )
+                # If initial log creation failed, create a fallback SENT log
+                if not log_id:
+                    log_id = EmailService._create_sent_email_log_fallback(
+                        to_email=to,
+                        template_name="welcome_platform",
+                        subject=subject,
+                        variables={"user_name": user_name, "dashboard_url": dashboard_url},
+                        smtp_response=result["message"]
+                    )
+                else:
+                    EmailService._update_email_log_status(
+                        log_id=log_id,
+                        status=EmailStatus.SENT,
+                        smtp_response=result["message"]
+                    )
             else:
                 raise Exception(result["message"])
-            
+
         except Exception as e:
             logger.error(f"Failed to send welcome email to {to}: {str(e)}")
             EmailService._update_email_log_status(
@@ -667,9 +804,9 @@ Message:
         )
         try:
             logger.info(f"SENDING PLAN PURCHASE CONFIRMATION: To={to}, Plan={plan_name}")
-            
+
             subject = "Purchase confirmed — your CraftsmanAI plan is active"
-            
+
             html_content = await render_template(
                 "plan_purchase_confirm_email_template/purchase_confirmed",
                 context={
@@ -680,26 +817,36 @@ Message:
                     "billing_url": billing_url
                 }
             )
-            
+
             text_body = f"Hi {user_name},\n\nYour {plan_name} plan is now active.\n\nPlan: {plan_name}\nAmount: {amount}\nBilling Date: {billing_date}\nStatus: Active\n\nView billing details: {billing_url}\n\nBest regards,\nThe Craftsman AI Team"
-            
+
             result = await EmailService._send_via_zeptomail(
                 to_email=to,
                 subject=subject,
                 html_content=html_content,
                 text_body=text_body
             )
-            
+
             if result["success"]:
                 logger.info(f"Successfully sent plan purchase confirmation to {to}")
-                EmailService._update_email_log_status(
-                    log_id=log_id,
-                    status=EmailStatus.SENT,
-                    smtp_response=result["message"]
-                )
+                # If initial log creation failed, create a fallback SENT log
+                if not log_id:
+                    log_id = EmailService._create_sent_email_log_fallback(
+                        to_email=to,
+                        template_name="plan_purchase_confirm_email_template/purchase_confirmed",
+                        subject=subject,
+                        variables={"user_name": user_name, "plan_name": plan_name, "amount": amount, "billing_date": billing_date, "billing_url": billing_url},
+                        smtp_response=result["message"]
+                    )
+                else:
+                    EmailService._update_email_log_status(
+                        log_id=log_id,
+                        status=EmailStatus.SENT,
+                        smtp_response=result["message"]
+                    )
             else:
                 raise Exception(result["message"])
-            
+
         except Exception as e:
             logger.error(f"Failed to send plan purchase confirmation to {to}: {str(e)}")
             EmailService._update_email_log_status(
@@ -721,9 +868,9 @@ Message:
         )
         try:
             logger.info(f"SENDING TOP-UP PURCHASE CONFIRMATION: To={to}, Plan={plan_name}")
-            
+
             subject = "Top-up pack confirmed — your CraftsmanAI plan is updated"
-            
+
             html_content = await render_template(
                 "plan_purchase_confirm_email_template/purchase_confirmed",
                 context={
@@ -734,26 +881,36 @@ Message:
                     "billing_url": billing_url
                 }
             )
-            
+
             text_body = f"Hi {user_name},\n\nYour {plan_name} top-up pack is now active.\n\nPlan: {plan_name}\nAmount: {amount}\nBilling Date: {billing_date}\nStatus: Active\n\nView billing details: {billing_url}\n\nBest regards,\nThe Craftsman AI Team"
-            
+
             result = await EmailService._send_via_zeptomail(
                 to_email=to,
                 subject=subject,
                 html_content=html_content,
                 text_body=text_body
             )
-            
+
             if result["success"]:
                 logger.info(f"Successfully sent top-up purchase confirmation to {to}")
-                EmailService._update_email_log_status(
-                    log_id=log_id,
-                    status=EmailStatus.SENT,
-                    smtp_response=result["message"]
-                )
+                # If initial log creation failed, create a fallback SENT log
+                if not log_id:
+                    log_id = EmailService._create_sent_email_log_fallback(
+                        to_email=to,
+                        template_name="plan_purchase_confirm_email_template/purchase_confirmed",
+                        subject=subject,
+                        variables={"user_name": user_name, "plan_name": plan_name, "amount": amount, "billing_date": billing_date, "billing_url": billing_url},
+                        smtp_response=result["message"]
+                    )
+                else:
+                    EmailService._update_email_log_status(
+                        log_id=log_id,
+                        status=EmailStatus.SENT,
+                        smtp_response=result["message"]
+                    )
             else:
                 raise Exception(result["message"])
-            
+
         except Exception as e:
             logger.error(f"Failed to send top-up purchase confirmation to {to}: {str(e)}")
             EmailService._update_email_log_status(
@@ -775,9 +932,9 @@ Message:
         )
         try:
             logger.info(f"SENDING PLAN UPGRADE CONFIRMATION: To={to}, New Plan={new_plan}")
-            
+
             subject = "Your CraftsmanAI plan was upgraded"
-            
+
             html_content = await render_template(
                 "plan_upgrade_email_template/plan_upgraded",
                 context={
@@ -788,26 +945,36 @@ Message:
                     "plan_url": plan_url
                 }
             )
-            
+
             text_body = f"Hi {user_name},\n\nYour CraftsmanAI plan has been upgraded to {new_plan}.\n\nNew Plan: {new_plan}\nProrated Charge: {amount}\nNext Invoice Date: {next_invoice_date}\nStatus: Updated\n\nView Plan: {plan_url}\n\nBest regards,\nThe Craftsman AI Team"
-            
+
             result = await EmailService._send_via_zeptomail(
                 to_email=to,
                 subject=subject,
                 html_content=html_content,
                 text_body=text_body
             )
-            
+
             if result["success"]:
                 logger.info(f"Successfully sent plan upgrade confirmation to {to}")
-                EmailService._update_email_log_status(
-                    log_id=log_id,
-                    status=EmailStatus.SENT,
-                    smtp_response=result["message"]
-                )
+                # If initial log creation failed, create a fallback SENT log
+                if not log_id:
+                    log_id = EmailService._create_sent_email_log_fallback(
+                        to_email=to,
+                        template_name="plan_upgrade_email_template/plan_upgraded",
+                        subject=subject,
+                        variables={"user_name": user_name, "new_plan": new_plan, "amount": amount, "next_invoice_date": next_invoice_date, "plan_url": plan_url},
+                        smtp_response=result["message"]
+                    )
+                else:
+                    EmailService._update_email_log_status(
+                        log_id=log_id,
+                        status=EmailStatus.SENT,
+                        smtp_response=result["message"]
+                    )
             else:
                 raise Exception(result["message"])
-            
+
         except Exception as e:
             logger.error(f"Failed to send plan upgrade confirmation to {to}: {str(e)}")
             EmailService._update_email_log_status(
@@ -829,9 +996,9 @@ Message:
         )
         try:
             logger.info(f"SENDING SUBSCRIPTION RENEWAL: To={to}, Plan={plan_name}")
-            
+
             subject = "Your CraftsmanAI subscription renewed"
-            
+
             html_content = await render_template(
                 "subscription_renewed_email_template/subscription_renewed",
                 context={
@@ -842,26 +1009,36 @@ Message:
                     "invoice_url": invoice_url
                 }
             )
-            
+
             text_body = f"Hi {user_name},\n\nYour {plan_name} plan has renewed successfully.\n\nPlan: {plan_name}\nRenewal Amount: {amount}\nNext Renewal: {next_renewal_date}\nStatus: Renewed\n\nView Invoice: {invoice_url}\n\nBest regards,\nThe Craftsman AI Team"
-            
+
             result = await EmailService._send_via_zeptomail(
                 to_email=to,
                 subject=subject,
                 html_content=html_content,
                 text_body=text_body
             )
-            
+
             if result["success"]:
                 logger.info(f"Successfully sent subscription renewal confirmation to {to}")
-                EmailService._update_email_log_status(
-                    log_id=log_id,
-                    status=EmailStatus.SENT,
-                    smtp_response=result["message"]
-                )
+                # If initial log creation failed, create a fallback SENT log
+                if not log_id:
+                    log_id = EmailService._create_sent_email_log_fallback(
+                        to_email=to,
+                        template_name="subscription_renewed_email_template/subscription_renewed",
+                        subject=subject,
+                        variables={"user_name": user_name, "plan_name": plan_name, "amount": amount, "next_renewal_date": next_renewal_date, "invoice_url": invoice_url},
+                        smtp_response=result["message"]
+                    )
+                else:
+                    EmailService._update_email_log_status(
+                        log_id=log_id,
+                        status=EmailStatus.SENT,
+                        smtp_response=result["message"]
+                    )
             else:
                 raise Exception(result["message"])
-            
+
         except Exception as e:
             logger.error(f"Failed to send subscription renewal confirmation to {to}: {str(e)}")
             EmailService._update_email_log_status(
@@ -883,9 +1060,9 @@ Message:
         )
         try:
             logger.info(f"SENDING QUOTE SUBMITTED EMAIL: To={to}, Manufacturer={manufacturer_name}, Design={design_number}")
-            
+
             subject = f"Quote received from {manufacturer_name} — Craftsman AI"
-            
+
             html_content = await render_template(
                 "quote_submitted_template/quote_submitted",
                 context={
@@ -898,26 +1075,36 @@ Message:
                     "render_image_url": render_image_url
                 }
             )
-            
+
             text_body = f"Hi {retailer_name},\n\n{manufacturer_name} has submitted a quote for your design.\n\nDesign #{design_number}\nEstimated Cost: {estimated_cost}\nTimeline: {production_timeline}\n\nReview the estimate, timeline, and notes so you can price the job and move the project forward.\n\nBest regards,\nThe Craftsman AI Team"
-            
+
             result = await EmailService._send_via_zeptomail(
                 to_email=to,
                 subject=subject,
                 html_content=html_content,
                 text_body=text_body
             )
-            
+
             if result["success"]:
                 logger.info(f"Successfully sent quote submitted email to {to}")
-                EmailService._update_email_log_status(
-                    log_id=log_id,
-                    status=EmailStatus.SENT,
-                    smtp_response=result["message"]
-                )
+                # If initial log creation failed, create a fallback SENT log
+                if not log_id:
+                    log_id = EmailService._create_sent_email_log_fallback(
+                        to_email=to,
+                        template_name="quote_submitted_template/quote_submitted",
+                        subject=subject,
+                        variables={"retailer_name": retailer_name, "manufacturer_name": manufacturer_name, "design_number": design_number, "estimated_cost": estimated_cost, "production_timeline": production_timeline, "quote_url": quote_url, "render_image_url": render_image_url},
+                        smtp_response=result["message"]
+                    )
+                else:
+                    EmailService._update_email_log_status(
+                        log_id=log_id,
+                        status=EmailStatus.SENT,
+                        smtp_response=result["message"]
+                    )
             else:
                 raise Exception(result["message"])
-            
+
         except Exception as e:
             logger.error(f"Failed to send quote submitted email to {to}: {str(e)}")
             EmailService._update_email_log_status(
@@ -939,9 +1126,9 @@ Message:
         )
         try:
             logger.info(f"SENDING SUBSCRIPTION CANCELLATION: To={to}, Plan={plan_name}")
-            
+
             subject = "Your CraftsmanAI subscription has been cancelled"
-            
+
             html_content = await render_template(
                 "subscription_cancelled_email_template/subscription_cancelled",
                 context={
@@ -952,26 +1139,36 @@ Message:
                     "manage_billing_url": manage_billing_url
                 }
             )
-            
+
             text_body = f"Hi {user_name},\n\nYour {plan_name} subscription has been cancelled.\n\nPlan: {plan_name}\nAccess Until: {access_end_date}\nCancellation Date: {cancellation_date}\nStatus: Cancelled\n\nYou can manage your billing here: {manage_billing_url}\n\nBest regards,\nThe Craftsman AI Team"
-            
+
             result = await EmailService._send_via_zeptomail(
                 to_email=to,
                 subject=subject,
                 html_content=html_content,
                 text_body=text_body
             )
-            
+
             if result["success"]:
                 logger.info(f"Successfully sent subscription cancellation confirmation to {to}")
-                EmailService._update_email_log_status(
-                    log_id=log_id,
-                    status=EmailStatus.SENT,
-                    smtp_response=result["message"]
-                )
+                # If initial log creation failed, create a fallback SENT log
+                if not log_id:
+                    log_id = EmailService._create_sent_email_log_fallback(
+                        to_email=to,
+                        template_name="subscription_cancelled_email_template/subscription_cancelled",
+                        subject=subject,
+                        variables={"user_name": user_name, "plan_name": plan_name, "access_end_date": access_end_date, "cancellation_date": cancellation_date, "manage_billing_url": manage_billing_url},
+                        smtp_response=result["message"]
+                    )
+                else:
+                    EmailService._update_email_log_status(
+                        log_id=log_id,
+                        status=EmailStatus.SENT,
+                        smtp_response=result["message"]
+                    )
             else:
                 raise Exception(result["message"])
-            
+
         except Exception as e:
             logger.error(f"Failed to send subscription cancellation confirmation to {to}: {str(e)}")
             EmailService._update_email_log_status(

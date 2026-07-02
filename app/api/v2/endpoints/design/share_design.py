@@ -246,6 +246,7 @@ def share_design_variant(
             "Design is already shared with another customer.",
             "Design already rejected by customer",
             "This design already has a shared variant.",
+            "This variant is already shared with another customer.",
         ]:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

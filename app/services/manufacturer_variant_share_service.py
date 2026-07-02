@@ -170,11 +170,11 @@ class DesignVariantManufacturerShareService:
                 if order.status == OrderStatus.CREATED:
                     self.order_repo.update_status(order, status=OrderStatus.QUOTED)
             
-            # Also update the customer share if one exists
-            shares = self.design_share_repo.list_for_design_variant(share.design_variant_id)
-            if shares:
-                from app.models.design import DesignShareStatus
-                self.design_share_repo.update_status(shares[0], status=DesignShareStatus.Quoted)
+            # Note: Do NOT update the customer share status here.
+            # The customer share (DesignShare) has its own lifecycle:
+            # PENDING -> ACCEPTED/REJECTED/NEEDS_REFINEMENT
+            # Manufacturer quote submission should NOT overwrite the customer's
+            # ACCEPTED status with QUOTED. These are separate workflows.
 
         # Update the parent Design status to QUOTE_RECEIVED
         if variant and variant.design:
