@@ -37,6 +37,13 @@ def get_customer(
     customer = service.get_customer(customer_id)
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
+    
+    # Security check: verify the customer belongs to the current user
+    if customer.created_by_user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this customer",
+        )
 
     # 1. Fetch design shares linked to this customer
     shares = db.query(DesignShare).filter(DesignShare.customer_id == customer.id).all()

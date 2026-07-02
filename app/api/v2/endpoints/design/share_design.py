@@ -179,6 +179,12 @@ def share_design_variant(
         # Resend notification to the existing customer
         share = existing_shares[0]
         if share.customer:
+            # Security check: verify the existing customer belongs to the current user
+            if share.customer.created_by_user_id != current_user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You do not have permission to send notifications to this customer",
+                )
             from app.core.config import settings
             preview_url = f"{settings.FRONTEND_URL}/customer/review/{share.public_token}"
             _send_customer_notifications(
@@ -206,6 +212,16 @@ def share_design_variant(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid customer",
         )
+    
+    # Security check: verify the customer belongs to the current user
+    # Check both direct user_id ownership and team ownership
+    if customer.created_by_user_id != current_user.id:
+        # For team members, also check if the team owner owns this customer
+        if not (current_user.is_team_member and current_user.team_owner_id and customer.created_by_user_id == current_user.team_owner_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to share with this customer",
+            )
 
     # Normalize metal to lowercase for consistent lookup
     metal = payload.metal.lower() if payload.metal else None
@@ -275,20 +291,38 @@ def update_share_variant(
     variant_service = DesignVariantService(db)
     sharing_service = DesignSharingService(db)
 
+    # Find the share by token FIRST
+    share = sharing_service.get_by_token(share_token)
+    if not share:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+
+    # SECURITY FIX (Share Hijack): Verify the current user owns the share's
+    # ORIGINAL design before allowing any update. This prevents an attacker
+    # from repointing a share they don't own to their own variant.
+    original_variant = variant_service.get_variant(share.design_variant_id)
+    if not original_variant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original variant not found")
+
+    original_design = design_service.get_design_for_team_member(
+        design_id=original_variant.design_id, user=current_user
+    )
+    if not original_design:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to update this share",
+        )
+
     # Verify the new variant exists
     new_variant = variant_service.get_variant(payload.design_variant_id)
     if not new_variant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="New variant not found")
 
-    # Verify the user owns the design
-    design = design_service.get_design_for_team_member(design_id=new_variant.design_id, user=current_user)
-    if not design:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
-
-    # Find the share by token
-    share = sharing_service.get_by_token(share_token)
-    if not share:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+    # Verify the user owns the new variant's design as well
+    new_design = design_service.get_design_for_team_member(
+        design_id=new_variant.design_id, user=current_user
+    )
+    if not new_design:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found for new variant")
 
     # Update the variant reference
     updated = sharing_service.update_variant(

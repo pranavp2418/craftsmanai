@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 from app.models.design import Design, DesignShare, DesignShareStatus, DesignStatus
+from app.repositories.customer import CustomerRepository
 from app.repositories.design import DesignRepository
 from app.repositories.design_share import DesignShareRepository
 from app.repositories.activity_log import DesignActivityLogRepository
@@ -20,6 +21,7 @@ class DesignSharingService:
         self.share_repo = DesignShareRepository(db)
         self.activity_repo = DesignActivityLogRepository(db)
         self.variant_repo = DesignVariantRepository(db)
+        self.customer_repo = CustomerRepository(db)
 
     def _token(self) -> str:
         return secrets.token_urlsafe(18)
@@ -39,6 +41,14 @@ class DesignSharingService:
         variant = self.variant_repo.get_by_id(design_variant_id)
         if not variant:
             raise ValueError(f"DesignVariant with id {design_variant_id} not found")
+
+        # Defense-in-depth: verify the customer exists and belongs to the same user as the design
+        if customer_id is not None:
+            customer = self.customer_repo.get_by_id(customer_id)
+            if not customer:
+                raise ValueError(f"Customer with id {customer_id} not found")
+            if not customer.is_active:
+                raise ValueError("Invalid customer")
 
         # Check if the design is already shared with another customer
         if customer_id is not None:

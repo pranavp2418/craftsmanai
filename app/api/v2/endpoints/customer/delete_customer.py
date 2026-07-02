@@ -18,5 +18,12 @@ def delete_customer(
     customer = service.get_customer(customer_id)
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
+    
+    # Security check: verify the customer belongs to the current user
+    if customer.created_by_user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to delete this customer",
+        )
         
     return service.delete_customer(customer)
