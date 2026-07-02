@@ -16,6 +16,49 @@ def split_full_name(full_name: str | None) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
+def get_subscription_status(db: Session, user: User) -> tuple[bool, bool, str | None]:
+    from app.services.subscription_service import SubscriptionService
+    from app.models.subscription import UserSubscription, SubscriptionStatus, SubscriptionPlan
+    from datetime import datetime, timezone
+
+    owner_id = SubscriptionService.get_subscription_owner_id(user)
+    now = datetime.now(timezone.utc)
+    
+    subscription = db.query(UserSubscription).filter(
+        UserSubscription.user_id == owner_id,
+        UserSubscription.is_queued == False
+    ).order_by(UserSubscription.created_at.desc()).first()
+
+    subscription = SubscriptionService.check_and_update_subscription_expiry(db, subscription)
+
+    if not subscription:
+        return True, False, None
+
+    is_active_status = subscription.status == SubscriptionStatus.ACTIVE
+    is_cancelled_but_active = (subscription.status == SubscriptionStatus.CANCELLED) and (subscription.end_date >= now)
+    is_active_sub = is_active_status or is_cancelled_but_active
+
+    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
+    plan_name = plan.name if plan else None
+
+    if is_active_sub:
+        plan_expired = False
+        if plan and plan.has_unlimited_renders:
+            token_exhausted = False
+        else:
+            limit = subscription.initial_monthly_renders
+            used = subscription.used_monthly_renders or 0
+            if limit != -1 and used >= limit:
+                token_exhausted = True
+            else:
+                token_exhausted = False
+    else:
+        plan_expired = True
+        token_exhausted = False
+
+    return plan_expired, token_exhausted, plan_name
+
+
 @router.put("/", response_model=UserProfileResponse)
 def update_user_profile(
     *,
@@ -71,6 +114,8 @@ def update_user_profile(
     final_first, final_last = split_full_name(current_user.full_name)
     role = "Admin" if current_user.is_superuser else "User"
 
+    plan_expired, token_exhausted, plan_name = get_subscription_status(db, current_user)
+
     return UserProfileResponse(
         id=current_user.id,
         email=current_user.email,
@@ -84,7 +129,10 @@ def update_user_profile(
         is_verified=current_user.is_verified,
         is_superuser=current_user.is_superuser,
         business_name=current_user.business_name,
-        role=role
+        role=role,
+        plan_expired=plan_expired,
+        token_exhausted=token_exhausted,
+        plan_name=plan_name
     )
 
 
@@ -123,6 +171,8 @@ async def update_profile_picture(
     final_first, final_last = split_full_name(current_user.full_name)
     role = "Admin" if current_user.is_superuser else "User"
 
+    plan_expired, token_exhausted, plan_name = get_subscription_status(db, current_user)
+
     return UserProfileResponse(
         id=current_user.id,
         email=current_user.email,
@@ -136,5 +186,8 @@ async def update_profile_picture(
         is_verified=current_user.is_verified,
         is_superuser=current_user.is_superuser,
         business_name=current_user.business_name,
-        role=role
+        role=role,
+        plan_expired=plan_expired,
+        token_exhausted=token_exhausted,
+        plan_name=plan_name
     )
