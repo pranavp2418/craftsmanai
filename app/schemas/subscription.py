@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import datetime
 from pydantic import BaseModel, UUID4, ConfigDict
 from decimal import Decimal
@@ -7,12 +7,12 @@ from decimal import Decimal
 class SubscriptionPlanBase(BaseModel):
     name: str
     description: Optional[str] = None
-    price: Optional[Decimal] = None
-    monthly_price: Optional[Decimal] = None
+    price: Optional[Union[Decimal, str]] = None
+    monthly_price: Optional[Union[Decimal, str]] = None
     duration_days: Optional[int] = None
     is_active: bool = True
     is_most_popular: bool = False
-    monthly_renders: int = -1
+    monthly_renders: Union[int, str] = -1
     feature_points: Optional[List[str]] = None
     # Feature flags
     can_use_logo: bool = False

@@ -44,7 +44,7 @@ def get_brand_settings(
     # Convert to dict and add feature flags
     result = {
         "user_id": setting.user_id,
-        "brand_name": setting.brand_name,
+        "brand_name": setting.brand_name if can_use_brand_name else "CraftsmnaAI",
         "logo_url": setting.logo_url,
         "business_email": setting.business_email,
         "phone_number": setting.phone_number,

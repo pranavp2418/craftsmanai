@@ -227,7 +227,7 @@ def get_active_topup_users(
                 UserSubscription.status == SubscriptionStatus.ACTIVE,
                 (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= now)
             ),
-            text("user_subscriptions.active_topups IS NOT NULL AND user_subscriptions.active_topups != '[]'::jsonb")
+            text("user_subscriptions.active_topups IS NOT NULL AND user_subscriptions.active_topups::jsonb != '[]'::jsonb")
         )
     )
 

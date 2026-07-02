@@ -206,23 +206,18 @@ def create_topup_checkout_session(
         checkout_session = stripe.checkout.Session.create(
             customer=stripe_customer_id,
             payment_method_types=['card'],
-            payment_method_collection='if_required',
             line_items=[{
                 'price_data': {
                     'currency': 'usd',
                     'unit_amount': stripe_amount,
                     'product_data': {
                         'name': f"Topup Pack - {topup_pack.renders} Renders",
-                        'description': f"Adds recurring {topup_pack.renders} renders to your monthly subscription allowance."
-                    },
-                    'recurring': {
-                        'interval': 'month',
-                        'interval_count': 1
+                        'description': f"Adds {topup_pack.renders} renders to your monthly subscription allowance."
                     }
                 },
                 'quantity': 1,
             }],
-            mode='subscription',
+            mode='payment',
             success_url=f"{settings.FRONTEND_URL}/payment-success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{settings.FRONTEND_URL}/payment-failed",
             metadata={
@@ -938,14 +933,41 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                         
                         lines = invoice.get('lines', {}).get('data', [])
                         next_renewal = None
+                        period_start = None
+                        period_end = None
                         if lines:
-                            next_renewal_ts = lines[0].get('period', {}).get('end')
+                            period_data = lines[0].get('period', {})
+                            next_renewal_ts = period_data.get('end')
+                            start_ts = period_data.get('start')
                             if next_renewal_ts:
                                 next_renewal = datetime.fromtimestamp(next_renewal_ts, timezone.utc).strftime("%B %d, %Y")
+                                period_end = datetime.fromtimestamp(next_renewal_ts, timezone.utc)
+                            if start_ts:
+                                period_start = datetime.fromtimestamp(start_ts, timezone.utc)
                         
                         if not next_renewal:
-                            next_renewal = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%B %d, %Y")
+                            period_end = datetime.now(timezone.utc) + timedelta(days=30)
+                            period_start = datetime.now(timezone.utc)
+                            next_renewal = period_end.strftime("%B %d, %Y")
                             
+                        # Update subscription dates and reset usage/topups for the new cycle
+                        sub.start_date = period_start or sub.start_date
+                        sub.end_date = period_end or sub.end_date
+                        sub.used_monthly_renders = 0
+                        sub.renders_added = 0
+                        sub.active_topups = []
+                        sub.topup_plan_id = None
+                        sub.initial_monthly_renders = plan.monthly_renders if plan.monthly_renders != -1 else 999999
+                        
+                        # Mark UserTopup records as expired
+                        from app.models.subscription import UserTopup
+                        db.query(UserTopup).filter(
+                            UserTopup.user_subscription_id == sub.id,
+                            UserTopup.status == "active"
+                        ).update({"status": "expired"})
+                        
+                        db.commit()
+                        
                         invoice_url = invoice.get('hosted_invoice_url') or f"{settings.FRONTEND_URL}/retailer/settings"
                         
                         from app.tasks.email_tasks import send_subscription_renewal_confirmation_email
@@ -1060,6 +1082,23 @@ def reset_monthly_tokens(
             reset_date = sub.start_date
             if now.month != reset_date.month or now.year != reset_date.year:
                 sub.used_monthly_renders = 0
+                sub.start_date = now
+                sub.renders_added = 0
+                sub.active_topups = []
+                sub.topup_plan_id = None
+                
+                # Fetch plan to restore initial renders
+                plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == sub.plan_id).first()
+                if plan:
+                    sub.initial_monthly_renders = plan.monthly_renders if plan.monthly_renders != -1 else 999999
+                
+                # Mark UserTopup records as expired
+                from app.models.subscription import UserTopup
+                db.query(UserTopup).filter(
+                    UserTopup.user_subscription_id == sub.id,
+                    UserTopup.status == "active"
+                ).update({"status": "expired"})
+                
                 reset_count += 1
                 
         db.commit()

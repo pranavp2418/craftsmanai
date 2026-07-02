@@ -20,6 +20,9 @@ class UserProfileResponse(BaseModel):
     is_verified: bool
     is_superuser: bool
     role: str
+    plan_expired: bool
+    token_exhausted: bool
+    plan_name: Optional[str] = None
 
     class Config:
         from_attributes = True

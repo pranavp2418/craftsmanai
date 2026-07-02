@@ -157,4 +157,22 @@ class DesignVariantService:
             message=message or f"Variant {variant.variant_name} deleted",
             metadata={"variant_id": variant.id, "is_deleted": True},
         )
+        
+        # Check if there are any remaining active (non-deleted) variants for this design
+        from app.models.design import Design
+        remaining_count = self.db.query(DesignVariant).filter(
+            DesignVariant.design_id == variant.design_id,
+            DesignVariant.is_deleted.is_(False)
+        ).count()
+        
+        if remaining_count == 0:
+            self.db.query(Design).filter(Design.id == variant.design_id).update({Design.is_deleted: True})
+            self.activity_repo.log(
+                design_id=variant.design_id,
+                action_type="DESIGN_DELETED",
+                message="Parent design deleted because its last variant was deleted",
+                metadata={"last_deleted_variant_id": variant.id}
+            )
+            self.db.commit()
+            
         return deleted

@@ -28,6 +28,22 @@ class SubscriptionService:
                 subscription.status = SubscriptionStatus.EXPIRED if not subscription.cancellation_date else SubscriptionStatus.CANCELLED
                 db.commit()
                 db.refresh(subscription)
+                
+                # Publish subscription.expired event only if it actually became EXPIRED (not CANCELLED)
+                if subscription.status == SubscriptionStatus.EXPIRED:
+                    try:
+                        from app.services.sse_service import sse_service
+                        sse_service.publish(
+                            channel=f"user:{subscription.user_id}",
+                            event="subscription.expired",
+                            data={
+                                "user_id": subscription.user_id,
+                                "status": subscription.status,
+                                "message": "Your subscription has expired. Please renew to continue."
+                            }
+                        )
+                    except Exception as sse_err:
+                        logger.error(f"Failed to publish subscription expiration SSE event: {sse_err}")
             return None
         return subscription
 
@@ -111,6 +127,23 @@ class SubscriptionService:
                 f"Successfully deducted {tokens_to_deduct} tokens for user {user.id} (owner {owner_id}). "
                 f"New usage: {subscription.used_monthly_renders}/{limit if limit != -1 else 'Unlimited'}"
             )
+            
+            # Post-deduction limit exhaustion check: notify if they have now used all renders
+            if limit != -1 and subscription.used_monthly_renders >= limit:
+                try:
+                    from app.services.sse_service import sse_service
+                    sse_service.publish(
+                        channel=f"user:{owner_id}",
+                        event="subscription.credits_exhausted",
+                        data={
+                            "user_id": owner_id,
+                            "limit": limit,
+                            "used": subscription.used_monthly_renders,
+                            "message": "Your renders are all used. Please purchase a top-up or upgrade."
+                        }
+                    )
+                except Exception as sse_err:
+                    logger.error(f"Failed to publish credits exhausted SSE event post-deduction: {sse_err}")
         except HTTPException:
             raise
         except Exception as e:

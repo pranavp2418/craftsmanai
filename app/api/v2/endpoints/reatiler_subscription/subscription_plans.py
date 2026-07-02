@@ -37,7 +37,11 @@ def read_subscription_plans(
         UserSubscription.user_id == current_user.id
     ).first() is not None
 
-    query = select(SubscriptionPlan).where(SubscriptionPlan.is_active == True)
+    # Query normal plans excluding the 'Custom' plan
+    query = select(SubscriptionPlan).where(
+        SubscriptionPlan.is_active == True,
+        SubscriptionPlan.name != 'Custom'
+    )
     
     if has_any_sub:
         # Exclude trial plans for existing users
@@ -53,7 +57,24 @@ def read_subscription_plans(
 
     query = query.offset(skip).limit(limit)
     plans = db.execute(query).scalars().all()
-    return plans
+    
+    # Map regular plans to response schema
+    plans_list = [SubscriptionPlanSchema.model_validate(p) for p in plans]
+
+    # Query and always append the 'Custom' plan if it exists
+    custom_db_plan = db.query(SubscriptionPlan).filter(
+        SubscriptionPlan.name == 'Custom',
+        SubscriptionPlan.is_active == True
+    ).first()
+
+    if custom_db_plan:
+        custom_schema = SubscriptionPlanSchema.model_validate(custom_db_plan)
+        custom_schema.price = "Contact Sales"
+        custom_schema.monthly_price = "Contact Sales"
+        custom_schema.monthly_renders = "Custom"
+        plans_list.append(custom_schema)
+
+    return plans_list
 
 
 @router.get("/topup-packs")

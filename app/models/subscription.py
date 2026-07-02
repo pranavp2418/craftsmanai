@@ -169,7 +169,7 @@ class UserTopup(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     user_subscription_id = Column(UUID(as_uuid=True), ForeignKey("user_subscriptions.id", ondelete="CASCADE"), nullable=False, index=True)
     topup_pack_id = Column(UUID(as_uuid=True), ForeignKey("topup_packs.id", ondelete="SET NULL"), nullable=True, index=True)
-    stripe_subscription_id = Column(String, nullable=True, unique=True, index=True)
+    stripe_subscription_id = Column(String, nullable=True, unique=False, index=True)
     status = Column(String, default="active", nullable=False, index=True)  # active, cancelled, expired, past_due
     renders = Column(Integer, nullable=False, default=0)
     price = Column(Numeric(10, 2), nullable=False)

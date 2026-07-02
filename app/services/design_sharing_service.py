@@ -49,7 +49,12 @@ class DesignSharingService:
                 raise ValueError(f"Customer with id {customer_id} not found")
             if not customer.is_active:
                 raise ValueError("Invalid customer")
+            # Verify the customer belongs to the same user who owns the design
 
+            if customer.created_by_user_id != variant.design.user_id:
+
+                raise ValueError("You do not have permission to share with this customer")
+ 
         # Check if the design is already shared with another customer
         if customer_id is not None:
             customer_shares = self.share_repo.get_customer_shares_for_design(variant.design_id)
@@ -87,7 +92,31 @@ class DesignSharingService:
         # Check if any variant of this design has already been shared
         all_design_shares = self.share_repo.get_customer_shares_for_design(variant.design_id)
         if all_design_shares:
-            raise ValueError("This design already has a shared variant.")
+            existing_share = all_design_shares[0]
+            if (
+                customer_id is not None
+                and existing_share.customer_id == customer_id
+                and existing_share.status == DesignShareStatus.NEEDS_REFINEMENT
+            ):
+                # Update the existing share to point to the new variant
+                existing_share.design_variant_id = design_variant_id
+                existing_share.status = DesignShareStatus.PENDING
+                existing_share.shared_metal = shared_metal
+                existing_share.shared_angles = shared_angles
+                existing_share.comment = comment
+                self.db.add(existing_share)
+                self.db.commit()
+                self.db.refresh(existing_share)
+
+                self.activity_repo.log(
+                    design_id=variant.design_id,
+                    action_type="VARIANT_UPDATED_ON_SHARE",
+                    message=f"Share {existing_share.id} updated to variant {design_variant_id} (refinement complete)",
+                    metadata={"share_id": existing_share.id, "new_variant_id": design_variant_id, "customer_id": customer_id},
+                )
+                return existing_share
+            else:
+                raise ValueError("This design already has a shared variant.")
 
         share = self.share_repo.create_share(
             design_variant_id=design_variant_id,
