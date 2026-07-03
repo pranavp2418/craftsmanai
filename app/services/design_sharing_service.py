@@ -316,6 +316,19 @@ class DesignSharingService:
                         brand_setting = brand_repo.get_by_user_id(recipient_user_id)
                         retailer_name = brand_setting.brand_name if brand_setting else (recipient_user.full_name or recipient_user.username)
                         
+                        # Check subscription plan feature flags
+                        from app.models.subscription import UserSubscription, SubscriptionStatus
+                        active_subscription = self.db.query(UserSubscription).filter(
+                            UserSubscription.user_id == recipient_user_id,
+                            UserSubscription.status == SubscriptionStatus.ACTIVE
+                        ).first()
+                        
+                        # Only use custom brand color if subscription allows it
+                        if active_subscription and active_subscription.plan and active_subscription.plan.can_use_custom_color:
+                            brand_primary_color = brand_setting.primary_color if brand_setting else "#6366F1"
+                        else:
+                            brand_primary_color = "#6366F1"  # Default color
+                        
                         # Map status to action string
                         action_map = {
                             DesignShareStatus.ACCEPTED: "approved",
@@ -338,6 +351,7 @@ class DesignSharingService:
                                 version_label=f"Version {variant.version_number}" if variant and variant.version_number else None,
                                 render_image_url=variant.base_design_image_url if variant else None,
                                 brand_logo_url=brand_setting.logo_url if brand_setting else None,
+                                brand_primary_color=brand_primary_color,
                                 comment=comment,
                             )
                             logger.info(

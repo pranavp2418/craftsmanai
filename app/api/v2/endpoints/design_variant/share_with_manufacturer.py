@@ -243,16 +243,34 @@ def share_variant_with_manufacturer(
                 brand_repo = BrandSettingRepository(db)
                 brand_setting = brand_repo.get_by_user_id(current_user.id)
                 
-                retailer_name = brand_setting.brand_name if brand_setting else (current_user.full_name or current_user.username)
+                # Determine retailer name: brand_name > business_name > full_name > username
+                retailer_name = (
+                    brand_setting.brand_name if brand_setting and brand_setting.brand_name
+                    else current_user.business_name
+                    or current_user.full_name
+                    or current_user.username
+                )
                 render_image_url = variant.base_design_image_url or ""
                 jewelry_type = design.jewellery_type or "Custom Jewelry"
                 metal = shared_metal or "Not specified"
                 
-                # Determine brand logo based on subscription plan
-                # Pro plan users get their brand logo; Starter plan users get the default CraftsmanAI logo
+                # Determine brand logo and color based on subscription plan feature flags
                 brand_logo_url = None
-                if current_user.subscription_plan and current_user.subscription_plan.lower() == "pro":
-                    brand_logo_url = brand_setting.logo_url if brand_setting else None
+                brand_primary_color = "#6366F1"  # Default color
+                from app.models.subscription import UserSubscription, SubscriptionStatus
+                active_subscription = db.query(UserSubscription).filter(
+                    UserSubscription.user_id == current_user.id,
+                    UserSubscription.status == SubscriptionStatus.ACTIVE
+                ).first()
+                
+                # Only use custom brand color if subscription allows it
+                if active_subscription and active_subscription.plan:
+                    if active_subscription.plan.can_use_logo:
+                        if brand_setting and brand_setting.logo_url:
+                            brand_logo_url = brand_setting.logo_url
+                    if active_subscription.plan.can_use_custom_color:
+                        if brand_setting and brand_setting.primary_color:
+                            brand_primary_color = brand_setting.primary_color
                 
                 # Send email to each recipient
                 for email in emails_to_send:
@@ -267,7 +285,7 @@ def share_variant_with_manufacturer(
                         jewelry_type=jewelry_type,
                         metal=metal,
                         brand_logo_url=brand_logo_url,
-                        brand_primary_color=brand_setting.primary_color
+                        brand_primary_color=brand_primary_color
                     )
                 
             if hasattr(manufacturer, 'phone_number') and manufacturer.phone_number:

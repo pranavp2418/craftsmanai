@@ -415,6 +415,7 @@ class EmailService:
             # Render the manufacturer_design_share template
             context = {
                 "manufacturer_name": manufacturer_name,
+                "retailer_name": retailer_name or designer_name,
                 "design_number": design_code or "",
                 "jewelry_type": jewelry_type or "Custom Jewelry",
                 "metal_spec": metal or "Not specified",
@@ -592,6 +593,7 @@ Message:
         version_label: str = None,
         render_image_url: str = None,
         brand_logo_url: str = None,
+        brand_primary_color: str = None,
         comment: str = None,
     ):
         """
@@ -640,6 +642,7 @@ Message:
                 "version_label": version_label,
                 "render_image_url": render_image_url,
                 "brand_logo_url": brand_logo_url,
+                "brand_primary_color": brand_primary_color,
                 "comment": comment,
             }
         )
@@ -658,6 +661,7 @@ Message:
                 "jewelry_type": jewelry_type or "Custom Jewelry",
                 "version_label": version_label or "Version 1",
                 "brand_logo_url": brand_logo_url or "",
+                "brand_primary_color": brand_primary_color or "#6366F1",
                 "comment": comment or "",
                 "dashboard_url": "#",
             }
@@ -709,6 +713,7 @@ Message:
                             "version_label": version_label,
                             "render_image_url": render_image_url,
                             "brand_logo_url": brand_logo_url,
+                            "brand_primary_color": brand_primary_color,
                             "comment": comment,
                         },
                         smtp_response=result["message"]

@@ -811,7 +811,7 @@ def send_manufacturer_share_email(self, to_email: str, manufacturer_name: str, p
         import asyncio
         loop = asyncio.new_event_loop()
         loop.run_until_complete(
-            EmailService.send_manufacturer_share(to_email, manufacturer_name, preview_url, designer_name, retailer_name, render_image_url, design_code, jewelry_type, metal, brand_logo_url)
+            EmailService.send_manufacturer_share(to_email, manufacturer_name, preview_url, designer_name, retailer_name, render_image_url, design_code, jewelry_type, metal, brand_logo_url, brand_primary_color)
         )
         
         logger.info(f"✅ {task_name} completed successfully for {to_email}")
@@ -840,6 +840,7 @@ def send_customer_action_email_task(
     version_label: str = None,
     render_image_url: str = None,
     brand_logo_url: str = None,
+    brand_primary_color: str = None,
     comment: str = None,
 ):
     """
@@ -873,6 +874,7 @@ def send_customer_action_email_task(
                 version_label=version_label,
                 render_image_url=render_image_url,
                 brand_logo_url=brand_logo_url,
+                brand_primary_color=brand_primary_color,
                 comment=comment,
             )
         )

@@ -84,7 +84,27 @@ def _send_customer_notifications(
     customer_name = customer.full_name or "Customer"
     designer_name = current_user.full_name or current_user.username
     design_code = design.design_code
-    brand_primary_color = brand_setting.primary_color if brand_setting else "#6366F1"
+    
+    # Check if user has an active subscription with can_use_custom_color feature
+    from app.models.subscription import UserSubscription, SubscriptionStatus
+    active_subscription = db.query(UserSubscription).filter(
+        UserSubscription.user_id == current_user.id,
+        UserSubscription.status == SubscriptionStatus.ACTIVE
+    ).first()
+    
+    # Only use custom brand color if subscription allows it
+    if active_subscription and active_subscription.plan and active_subscription.plan.can_use_custom_color:
+        brand_primary_color = brand_setting.primary_color if brand_setting else "#6366F1"
+    else:
+        brand_primary_color = "#6366F1"  # Default color
+    
+    # Determine retailer name: brand_name > business_name > full_name > username
+    retailer_name = (
+        brand_setting.brand_name if brand_setting and brand_setting.brand_name
+        else current_user.business_name
+        or current_user.full_name
+        or current_user.username
+    )
 
     # --- Email ---
     if customer and hasattr(customer, 'emails') and customer.emails:
@@ -107,8 +127,15 @@ def _send_customer_notifications(
             version_label = f"Version {variant.version_number}" if variant.version_number else "Version 1"
 
             brand_logo_url = None
-            if current_user.subscription_plan and current_user.subscription_plan.lower() == "pro":
-                brand_logo_url = brand_setting.logo_url if brand_setting else None
+            # Check if user has an active subscription with can_use_logo feature AND has a logo set
+            from app.models.subscription import UserSubscription, SubscriptionStatus
+            active_subscription = db.query(UserSubscription).filter(
+                UserSubscription.user_id == current_user.id,
+                UserSubscription.status == SubscriptionStatus.ACTIVE
+            ).first()
+            if active_subscription and active_subscription.plan and active_subscription.plan.can_use_logo:
+                if brand_setting and brand_setting.logo_url:
+                    brand_logo_url = brand_setting.logo_url
 
             send_customer_share_email.delay(
                 to_email=primary_email,
