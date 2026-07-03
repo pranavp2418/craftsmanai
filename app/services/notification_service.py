@@ -77,9 +77,21 @@ class NotificationService:
         )
 
         # 2. Attempt real-time push via WebSocket (fire-and-forget)
-        self._push_ws(user_id, db_notification)
+        try:
+            from app.models.settings import SystemSettings
+            system_settings = self.db.query(SystemSettings).first()
+            in_app_enabled = system_settings.in_app_notifications if system_settings else True
+        except Exception as se_err:
+            logger.error("Error checking in_app_notifications setting: %s", se_err)
+            in_app_enabled = True
+
+        if in_app_enabled:
+            self._push_ws(user_id, db_notification)
+        else:
+            logger.info("Real-time push via WebSocket skipped for user_id=%s because in_app_notifications is disabled", user_id)
 
         return db_notification
+
 
     def _push_ws(self, user_id: int, notification: NotificationResponse) -> None:
         """
@@ -198,6 +210,19 @@ class NotificationService:
 
         Returns the number of flushed notifications.
         """
+        # Check if in-app notifications are enabled
+        try:
+            from app.models.settings import SystemSettings
+            system_settings = db.query(SystemSettings).first()
+            if system_settings and not system_settings.in_app_notifications:
+                logger.info("Flushing pending notifications skipped for user_id=%s because in_app_notifications is disabled", user_id)
+                # Mark all as read anyway so they don't pile up or show badge if they shouldn't
+                repo = NotificationRepository(db)
+                repo.mark_all_as_read(user_id)
+                return 0
+        except Exception as se_err:
+            logger.error("Error checking in_app_notifications setting in flush: %s", se_err)
+
         repo = NotificationRepository(db)
         recent_notifications = repo.get_by_user_id(user_id, limit=20)
 
