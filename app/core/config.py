@@ -135,7 +135,7 @@ class Settings(BaseSettings):
     
     # Frontend URL
     # FRONTEND_URL: str = "https://z296mjqz-3000.inc1.devtunnels.ms/"
-    FRONTEND_URL: str = "https://craftmenai.txogavideo.in/"
+    FRONTEND_URL: str = "https://craftsmanai.app/"
 
 
     # Web Push VAPID Keys

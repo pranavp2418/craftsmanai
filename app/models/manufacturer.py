@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -13,7 +13,7 @@ class Manufacturer(Base):
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     speciality = Column(String(255), nullable=True)
-    emails = Column(String(255), nullable=True)
+    emails = Column(Text, nullable=True)
     phone_number = Column(String(50), nullable=True)
     address = Column(String(500), nullable=True)
     location = Column(String(255), nullable=True)

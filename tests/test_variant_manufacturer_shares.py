@@ -65,7 +65,6 @@ def test_variant_manufacturer_shares_returns_design_status_and_manufacturers(
     manufacturer_one = manufacturer_repo.create_manufacturer(
         created_by_user_id=owner.id,
         name="North Star Manufacturing",
-        public_token=f"m-{uuid.uuid4().hex}",
         emails='[{"label":"Work","email":"northstar@example.com"}]',
         phone_number="+15550001",
         location="New York",
@@ -73,7 +72,6 @@ def test_variant_manufacturer_shares_returns_design_status_and_manufacturers(
     manufacturer_two = manufacturer_repo.create_manufacturer(
         created_by_user_id=owner.id,
         name="Aurora Jewels",
-        public_token=f"m-{uuid.uuid4().hex}",
         emails='[{"label":"Work","email":"aurora@example.com"}]',
         phone_number="+15550002",
         location="Los Angeles",
@@ -153,7 +151,6 @@ def test_share_with_manufacturer_returns_review_url_and_logs_metadata(
     manufacturer = manufacturer_repo.create_manufacturer(
         created_by_user_id=owner.id,
         name="North Star Manufacturing",
-        public_token=f"m-{uuid.uuid4().hex}",
         emails='[{"label":"Work","email":"northstar@example.com"}]',
         phone_number="+15550001",
         location="New York",
@@ -241,7 +238,6 @@ def test_share_with_manufacturer_sends_to_specified_emails(
     manufacturer = manufacturer_repo.create_manufacturer(
         created_by_user_id=owner.id,
         name="Multi Email Manufacturer",
-        public_token=f"m-{uuid.uuid4().hex}",
         emails='[{"label":"Work","email":"work@example.com"},{"label":"Personal","email":"personal@example.com"}]',
         phone_number="+15550001",
         location="New York",
@@ -277,12 +273,14 @@ def test_share_with_manufacturer_sends_to_specified_emails(
     assert share.sent_to_email == "work@example.com"  # First email in the list
 
 
-def test_resend_only_sends_to_accepted_shares(
+def test_resend_sends_to_pending_and_accepted_shares(
     client: TestClient,
     db_session: Session,
     create_verified_user,
 ):
-    """Test that resend API only sends to shares with ACCEPTED status."""
+    """Test that resend API sends to shares with both PENDING and ACCEPTED status."""
+    from unittest.mock import patch, MagicMock
+
     owner = create_verified_user(
         email=f"owner_{uuid.uuid4().hex[:8]}@example.com",
         username=f"owner_{uuid.uuid4().hex[:8]}",
@@ -323,7 +321,6 @@ def test_resend_only_sends_to_accepted_shares(
     manufacturer1 = manufacturer_repo.create_manufacturer(
         created_by_user_id=owner.id,
         name="Manufacturer 1",
-        public_token=f"m1-{uuid.uuid4().hex}",
         emails='[{"label":"Work","email":"m1@example.com"}]',
         phone_number="+15550001",
         location="New York",
@@ -331,7 +328,6 @@ def test_resend_only_sends_to_accepted_shares(
     manufacturer2 = manufacturer_repo.create_manufacturer(
         created_by_user_id=owner.id,
         name="Manufacturer 2",
-        public_token=f"m2-{uuid.uuid4().hex}",
         emails='[{"label":"Work","email":"m2@example.com"}]',
         phone_number="+15550002",
         location="Los Angeles",
@@ -346,7 +342,7 @@ def test_resend_only_sends_to_accepted_shares(
     )
     share1.status = "ACCEPTED"
     share1.sent_to_email = "m1@example.com"
-    
+
     share2 = share_service.create_share(
         design_variant_id=variant.id,
         manufacturer_id=manufacturer2.id,
@@ -354,25 +350,39 @@ def test_resend_only_sends_to_accepted_shares(
     )
     share2.status = "PENDING"
     share2.sent_to_email = "m2@example.com"
-    
+
     db_session.commit()
+
+    # Mock the Celery task to run synchronously
+    mock_task = MagicMock(return_value=MagicMock(id="test-task-id"))
 
     _override_user(client, owner)
     _override_db(client, db_session)
     try:
-        response = client.post(
-            f"/api/v2/design-variant/variants/{variant.id}/resend-manufacturer-emails",
-        )
+        with patch(
+            "app.api.v2.endpoints.design_variant.resend_manufacturer_emails.resend_manufacturer_share_email",
+            mock_task
+        ):
+            response = client.post(
+                f"/api/v2/design-variant/variants/{variant.id}/resend-manufacturer-emails",
+            )
     finally:
         client.app.dependency_overrides.clear()
 
     assert response.status_code == 202, response.text
     payload = response.json()
-    
-    # Only the ACCEPTED share should be queued
-    assert payload["total_shares"] == 1  # Only 1 accepted share
-    assert payload["queued_count"] == 1
+
+    # Both PENDING and ACCEPTED shares should be queued
+    assert payload["total_shares"] == 2  # Both shares
+    assert payload["queued_count"] == 2
     assert payload["skipped_count"] == 0
-    assert len(payload["items"]) == 1
-    assert payload["items"][0]["share_id"] == share1.id
-    assert payload["items"][0]["manufacturer_id"] == manufacturer1.id
+    assert len(payload["items"]) == 2
+
+    # Verify both shares are in the response
+    share_ids = {item["share_id"] for item in payload["items"]}
+    manufacturer_ids = {item["manufacturer_id"] for item in payload["items"]}
+    assert share_ids == {share1.id, share2.id}
+    assert manufacturer_ids == {manufacturer1.id, manufacturer2.id}
+
+    # Verify the Celery task was called for both shares
+    assert mock_task.delay.call_count == 2

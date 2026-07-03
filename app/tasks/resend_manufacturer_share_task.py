@@ -131,6 +131,15 @@ def resend_manufacturer_share_email(
             brand_setting.business_email if brand_setting else owner.email
         )
 
+        # Pre-compute brand values with safe defaults to avoid NPE
+        brand_logo_url = None
+        brand_primary_color = "#6366F1"  # Default color
+        if brand_setting:
+            if hasattr(brand_setting, 'logo_url') and brand_setting.logo_url:
+                brand_logo_url = brand_setting.logo_url
+            if hasattr(brand_setting, 'primary_color') and brand_setting.primary_color:
+                brand_primary_color = brand_setting.primary_color
+
         # ── 5. Build the review URL exactly like the original share flow
         share_service = DesignVariantManufacturerShareService(db)
         review_url = share_service.build_review_url(share)
@@ -160,22 +169,44 @@ def resend_manufacturer_share_email(
                 except (json.JSONDecodeError, TypeError, AttributeError):
                     primary_email = str(manufacturer.emails).split(",")[0].strip()
 
+        # ── 6.5. Check for duplicate sends (idempotency guard) ─────────
+        # If this share was already successfully resent in the last 5 minutes,
+        # skip sending to avoid duplicates from task retries
+        from datetime import timedelta
+        recent_successful_resend = (
+            db.query(EmailLog)
+            .filter(
+                EmailLog.template_name == "manufacturer_design_share_resend",
+                EmailLog.to_email == primary_email,
+                EmailLog.status == EmailStatus.SENT,
+                EmailLog.template_variables.like(f'%"share_id": {share_id}%'),
+                EmailLog.sent_at >= datetime.now(timezone.utc) - timedelta(minutes=5),
+            )
+            .first()
+        )
+        if recent_successful_resend:
+            logger.info(
+                f"✅ {task_name}: Skipping duplicate send for share_id={share_id} "
+                f"- already sent successfully at {recent_successful_resend.sent_at}"
+            )
+            return True
+
         render_image_url = variant.base_design_image_url or ""
         jewelry_type = design.jewellery_type or "Custom Jewelry"
         metal = share.shared_metal or "Not specified"
         designer_name = owner.full_name or owner.username
         design_code = design.design_code
         
-        # Determine brand logo based on subscription plan feature flag
-        brand_logo_url = None
+        # Override logo URL based on subscription plan feature flag
         from app.models.subscription import SubscriptionPlan
         plan_obj = None
         if hasattr(owner, 'subscriptions') and owner.subscriptions:
             active_sub = owner.subscriptions[0] if owner.subscriptions else None
             if active_sub and active_sub.plan_id:
                 plan_obj = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == active_sub.plan_id).first()
-        if plan_obj and plan_obj.can_use_logo:
-            brand_logo_url = brand_setting.logo_url if brand_setting else None
+        if not (plan_obj and plan_obj.can_use_logo):
+            # If plan doesn't allow logo, reset to None
+            brand_logo_url = None
 
         # ── 7. Log the resend in the email_logs table for traceability
         resend_log = EmailLog(
@@ -216,7 +247,7 @@ def resend_manufacturer_share_email(
                         jewelry_type=jewelry_type,
                         metal=metal,
                         brand_logo_url=brand_logo_url,
-                        brand_primary_color=brand_setting.primary_color if brand_setting else "#6366F1",
+                        brand_primary_color=brand_primary_color,
                     )
                 )
             finally:

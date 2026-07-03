@@ -207,7 +207,7 @@ async def verify_otp(
             send_welcome_email.delay(
                 to=user.email,
                 user_name=user.username or user.email,
-                dashboard_url="https://craftmenai.txogavideo.in/"
+                dashboard_url=settings.FRONTEND_URL
             )
             logger.info(f"Welcome email queued for {user.email}")
         except Exception as e:
