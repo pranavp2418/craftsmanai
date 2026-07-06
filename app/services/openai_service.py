@@ -2438,14 +2438,80 @@ def _border_avg_brightness(img: "Image.Image") -> float:
     return total / len(samples)
 
 
-def _whiten_background(image_bytes: bytes, tag: str = "bg") -> bytes:
-    """Replace a dark/colored background with pure white using a border flood-fill.
+def _remove_stray_bg_blobs(img: "Image.Image", tag: str = "bg") -> "Image.Image":
+    """Whiten small, isolated, desaturated gray patches left in the background.
 
-    Why flood-fill (not pixel thresholding): flood-fill starts from the image
-    BORDER and only spreads through CONNECTED background pixels. The centered
-    jewelry is never touched — even if it contains dark shadows or black accents —
-    because it is not connected to the border. This reliably produces a pure white
-    (#FFFFFF) background while fully preserving the design.
+    The border flood-fill only cleans backdrop pixels CONNECTED to an edge. Some
+    generated images carry a stray gray smudge/patch in the INTERIOR (a "dhabba"),
+    disconnected from the border, so the flood-fill never reaches it — and when the
+    border is already white the flood-fill is skipped entirely, leaving it untouched.
+
+    This pass labels every non-white connected region, keeps the main subject (the
+    largest region) and every substantial region, and repaints ONLY the small +
+    desaturated (gray/off-white) strays to pure white. Colored (gold/enamel) or
+    large elements are never touched, so the jewellery is fully preserved.
+    """
+    try:
+        import numpy as np
+        from scipy import ndimage
+
+        arr = np.array(img, dtype=np.uint8)   # copy (writable); asarray gives a read-only view
+        if arr.ndim != 3 or arr.shape[2] < 3:
+            return img
+        h, w = arr.shape[:2]
+        r = arr[:, :, 0].astype(np.int16)
+        g = arr[:, :, 1].astype(np.int16)
+        b = arr[:, :, 2].astype(np.int16)
+        mx = np.maximum(np.maximum(r, g), b)
+        mn = np.minimum(np.minimum(r, g), b)
+        sat = mx - mn                       # 0..255 chroma (0 = pure gray)
+
+        # "content" = anything that isn't near-pure-white background
+        content = mx < 236
+        if not content.any():
+            return img
+
+        labels, n = ndimage.label(content, structure=np.ones((3, 3), dtype=int))  # 8-connectivity
+        if n == 0:
+            return img
+        sizes = ndimage.sum(np.ones_like(labels), labels, index=np.arange(1, n + 1))
+        largest = int(np.argmax(sizes)) + 1          # main subject label (never removed)
+        img_area = float(h * w)
+
+        remove_mask = np.zeros((h, w), dtype=bool)
+        removed = 0
+        for lbl in range(1, n + 1):
+            if lbl == largest:
+                continue
+            comp = labels == lbl
+            area = float(comp.sum())
+            if area / img_area >= 0.02:              # substantial region → keep (could be a real part)
+                continue
+            if float(sat[comp].mean()) >= 35:        # colored element (gold/enamel/gem) → keep
+                continue
+            remove_mask |= comp                      # small + gray + isolated → a background smudge
+            removed += 1
+
+        if removed:
+            arr[remove_mask] = 255
+            logger.info("[%s] Removed %d stray gray background blob(s) → pure white", tag, removed)
+            return Image.fromarray(arr, "RGB")
+        return img
+    except Exception as e:
+        logger.warning("[%s] stray-blob removal skipped: %s", tag, e)
+        return img
+
+
+def _whiten_background(image_bytes: bytes, tag: str = "bg") -> bytes:
+    """Replace a dark/colored background with pure white and scrub stray patches.
+
+    Two passes:
+    1. Border flood-fill — starts from the image BORDER and only spreads through
+       CONNECTED background pixels, so the centered jewelry is never touched (even
+       its dark shadows/black accents), reliably yielding a pure white (#FFFFFF)
+       backdrop while fully preserving the design.
+    2. Stray-blob scrub — repaints small, isolated, desaturated gray patches in the
+       INTERIOR that the flood-fill can't reach (disconnected from the border).
 
     gpt-image-2's /images/edits endpoint copies the reference background color and
     its outputs sometimes carry a dark backdrop, so we run this on BOTH the input
@@ -2458,31 +2524,31 @@ def _whiten_background(image_bytes: bytes, tag: str = "bg") -> bytes:
         w, h = img.size
 
         avg_brightness = _border_avg_brightness(img)
-        if avg_brightness >= 215:
-            # Border is already essentially white — nothing to do
-            return image_bytes
+        if avg_brightness < 215:
+            logger.info("[%s] Non-white background detected (border brightness=%.0f) → flooding to white", tag, avg_brightness)
+            # Flood-fill from many border seed points so we catch the whole backdrop
+            # even if a piece of jewelry touches one edge. thresh controls how far the
+            # fill spreads from each seed's colour — generous enough to swallow shadows
+            # and gradients, but it still stops at the bright jewelry.
+            seeds = [
+                (1, 1), (w - 2, 1), (1, h - 2), (w - 2, h - 2),          # corners
+                (w // 2, 1), (w // 2, h - 2), (1, h // 2), (w - 2, h // 2),  # edge midpoints
+                (w // 4, 1), (3 * w // 4, 1), (w // 4, h - 2), (3 * w // 4, h - 2),
+            ]
+            for seed in seeds:
+                try:
+                    ImageDraw.floodfill(img, seed, (255, 255, 255), thresh=90)
+                except Exception:
+                    pass
+            logger.info("[%s] Background flooded to white", tag)
 
-        logger.info("[%s] Non-white background detected (border brightness=%.0f) → flooding to white", tag, avg_brightness)
-
-        # Flood-fill from many border seed points so we catch the whole backdrop
-        # even if a piece of jewelry touches one edge. thresh controls how far the
-        # fill spreads from each seed's colour — generous enough to swallow shadows
-        # and gradients, but it still stops at the bright jewelry.
-        seeds = [
-            (1, 1), (w - 2, 1), (1, h - 2), (w - 2, h - 2),          # corners
-            (w // 2, 1), (w // 2, h - 2), (1, h // 2), (w - 2, h // 2),  # edge midpoints
-            (w // 4, 1), (3 * w // 4, 1), (w // 4, h - 2), (3 * w // 4, h - 2),
-        ]
-        for seed in seeds:
-            try:
-                ImageDraw.floodfill(img, seed, (255, 255, 255), thresh=90)
-            except Exception:
-                pass
+        # Always scrub interior stray gray patches — the flood-fill (or the
+        # already-white border early-exit) leaves disconnected smudges behind.
+        img = _remove_stray_bg_blobs(img, tag=tag)
 
         buf = BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
-        logger.info("[%s] Background flooded to white", tag)
         return buf.getvalue()
 
     except Exception as e:
