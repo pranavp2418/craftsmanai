@@ -1064,7 +1064,7 @@ Message:
         from app.models.email_log import EmailStatus
         
         # Construct quote URL using FRONTEND_URL
-        quote_url = f"{settings.FRONTEND_URL}/designs/{design_id}" if design_id else f"{settings.FRONTEND_URL}/retailer"
+        quote_url = f"{settings.FRONTEND_URL}/retailer"
         
         log_id = EmailService._create_email_log(
             to_email=to,

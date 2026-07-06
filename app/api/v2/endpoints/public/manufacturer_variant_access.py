@@ -11,6 +11,7 @@ from app.schemas.manufacturer_variant_share import (
     ManufacturerQuoteSubmitRequest,
 )
 from app.services.manufacturer_variant_share_service import DesignVariantManufacturerShareService
+from app.services.email_service import EmailService
 
 router = APIRouter()
 
@@ -177,9 +178,16 @@ def manufacturer_submit_quote(
     The manufacturer uses the share token (received from the designer) to
     submit their pricing, delivery time, and notes.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"🚀 Starting quote submission for share_token: {payload.share_token}")
+    
     share_service = DesignVariantManufacturerShareService(db)
 
     share = share_service.get_by_token(payload.share_token)
+    logger.info(f"🔍 Share found: {share.id if share else 'None'}, status: {share.status.value if share else 'N/A'}")
+    
     if not share:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -193,13 +201,16 @@ def manufacturer_submit_quote(
         )
 
     try:
+        logger.info(f"📝 Submitting quote: cost={payload.cost_price}, days={payload.delivery_time_days}")
         updated = share_service.submit_quote(
             share,
             cost_price=payload.cost_price,
             delivery_time_days=payload.delivery_time_days,
             notes=payload.notes,
         )
+        logger.info(f"✅ Quote submitted successfully, share_id: {updated.id}")
     except ValueError as exc:
+        logger.error(f"❌ Quote submission failed: {str(exc)}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     quote = share_service.get_quote_for_share(updated)
@@ -218,9 +229,14 @@ def manufacturer_submit_quote(
             from app.tasks.email_tasks import send_quote_submitted_email
             from app.services.notification_service import NotificationService
             from app.core.config import settings
+            import logging
+
+            logger = logging.getLogger(__name__)
 
             # Get the design owner
             design_owner = db.query(User).filter(User.id == design.user_id).first()
+            logger.info(f"🔍 Design owner found: {design_owner.email if design_owner else 'None'}")
+            
             if design_owner and design_owner.email:
                 # Get brand settings
                 brand_repo = BrandSettingRepository(db)
@@ -252,22 +268,36 @@ def manufacturer_submit_quote(
                     or design_owner.username
                 )
 
-                # Send email to design owner
-                send_quote_submitted_email.delay(
-                    to_email=design_owner.email,
-                    retailer_name=retailer_name,
-                    manufacturer_name=manufacturer.name if manufacturer else "Manufacturer",
-                    design_number=design.design_code,
-                    estimated_cost=str(quote.cost_price) if quote else str(updated.cost_price),
-                    production_timeline=f"{quote.delivery_time_days} days" if quote else f"{updated.delivery_time_days} days",
-                    quote_url=f"{settings.FRONTEND_URL}/designs/{design.id}",
-                    render_image_url=variant.base_design_image_url or "",
-                    brand_logo_url=brand_logo_url,
-                    brand_primary_color=brand_primary_color
-                )
+                # Send email to design owner using Celery task
+                logger.info(f"📧 Queuing quote submitted email via Celery to {design_owner.email}")
+                try:
+                    logger.info(f"🔄 Importing Celery task...")
+                    from app.tasks.email_tasks import send_quote_submitted_email
+                    logger.info(f"✅ Celery task imported successfully")
+                    
+                    logger.info(f"🔄 Queueing email task with parameters...")
+                    # Queue the email task
+                    task_result = send_quote_submitted_email.delay(
+                        to=design_owner.email,
+                        retailer_name=retailer_name,
+                        manufacturer_name=manufacturer.name if manufacturer else "Manufacturer",
+                        design_number=design.design_code,
+                        estimated_cost=str(quote.cost_price) if quote else str(updated.cost_price),
+                        production_timeline=f"{quote.delivery_time_days} days" if quote else f"{updated.delivery_time_days} days",
+                        design_id=design.id,
+                        render_image_url=variant.base_design_image_url or "",
+                        brand_logo_url=brand_logo_url,
+                        brand_primary_color=brand_primary_color
+                    )
+                    logger.info(f"✅ Quote email task queued successfully. Task ID: {task_result.id}")
+                except Exception as celery_exc:
+                    logger.error(f"❌ Failed to queue quote email via Celery: {str(celery_exc)}")
+                    import traceback
+                    logger.error(f"❌ Full traceback: {traceback.format_exc()}")
 
                 # Send in-app notification
                 try:
+                    logger.info(f"🔔 Sending in-app notification to user {design_owner.id}")
                     notification_service = NotificationService(db)
                     notification_service.send_notification(
                         user_id=design_owner.id,
@@ -284,9 +314,9 @@ def manufacturer_submit_quote(
                             "quote_id": quote.id if quote else None,
                         }
                     )
+                    logger.info(f"✅ In-app notification sent successfully to user {design_owner.id}")
                 except Exception as notif_exc:
-                    import logging
-                    logging.getLogger(__name__).error(f"Failed to send quote notification: {str(notif_exc)}")
+                    logger.error(f"❌ Failed to send quote notification: {str(notif_exc)}")
 
         except Exception as email_exc:
             import logging

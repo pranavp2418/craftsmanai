@@ -1220,6 +1220,39 @@ The Craftsman AI Team
     return text
 
 
+@create_task(name="send_quote_submitted_email", max_retries=3)
+def send_quote_submitted_email(self, to: str, retailer_name: str, manufacturer_name: str, design_number: str, estimated_cost: str, production_timeline: str, design_id: int = None, render_image_url: str = "", brand_logo_url: str = None, brand_primary_color: str = None):
+    """
+    Send quote submitted notification email to retailer.
+    """
+    task_name = "send_quote_submitted_email"
+    
+    # Validate email address before proceeding
+    if not _validate_email_address(to):
+        error_msg = f"Invalid recipient email address: {to}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
+    
+    try:
+        logger.info(f"📧 Starting {task_name} for {to}")
+        
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            EmailService.send_quote_submitted_email(to, retailer_name, manufacturer_name, design_number, estimated_cost, production_timeline, design_id, render_image_url, brand_logo_url, brand_primary_color)
+        )
+        
+        logger.info(f"✅ {task_name} completed successfully for {to}")
+        return True
+    except Exception as exc:
+        logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
+        raise self.retry(
+            exc=exc, 
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3
+        )
+
+
 @create_task(name="send_subscription_cancellation_confirmation_email", max_retries=3)
 def send_subscription_cancellation_confirmation_email(self, to: str, user_name: str, plan_name: str, access_end_date: str, cancellation_date: str, manage_billing_url: str = "#"):
     """
@@ -1248,6 +1281,47 @@ def send_subscription_cancellation_confirmation_email(self, to: str, user_name: 
         loop = asyncio.new_event_loop()
         loop.run_until_complete(
             EmailService.send_subscription_cancellation_confirmation(to, user_name, plan_name, access_end_date, cancellation_date, manage_billing_url)
+        )
+        
+        logger.info(f"✅ {task_name} completed successfully for {to}")
+        return True
+    except Exception as exc:
+        logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
+        raise self.retry(
+            exc=exc, 
+            countdown=60 * (2 ** self.request.retries),
+            max_retries=3
+        )
+
+
+@create_task(name="send_subscription_renewal_confirmation_email", max_retries=3)
+def send_subscription_renewal_confirmation_email(self, to: str, user_name: str, plan_name: str, amount: str, next_renewal_date: str, invoice_url: str = "#"):
+    """
+    Send subscription renewal confirmation email using Celery.
+    
+    Args:
+        to: Recipient email address
+        user_name: User's name
+        plan_name: Name of the renewed plan
+        amount: Renewal amount
+        next_renewal_date: Next renewal date
+        invoice_url: URL to view invoice
+    """
+    task_name = "send_subscription_renewal_confirmation_email"
+    
+    # Validate email address before proceeding
+    if not _validate_email_address(to):
+        error_msg = f"Invalid recipient email address: {to}. Skipping retries."
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
+    
+    try:
+        logger.info(f"📧 Starting {task_name} for {to}")
+        
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            EmailService.send_subscription_renewal_confirmation(to, user_name, plan_name, amount, next_renewal_date, invoice_url)
         )
         
         logger.info(f"✅ {task_name} completed successfully for {to}")
@@ -1384,120 +1458,4 @@ def send_plan_upgrade_confirmation_email(self, to: str, user_name: str, new_plan
         )
 
 
-@create_task(name="send_subscription_cancellation_confirmation_email", max_retries=3)
-def send_subscription_cancellation_confirmation_email(self, to: str, user_name: str, plan_name: str, access_end_date: str, cancellation_date: str, manage_billing_url: str = "#"):
-    """
-    Send subscription cancellation confirmation email using Celery.
-    
-    Args:
-        to: Recipient email address
-        user_name: User's name
-        plan_name: Name of the cancelled plan
-        access_end_date: Date until access remains active
-        cancellation_date: Date of cancellation
-        manage_billing_url: URL to manage billing
-    """
-    task_name = "send_subscription_cancellation_confirmation_email"
-    try:
-        logger.info(f"📧 Starting {task_name} for {to}")
-        
-        import asyncio
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(
-            EmailService.send_subscription_cancellation_confirmation(to, user_name, plan_name, access_end_date, cancellation_date, manage_billing_url)
-        )
-        
-        logger.info(f"✅ {task_name} completed successfully for {to}")
-        return True
-    except Exception as exc:
-        logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
-        raise self.retry(
-            exc=exc, 
-            countdown=60 * (2 ** self.request.retries),
-            max_retries=3
-        )
-
-
-@create_task(name="send_quote_submitted_email", max_retries=3)
-def send_quote_submitted_email(self, to: str, retailer_name: str, manufacturer_name: str, design_number: str, estimated_cost: str, production_timeline: str, quote_url: str = "#", render_image_url: str = ""):
-    """
-    Send quote submitted notification email to retailer.
-    
-    Args:
-        to: Retailer email address
-        retailer_name: Retailer's name
-        manufacturer_name: Manufacturer's name
-        design_number: Design code/number
-        estimated_cost: Estimated cost string
-        production_timeline: Production timeline string
-        quote_url: URL to view the quote
-        render_image_url: URL of the design render image
-    """
-    task_name = "send_quote_submitted_email"
-    
-    # Validate email address before proceeding
-    if not _validate_email_address(to):
-        error_msg = f"Invalid recipient email address: {to}. Skipping retries."
-        logger.error(f"❌ {error_msg}")
-        raise Exception(error_msg)
-    
-    try:
-        logger.info(f"📧 Starting {task_name} for {to}")
-        
-        import asyncio
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(
-            EmailService.send_quote_submitted_email(to, retailer_name, manufacturer_name, design_number, estimated_cost, production_timeline, quote_url, render_image_url)
-        )
-        
-        logger.info(f"✅ {task_name} completed successfully for {to}")
-        return True
-    except Exception as exc:
-        logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
-        raise self.retry(
-            exc=exc, 
-            countdown=60 * (2 ** self.request.retries),
-            max_retries=3
-        )
-
-
-@create_task(name="send_subscription_renewal_confirmation_email", max_retries=3)
-def send_subscription_renewal_confirmation_email(self, to: str, user_name: str, plan_name: str, amount: str, next_renewal_date: str, invoice_url: str = "#"):
-    """
-    Send subscription renewal confirmation email using Celery.
-    
-    Args:
-        to: Recipient email address
-        user_name: User's name
-        plan_name: Name of the renewed plan
-        amount: Renewal amount
-        next_renewal_date: Next renewal date
-        invoice_url: URL to view invoice
-    """
-    task_name = "send_subscription_renewal_confirmation_email"
-    
-    # Validate email address before proceeding
-    if not _validate_email_address(to):
-        error_msg = f"Invalid recipient email address: {to}. Skipping retries."
-        logger.error(f"❌ {error_msg}")
-        raise Exception(error_msg)
-    
-    try:
-        logger.info(f"📧 Starting {task_name} for {to}")
-        
-        import asyncio
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(
-            EmailService.send_subscription_renewal_confirmation(to, user_name, plan_name, amount, next_renewal_date, invoice_url)
-        )
-        
-        logger.info(f"✅ {task_name} completed successfully for {to}")
-        return True
-    except Exception as exc:
-        logger.error(f"❌ {task_name} failed for {to}: {str(exc)}")
-        raise self.retry(
-            exc=exc, 
-            countdown=60 * (2 ** self.request.retries),
-            max_retries=3
-        )
 
