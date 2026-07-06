@@ -52,6 +52,7 @@ def get_customer(
     linked_projects = []
     for share in shares:
         design = _resolve_share_design(share)
+        variant = getattr(share, "design_variant", None)
         if design:
             linked_projects.append(
                 LinkedProject(
@@ -60,7 +61,7 @@ def get_customer(
                     name=design.name or "",
                     jewellery_type=design.jewellery_type,
                     status="Awaiting Approval" if share.status == DesignShareStatus.PENDING else "Shared with Customer",
-                    thumbnail_url=design.input_image_url,
+                    thumbnail_url=variant.base_design_image_url if (variant and variant.base_design_image_url) else design.input_image_url,
                 )
             )
 
@@ -128,7 +129,7 @@ def get_customer(
     for share in shares:
         if share.order:
             for quote in share.order.quotes:
-                if quote.status.value == "ACCEPTED" or quote.status == "ACCEPTED":
+                if quote.status.value == "APPROVED" or quote.status == "APPROVED":
                     total_spent += (quote.cost_price or 0.0)
 
     last_interaction = max(interaction_dates) if interaction_dates else customer.created_at

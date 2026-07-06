@@ -69,7 +69,7 @@ def get_manufacturer(
                     jewellery_type=design.jewellery_type,
                     status=status_str,
                     created_at=share.created_at,
-                    thumbnail_url=design.input_image_url,
+                    thumbnail_url=variant.base_design_image_url if (variant and variant.base_design_image_url) else design.input_image_url,
                 )
             )
 

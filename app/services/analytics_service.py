@@ -521,7 +521,7 @@ class AnalyticsService:
                     return "Other"
                 if any(word in value for word in ("ring", "band", "cocktail ring", "engagement", "wedding")):
                     return "Rings"
-                if any(word in value for word in ("necklace", "chain", "pendant", "neck piece", "choker")):
+                if any(word in value for word in ("necklace", "chain", "neck piece", "choker")):
                     return "Necklaces"
                 if any(word in value for word in ("earring", "stud", "hoop", "dangl", "drop")):
                     return "Earrings"
