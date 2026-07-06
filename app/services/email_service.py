@@ -198,7 +198,7 @@ class EmailService:
                 }
     
     @staticmethod
-    async def send_signup_otp(to: str, otp: str, user_name: str, expires_minutes: int = 15, verify_url: str = "#"):
+    async def send_signup_otp(to: str, otp: str, user_name: str, expires_minutes: int = 15, verify_url: str = None):
         """Send signup OTP email"""
         from app.models.email_log import EmailStatus
         log_id = EmailService._create_email_log(
@@ -262,7 +262,7 @@ class EmailService:
             raise e
     
     @staticmethod
-    async def send_password_reset_otp(to: str, otp: str, user_name: str, expires_minutes: int = 10, reset_url: str = "#"):
+    async def send_password_reset_otp(to: str, otp: str, user_name: str, expires_minutes: int = 10, reset_url: str = None):
         """Send password reset OTP email"""
         from app.models.email_log import EmailStatus
         log_id = EmailService._create_email_log(
@@ -663,7 +663,7 @@ Message:
                 "brand_logo_url": brand_logo_url or "",
                 "brand_primary_color": brand_primary_color or "#6366F1",
                 "comment": comment or "",
-                "dashboard_url": "#",
+                "dashboard_url": f"{settings.FRONTEND_URL}/retailer",
             }
 
             html_content = await render_template("customer_action_notification", context)
@@ -737,9 +737,14 @@ Message:
             raise e
 
     @staticmethod
-    async def send_welcome_email(to: str, user_name: str, dashboard_url: str = "#"):
+    async def send_welcome_email(to: str, user_name: str, dashboard_url: str = None):
         """Send welcome email after successful verification"""
         from app.models.email_log import EmailStatus
+        
+        # Use FRONTEND_URL from settings if not provided
+        if not dashboard_url:
+            dashboard_url = f"{settings.FRONTEND_URL}/retailer"
+        
         log_id = EmailService._create_email_log(
             to_email=to,
             template_name="welcome_platform",
@@ -798,7 +803,7 @@ Message:
             raise e
 
     @staticmethod
-    async def send_plan_purchase_confirmation_email(to: str, user_name: str, plan_name: str, amount: str, billing_date: str, billing_url: str = "#"):
+    async def send_plan_purchase_confirmation_email(to: str, user_name: str, plan_name: str, amount: str, billing_date: str, billing_url: str = None):
         """Send plan purchase confirmation email using plan_purchase_confirm_email_template."""
         from app.models.email_log import EmailStatus
         log_id = EmailService._create_email_log(
@@ -862,7 +867,7 @@ Message:
             raise e
 
     @staticmethod
-    async def send_topup_purchase_confirmation_email(to: str, user_name: str, plan_name: str, amount: str, billing_date: str, billing_url: str = "#"):
+    async def send_topup_purchase_confirmation_email(to: str, user_name: str, plan_name: str, amount: str, billing_date: str, billing_url: str = None):
         """Send top-up pack purchase confirmation email using plan_purchase_confirm_email_template."""
         from app.models.email_log import EmailStatus
         log_id = EmailService._create_email_log(
@@ -926,7 +931,7 @@ Message:
             raise e
 
     @staticmethod
-    async def send_plan_upgrade_confirmation_email(to: str, user_name: str, new_plan: str, amount: str, next_invoice_date: str, plan_url: str = "#"):
+    async def send_plan_upgrade_confirmation_email(to: str, user_name: str, new_plan: str, amount: str, next_invoice_date: str, plan_url: str = None):
         """Send plan upgrade confirmation email using plan_upgrade_email_template."""
         from app.models.email_log import EmailStatus
         log_id = EmailService._create_email_log(
@@ -990,7 +995,7 @@ Message:
             raise e
 
     @staticmethod
-    async def send_subscription_renewal_confirmation(to: str, user_name: str, plan_name: str, amount: str, next_renewal_date: str, invoice_url: str = "#"):
+    async def send_subscription_renewal_confirmation(to: str, user_name: str, plan_name: str, amount: str, next_renewal_date: str, invoice_url: str = None):
         """Send subscription renewal confirmation email using subscription_cancelled_email_template."""
         from app.models.email_log import EmailStatus
         log_id = EmailService._create_email_log(
@@ -1054,14 +1059,18 @@ Message:
             raise e
 
     @staticmethod
-    async def send_quote_submitted_email(to: str, retailer_name: str, manufacturer_name: str, design_number: str, estimated_cost: str, production_timeline: str, quote_url: str = "#", render_image_url: str = ""):
+    async def send_quote_submitted_email(to: str, retailer_name: str, manufacturer_name: str, design_number: str, estimated_cost: str, production_timeline: str, design_id: int = None, render_image_url: str = "", brand_logo_url: str = None, brand_primary_color: str = None):
         """Send quote submitted notification email to retailer using quote_submitted_template."""
         from app.models.email_log import EmailStatus
+        
+        # Construct quote URL using FRONTEND_URL
+        quote_url = f"{settings.FRONTEND_URL}/designs/{design_id}" if design_id else f"{settings.FRONTEND_URL}/retailer"
+        
         log_id = EmailService._create_email_log(
             to_email=to,
             template_name="quote_submitted_template/quote_submitted",
             subject=f"Quote received from {manufacturer_name} — Craftsman AI",
-            variables={"retailer_name": retailer_name, "manufacturer_name": manufacturer_name, "design_number": design_number, "estimated_cost": estimated_cost, "production_timeline": production_timeline, "quote_url": quote_url, "render_image_url": render_image_url}
+            variables={"retailer_name": retailer_name, "manufacturer_name": manufacturer_name, "design_number": design_number, "estimated_cost": estimated_cost, "production_timeline": production_timeline, "quote_url": quote_url, "render_image_url": render_image_url, "brand_logo_url": brand_logo_url, "brand_primary_color": brand_primary_color}
         )
         try:
             logger.info(f"SENDING QUOTE SUBMITTED EMAIL: To={to}, Manufacturer={manufacturer_name}, Design={design_number}")
@@ -1069,7 +1078,7 @@ Message:
             subject = f"Quote received from {manufacturer_name} — Craftsman AI"
 
             html_content = await render_template(
-                "quote_submitted_template/quote_submitted",
+                "quote_submitted_template",
                 context={
                     "retailer_name": retailer_name,
                     "manufacturer_name": manufacturer_name,
@@ -1077,7 +1086,9 @@ Message:
                     "estimated_cost": estimated_cost,
                     "production_timeline": production_timeline,
                     "quote_url": quote_url,
-                    "render_image_url": render_image_url
+                    "render_image_url": render_image_url,
+                    "brand_logo_url": brand_logo_url or "",
+                    "brand_primary_color": brand_primary_color or "#6366F1"
                 }
             )
 
@@ -1120,7 +1131,7 @@ Message:
             raise e
 
     @staticmethod
-    async def send_subscription_cancellation_confirmation(to: str, user_name: str, plan_name: str, access_end_date: str, cancellation_date: str, manage_billing_url: str = "#"):
+    async def send_subscription_cancellation_confirmation(to: str, user_name: str, plan_name: str, access_end_date: str, cancellation_date: str, manage_billing_url: str = None):
         """Send subscription cancellation confirmation email using subscription_renewed_email_template."""
         from app.models.email_log import EmailStatus
         log_id = EmailService._create_email_log(
