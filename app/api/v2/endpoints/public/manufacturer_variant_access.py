@@ -204,6 +204,94 @@ def manufacturer_submit_quote(
 
     quote = share_service.get_quote_for_share(updated)
 
+    # Load related objects for notification
+    variant = share.design_variant
+    design = variant.design if variant else None
+    manufacturer = share.manufacturer
+
+    # Send email notification to the design owner (retailer)
+    if design:
+        try:
+            from app.models.user import User
+            from app.repositories.brand_setting import BrandSettingRepository
+            from app.models.subscription import UserSubscription, SubscriptionStatus
+            from app.tasks.email_tasks import send_quote_submitted_email
+            from app.services.notification_service import NotificationService
+            from app.core.config import settings
+
+            # Get the design owner
+            design_owner = db.query(User).filter(User.id == design.user_id).first()
+            if design_owner and design_owner.email:
+                # Get brand settings
+                brand_repo = BrandSettingRepository(db)
+                brand_setting = brand_repo.get_by_user_id(design_owner.id)
+
+                # Check subscription plan feature flags
+                active_subscription = db.query(UserSubscription).filter(
+                    UserSubscription.user_id == design_owner.id,
+                    UserSubscription.status == SubscriptionStatus.ACTIVE
+                ).first()
+
+                # Determine brand logo and color based on subscription plan
+                brand_logo_url = None
+                brand_primary_color = "#6366F1"  # Default color
+
+                if active_subscription and active_subscription.plan:
+                    if active_subscription.plan.can_use_logo:
+                        if brand_setting and brand_setting.logo_url:
+                            brand_logo_url = brand_setting.logo_url
+                    if active_subscription.plan.can_use_custom_color:
+                        if brand_setting and brand_setting.primary_color:
+                            brand_primary_color = brand_setting.primary_color
+
+                # Determine retailer name
+                retailer_name = (
+                    brand_setting.brand_name if brand_setting and brand_setting.brand_name
+                    else design_owner.business_name
+                    or design_owner.full_name
+                    or design_owner.username
+                )
+
+                # Send email to design owner
+                send_quote_submitted_email.delay(
+                    to_email=design_owner.email,
+                    retailer_name=retailer_name,
+                    manufacturer_name=manufacturer.name if manufacturer else "Manufacturer",
+                    design_number=design.design_code,
+                    estimated_cost=str(quote.cost_price) if quote else str(updated.cost_price),
+                    production_timeline=f"{quote.delivery_time_days} days" if quote else f"{updated.delivery_time_days} days",
+                    quote_url=f"{settings.FRONTEND_URL}/designs/{design.id}",
+                    render_image_url=variant.base_design_image_url or "",
+                    brand_logo_url=brand_logo_url,
+                    brand_primary_color=brand_primary_color
+                )
+
+                # Send in-app notification
+                try:
+                    notification_service = NotificationService(db)
+                    notification_service.send_notification(
+                        user_id=design_owner.id,
+                        type="quote_received",
+                        title="Quote Received",
+                        message=f"Manufacturer {manufacturer.name if manufacturer else 'Unknown'} has submitted a quote for design {design.design_code}. Estimated cost: {quote.cost_price if quote else updated.cost_price}, Timeline: {quote.delivery_time_days if quote else updated.delivery_time_days} days.",
+                        source="manufacturer_quote",
+                        reference_id=quote.id if quote else updated.id,
+                        data={
+                            "share_id": share.id,
+                            "design_id": design.id,
+                            "variant_id": variant.id,
+                            "manufacturer_id": manufacturer.id if manufacturer else None,
+                            "quote_id": quote.id if quote else None,
+                        }
+                    )
+                except Exception as notif_exc:
+                    import logging
+                    logging.getLogger(__name__).error(f"Failed to send quote notification: {str(notif_exc)}")
+
+        except Exception as email_exc:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to send quote submitted email: {str(email_exc)}")
+
     return {
         "success": True,
         "message": "Quote submitted successfully",
