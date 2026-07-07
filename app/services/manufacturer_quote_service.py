@@ -3,7 +3,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from app.models.design import Design, DesignStatus
-from app.models.order import ManufacturerQuote, ManufacturerQuoteStatus
+from app.models.order import Order, OrderStatus, ManufacturerQuote, ManufacturerQuoteStatus
 from app.repositories.design import DesignRepository
 from app.repositories.manufacturer_quote import ManufacturerQuoteRepository
 from app.repositories.activity_log import OrderActivityLogRepository, DesignActivityLogRepository
@@ -169,6 +169,7 @@ class ManufacturerQuoteService:
             order = quote.order or self.order_repo.get_by_id(quote.order_id)
             if order:
                 self.order_repo.assign_manufacturer(order, quote.manufacturer_id)
+                self.order_repo.update_status(order, status=OrderStatus.APPROVED)
 
                 # Update the parent Design status to MANUFACTURER_APPROVED
                 if order.design:

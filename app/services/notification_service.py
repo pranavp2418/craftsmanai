@@ -122,21 +122,26 @@ class NotificationService:
                 )
 
         try:
-            # Get the current event loop or create one if needed
+            # Check if we are running in an AnyIO worker thread pool (FastAPI sync def thread)
+            import anyio
             try:
-                loop = asyncio.get_running_loop()
+                anyio.from_thread.run(_async_push)
             except RuntimeError:
-                # No loop running - create one
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            if loop.is_running():
-                # Schedule the coroutine on the running loop
-                # Use ensure_future with the correct loop reference
-                asyncio.ensure_future(_async_push(), loop=loop)
-            else:
-                # Run the coroutine on the loop
-                loop.run_until_complete(_async_push())
+                # Fallback: Get the current event loop or create one if needed
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    # No loop running - create one
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                if loop.is_running():
+                    # Schedule the coroutine on the running loop
+                    # Use ensure_future with the correct loop reference
+                    asyncio.ensure_future(_async_push(), loop=loop)
+                else:
+                    # Run the coroutine on the loop
+                    loop.run_until_complete(_async_push())
         except Exception as exc:
             # Fail silently - notification is already persisted
             logger.error(

@@ -91,4 +91,13 @@ def complete_design(
 		user=current_user,
 		message=f"Design {design.design_code} marked as completed by {current_user.username}",
 	)
+
+	# Update corresponding Order status to COMPLETED
+	from app.repositories.order import OrderRepository
+	from app.models.order import OrderStatus
+	order_repo = OrderRepository(db)
+	order = order_repo.get_latest_by_design_id(design.id)
+	if order:
+		order_repo.update_status(order, status=OrderStatus.COMPLETED)
+
 	return updated_design
