@@ -4251,6 +4251,15 @@ def generate_with_fallback(
     # Font-template: use the rendered glyph image as the (only) reference blob for generation.
     if font_template:
         ref_blobs = [base64.b64decode(font_template["b64"])]
+    # ANNOTATED-REFERENCE CROP (create/initial only) — RE-ENABLED: a brief / spec-sheet reference shows the
+    # piece surrounded by written notes, dimensions and a separate font sample. The image model copies that
+    # embedded text — and often DUPLICATES the piece — no matter what the prompt says (the lean no-annotation
+    # prompt rule proved insufficient: the NOE brief still rendered with ghosted notes + a duplicated pendant),
+    # so physically crop the input down to just the jewelry. Fires ONLY when a vision check actually finds
+    # surrounding text (otherwise a no-op) and is fail-open on any error. Skipped for refines (the previous
+    # render is the source of truth, no annotations to strip) and for font-template runs (glyph IS the ref).
+    if ref_blobs and not is_refine and not font_template:
+        ref_blobs = [crop_reference_to_jewelry(b) for b in ref_blobs]
     input_b64 = base64.b64encode(ref_blobs[0]).decode("utf-8") if ref_blobs else None
 
     # (Removed two pre-generation vision calls from the image-create path:
