@@ -130,14 +130,54 @@ WHITE_BG_CONTRACT = (
     "piece: render ONLY the jewellery itself and REPLACE the entire background with pure solid white "
     "(#FFFFFF). Front-facing hero angle, centered, crisp edges, premium feel, manufacturable look. Realistic "
     "metal and stones. Soft uniform studio lighting only — no dramatic, contact, or drop shadows on the background."
+    "\n\nBACKGROUND MUST BE 100% BLANK WHITE: the area around the piece must be completely EMPTY pure white "
+    "(#FFFFFF) — absolutely NO faded, ghosted, translucent, blurred or half-erased remnants of the reference "
+    "scene, NO haze or glow, NO dark smudges/streaks at the edges, NO photographic backdrop (hall, temple, "
+    "wall, curtain, gradient). If the reference is a PHOTO of the piece on a busy/blurred backdrop, treat that "
+    "backdrop as NON-existent and draw crisp blank white there. Every part of the JEWELLERY PIECE itself, "
+    "however (including any ornate arch, throne-back, halo or relief panel that belongs to the design), must be "
+    "rendered SOLID and fully-formed — never faded or ghosted."
+)
+
+
+# Lovable's STONE_RULES (verbatim) — was missing in our create path. Small-to-mid stones + staggered/
+# honeycomb paved arrangement following the surface curvature + clean edge taper + row-count respect +
+# uniform setting per region.
+STONE_RULES = (
+    "\n\nSTONES: Use realistic small-to-mid stones unless the user asks for bold/large. On paved/iced "
+    "surfaces use staggered/honeycomb arrangements that follow the surface curvature, taper cleanly at "
+    "edges, and respect any explicit row counts (resize stones to fit). Keep prong/setting style uniform "
+    "within a region."
+)
+
+# Lovable's PRIORITY ORDER (verbatim) — conflict resolution.
+PRIORITY_ORDER = (
+    "\n\nPRIORITY ORDER (resolve any conflict in this order): 1) the user's explicit request / refinement "
+    "note, 2) the reference image's geometry and content, 3) the subtype defaults, 4) the style/avoid rules. "
+    "Do exactly what the user asked. Do not add unrequested elements. Do not redesign unrelated regions."
+)
+
+# Lovable's MANDATORY PRESERVE LIST (verbatim) — auto-applied to every REFERENCE-based job so the model
+# freezes the exact identity of the reference (Lovable omits it for text-only jobs). This was the biggest
+# create-with-image fidelity gap the Lovable comparison found. Added only by the image reproduce/enhance path.
+MANDATORY_PRESERVE_LIST = (
+    "\n\nMANDATORY PRESERVE LIST (reference-based job): unless the user EXPLICITLY requests a change to one "
+    "of these, freeze them EXACTLY — silhouette and overall outline; proportions and scale relationships; "
+    "metal color (yellow / white / rose / platinum / silver / two-tone); stone coverage (which regions have "
+    "stones, which do not); stone arrangement (rows, pave pattern, halo logic, density); setting style "
+    "(prong / bezel / channel / pave / micro-pave); border / frame style (thickness, faceting, "
+    "presence/absence); bail and clasp geometry; font / logo letter construction (stroke weight, serifs, "
+    "joins); relief / depth hierarchy (which layer is raised, which is recessed); side details (engraving, "
+    "lettering, profile work); negative space (open windows, cutouts, gaps between letters); camera angle "
+    "(front-facing hero unless specifically requested); composition and centering."
 )
 
 
 def build_lovable_create(directive: str, **fields) -> str:
     """Master (verbatim) + the selected Lovable generation directive + Lovable's white-background contract
-    (WHITE_BG_CONTRACT), placeholders filled. Missing placeholders resolve to '' (same as Lovable when the
-    structured field is empty)."""
-    out = LOVABLE_MASTER + directive + WHITE_BG_CONTRACT
+    (WHITE_BG_CONTRACT) + STONE_RULES + PRIORITY_ORDER — i.e. our equivalent of Lovable's SHARED_RULES.
+    Placeholders filled; missing ones resolve to '' (same as Lovable when the structured field is empty)."""
+    out = LOVABLE_MASTER + directive + WHITE_BG_CONTRACT + STONE_RULES + PRIORITY_ORDER
     for k in _FIELDS:
         out = out.replace("{" + k + "}", str(fields.get(k, "") or ""))
     return out
@@ -228,7 +268,9 @@ def resolve_canonical_type(item_type: str) -> str:
 NEGATIVE_PROMPT = (
     "AVOID: melted metal, warped geometry, floating stones, duplicate bail, extra clasp, unwanted chain, "
     "random diamonds, changed reference structure, distorted text, asymmetry, blurry setting, loose stones, "
-    "unrealistic plastic metal, fantasy elements, changed subtype, ANY engraved or stamped "
+    "unrealistic plastic metal, fantasy elements, changed subtype, lazy diamond-grid wallpaper background, "
+    "off-center framing, dramatic camera angles by default, halos or decorative extras the user did not ask for, "
+    "ANY engraved or stamped "
     "text/letters/numbers/logos/brand-marks/watermarks/signatures that the user did not explicitly request "
     "(no 'CraftsmanAI', no 'Craftsman', no 'AI', no tool/brand names, no placeholder names like 'NAME' or "
     "'LOGO', no sample monograms)."
