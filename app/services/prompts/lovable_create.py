@@ -18,8 +18,6 @@ LOVABLE_MASTER = LOVABLE_REFINE_PROMPT[:4264]
 # (a) create WITH image — render_as_is (Lovable generate-render render_as_is block)
 RENDER_AS_IS = """You are Craftsman.ai's jewelry render engine. The user has provided a jewelry reference image.
 
-RENDER ONLY THE JEWELRY PIECE — OMIT THE BRIEF (critical): the reference may be a SPEC SHEET / BRIEF that shows the jewelry piece together with surrounding written notes, captions, dimensions, measurement call-outs, arrows, and/or a SEPARATE hand-lettered font sample. Render ONLY the physical jewelry piece itself, centered and alone on a pure solid white (#FFFFFF) background. COMPLETELY OMIT every surrounding note, caption, dimension, measurement, arrow and any separate font/letter/word sample that is NOT physically engraved or stone-set on the piece — those are written instructions, NOT part of the jewelry, and must NOT appear anywhere in the output. KEEP the lettering / numbers that ARE physically part of the piece (e.g. the diamond-set or engraved name / number ON the pendant) EXACTLY as they appear in the reference — same font, same style, do not restyle them.
-
 - Produce a 1-to-1 CAD-styled render of the SAME piece
 - Preserve EXACTLY: metal color, structure, depth, outline, silhouette, layers, stone arrangement, stone orientation, border/frame logic, top/head/shank/bail/clasp shape
 - Visually enhance ONLY in clarity, presentation, and cleanliness

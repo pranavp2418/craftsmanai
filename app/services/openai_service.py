@@ -2439,17 +2439,17 @@ def _border_avg_brightness(img: "Image.Image") -> float:
 
 
 def _remove_stray_bg_blobs(img: "Image.Image", tag: str = "bg") -> "Image.Image":
-    """Whiten EVERY non-jewellery region the border flood-fill can't reach, so ONLY the jewellery's
-    own colours remain and everything else is pure white.
+    """Whiten small, isolated, desaturated gray patches left in the background.
 
-    The border flood-fill only cleans backdrop pixels CONNECTED to an edge, so two kinds of stains
-    survive it: (1) the DARK ENCLOSED region in the middle of a loop piece — e.g. the black hole inside
-    a necklace/bracelet ring — which is walled off from the border by the jewellery itself; and cast
-    SHADOWS + leftover dark backdrop; plus (2) small isolated gray smudges / annotation-text specks.
+    The border flood-fill only cleans backdrop pixels CONNECTED to an edge. Some
+    generated images carry a stray gray smudge/patch in the INTERIOR (a "dhabba"),
+    disconnected from the border, so the flood-fill never reaches it — and when the
+    border is already white the flood-fill is skipped entirely, leaving it untouched.
 
-    Pass 1 wipes LARGE dark/flat-gray regions (the enclosed hole, shadows, dark backdrop). Pass 2 wipes
-    small desaturated specks. Both PRESERVE the jewellery: gold/enamel (saturated) and bright metal /
-    diamonds (bright) are excluded, and small dark crevices BETWEEN stones stay below the size gate.
+    This pass labels every non-white connected region, keeps the main subject (the
+    largest region) and every substantial region, and repaints ONLY the small +
+    desaturated (gray/off-white) strays to pure white. Colored (gold/enamel) or
+    large elements are never touched, so the jewellery is fully preserved.
     """
     try:
         import numpy as np
@@ -2464,48 +2464,41 @@ def _remove_stray_bg_blobs(img: "Image.Image", tag: str = "bg") -> "Image.Image"
         b = arr[:, :, 2].astype(np.int16)
         mx = np.maximum(np.maximum(r, g), b)
         mn = np.minimum(np.minimum(r, g), b)
-        sat = mx - mn                          # 0..255 chroma (0 = pure gray)
-        brightness = (r + g + b) // 3
-        img_area = float(h * w)
-        struct = np.ones((3, 3), dtype=int)    # 8-connectivity
-        remove_mask = np.zeros((h, w), dtype=bool)
+        sat = mx - mn                       # 0..255 chroma (0 = pure gray)
 
-        # PASS 1 — LARGE dark / flat-gray NON-jewellery regions the flood-fill can't reach: the enclosed
-        # centre of a loop piece (black hole), cast shadows, leftover dark backdrop. Dark+grey
-        # (brightness < 150) AND desaturated (sat < 30) is background; GOLD/enamel (saturated) and BRIGHT
-        # metal / DIAMONDS (brightness >= 150) are excluded → jewellery kept. Only regions >= 1% of the
-        # image are wiped; tiny dark specks between stones (metal crevices) stay below the gate and remain.
-        bg_dark = (brightness < 150) & (sat < 30)
-        if bg_dark.any():
-            lab, nn = ndimage.label(bg_dark, structure=struct)
-            if nn:
-                szs = ndimage.sum(np.ones_like(lab), lab, index=np.arange(1, nn + 1))
-                big = np.nonzero(szs / img_area >= 0.01)[0] + 1   # labels of LARGE dark regions
-                if big.size:
-                    remove_mask |= np.isin(lab, big)
-
-        # PASS 2 — small isolated desaturated specks anywhere (annotation-text fragments, dots, smudges).
+        # "content" = anything that isn't near-pure-white background
         content = mx < 236
-        if content.any():
-            lab2, n2 = ndimage.label(content, structure=struct)
-            if n2:
-                idx2 = np.arange(1, n2 + 1)
-                szs2 = ndimage.sum(np.ones_like(lab2), lab2, index=idx2)
-                sat_mean = ndimage.mean(sat, lab2, index=idx2)
-                largest = int(np.argmax(szs2)) + 1                # main jewellery mass — never removed
-                small_gray = (szs2 / img_area < 0.02) & (sat_mean < 35)
-                small_gray[largest - 1] = False                  # never wipe the main jewellery mass
-                small_labels = idx2[small_gray]
-                if small_labels.size:
-                    remove_mask |= np.isin(lab2, small_labels)    # vectorised (no per-label full-image loop)
+        if not content.any():
+            return img
 
-        if remove_mask.any():
+        labels, n = ndimage.label(content, structure=np.ones((3, 3), dtype=int))  # 8-connectivity
+        if n == 0:
+            return img
+        sizes = ndimage.sum(np.ones_like(labels), labels, index=np.arange(1, n + 1))
+        largest = int(np.argmax(sizes)) + 1          # main subject label (never removed)
+        img_area = float(h * w)
+
+        remove_mask = np.zeros((h, w), dtype=bool)
+        removed = 0
+        for lbl in range(1, n + 1):
+            if lbl == largest:
+                continue
+            comp = labels == lbl
+            area = float(comp.sum())
+            if area / img_area >= 0.02:              # substantial region → keep (could be a real part)
+                continue
+            if float(sat[comp].mean()) >= 35:        # colored element (gold/enamel/gem) → keep
+                continue
+            remove_mask |= comp                      # small + gray + isolated → a background smudge
+            removed += 1
+
+        if removed:
             arr[remove_mask] = 255
-            logger.info("[%s] whitened non-jewellery regions (enclosed holes / shadows / specks) → white", tag)
+            logger.info("[%s] Removed %d stray gray background blob(s) → pure white", tag, removed)
             return Image.fromarray(arr, "RGB")
         return img
     except Exception as e:
-        logger.warning("[%s] bg cleanup skipped: %s", tag, e)
+        logger.warning("[%s] stray-blob removal skipped: %s", tag, e)
         return img
 
 
@@ -2533,36 +2526,20 @@ def _whiten_background(image_bytes: bytes, tag: str = "bg") -> bytes:
         avg_brightness = _border_avg_brightness(img)
         if avg_brightness < 215:
             logger.info("[%s] Non-white background detected (border brightness=%.0f) → flooding to white", tag, avg_brightness)
-            # PIL flood-fill is O(pixels)·seeds and CRAWLS (~10s at 2K) on a large uniform backdrop, so run
-            # it on a DOWNSCALED copy and upscale the "turned-white" mask back to full resolution — same
-            # result, ~10x faster. Many border seeds catch the whole backdrop even if a piece touches an edge;
-            # thresh controls how far the fill spreads from each seed's colour (swallows shadows/gradients but
-            # still stops at the bright jewelry).
-            import numpy as np
-            scale = max(1, round(max(w, h) / 800))
-            work = img.resize((max(1, w // scale), max(1, h // scale)), Image.NEAREST) if scale > 1 else img.copy()
-            ww, wh = work.size
-            before = np.asarray(work).copy()
+            # Flood-fill from many border seed points so we catch the whole backdrop
+            # even if a piece of jewelry touches one edge. thresh controls how far the
+            # fill spreads from each seed's colour — generous enough to swallow shadows
+            # and gradients, but it still stops at the bright jewelry.
             seeds = [
-                (1, 1), (ww - 2, 1), (1, wh - 2), (ww - 2, wh - 2),          # corners
-                (ww // 2, 1), (ww // 2, wh - 2), (1, wh // 2), (ww - 2, wh // 2),  # edge midpoints
-                (ww // 4, 1), (3 * ww // 4, 1), (ww // 4, wh - 2), (3 * ww // 4, wh - 2),
+                (1, 1), (w - 2, 1), (1, h - 2), (w - 2, h - 2),          # corners
+                (w // 2, 1), (w // 2, h - 2), (1, h // 2), (w - 2, h // 2),  # edge midpoints
+                (w // 4, 1), (3 * w // 4, 1), (w // 4, h - 2), (3 * w // 4, h - 2),
             ]
             for seed in seeds:
                 try:
-                    ImageDraw.floodfill(work, seed, (255, 255, 255), thresh=90)
+                    ImageDraw.floodfill(img, seed, (255, 255, 255), thresh=90)
                 except Exception:
                     pass
-            after = np.asarray(work)
-            turned = (after >= 250).all(axis=2) & ~(before >= 250).all(axis=2)   # newly whitened backdrop only
-            if turned.any():
-                if scale > 1:
-                    turned = np.asarray(
-                        Image.fromarray((turned * np.uint8(255))).resize((w, h), Image.NEAREST)
-                    ) > 127
-                full = np.array(img)
-                full[turned] = 255
-                img = Image.fromarray(full, "RGB")
             logger.info("[%s] Background flooded to white", tag)
 
         # Always scrub interior stray gray patches — the flood-fill (or the
@@ -4096,9 +4073,8 @@ def detect_jewelry_crop_box(image_b64: str) -> Optional[Dict[str, float]]:
     instruction = (
         "Look at this image. Does it contain written TEXT / notes / dimensions / measurements / labels / "
         "captions / spec-sheet writing AROUND the jewelry (text that is NOT engraved on the piece itself)? "
-        "If YES, give the bounding box of ONLY the main jewelry piece — you MUST INCLUDE its bail / loop / "
-        "hanging attachment at the TOP inside the box (never cut the bail off) — while excluding all that "
-        "surrounding text. If there are multiple pieces, give a box covering all the jewelry but none of the text. "
+        "If YES, give the TIGHT bounding box of ONLY the main jewelry piece (exclude all that surrounding "
+        "text). If there are multiple pieces, give a box covering all the jewelry but none of the text. "
         "Respond ONLY as JSON: {\"has_text\": true|false, \"box\": {\"x\":0.0,\"y\":0.0,\"w\":1.0,\"h\":1.0}} "
         "where x,y is the top-left corner and w,h the width/height as fractions (0-1) of the image."
     )
@@ -4135,11 +4111,7 @@ def crop_reference_to_jewelry(image_bytes: bytes) -> bytes:
     model can't reproduce the surrounding text. Returns the original bytes when there's no text to strip
     or anything goes wrong (fail-open)."""
     try:
-        _b64 = base64.b64encode(image_bytes).decode("utf-8")
-        # ONE retry: the text-detect vision call is stochastic and ~1 in 5 returns None on a real brief,
-        # which would skip the crop and leave the piece stuck in its off-to-the-side brief position (the
-        # "side me bana" report). A single retry lifts reliability well above 90%.
-        box = detect_jewelry_crop_box(_b64) or detect_jewelry_crop_box(_b64)
+        box = detect_jewelry_crop_box(base64.b64encode(image_bytes).decode("utf-8"))
         if not box:
             return image_bytes
         import io
@@ -4149,11 +4121,7 @@ def crop_reference_to_jewelry(image_bytes: bytes) -> bytes:
         x, y = box["x"] * W, box["y"] * H
         w, h = box["w"] * W, box["h"] * H
         pad_x, pad_y = 0.03 * W, 0.03 * H
-        # Extra HEADROOM at the top so the bail / loop at the very top of the piece is never clipped — a
-        # clipped bail makes the model think the piece has none and add a WRONG second bail. Any stray text
-        # that this headroom catches is scrubbed by the whiten pass below.
-        pad_top = 0.11 * H
-        left = max(0, int(x - pad_x)); top = max(0, int(y - pad_top))
+        left = max(0, int(x - pad_x)); top = max(0, int(y - pad_y))
         right = min(W, int(x + w + pad_x)); bottom = min(H, int(y + h + pad_y))
         # sanity: ignore a degenerate / near-full box
         if (right - left) < W * 0.15 or (bottom - top) < H * 0.15 or (right - left) * (bottom - top) > W * H * 0.97:
@@ -4161,24 +4129,7 @@ def crop_reference_to_jewelry(image_bytes: bytes) -> bytes:
         buf = io.BytesIO()
         im.crop((left, top, right, bottom)).save(buf, "PNG")
         logger.info("[ref-crop] annotated reference cropped to jewelry box (%d,%d,%d,%d) of %dx%d", left, top, right, bottom, W, H)
-        # Faint text fragments that sat RIGHT BESIDE the piece can fall INSIDE the crop box and survive
-        # (the "of Noe" / "range enamel" leftovers). Whiten the cropped backdrop and strip small stray
-        # (text) blobs so ONLY the piece remains: the piece is the LARGEST connected region and is always
-        # preserved untouched — only small desaturated gray/text specks in the background get removed, and
-        # the studio backdrop flattens to clean white. Fail-open inside _whiten_background.
-        clean_bytes = _whiten_background(buf.getvalue(), tag="ref_crop_clean")
-        # CENTER the piece on a clean white SQUARE canvas so the render comes out CENTERED like every other
-        # generation — not stuck in the top/side spot it occupied in the brief. Piece fills ~76% with even
-        # margins; white-on-white paste is seamless (the crop's backdrop was just flattened to white above).
-        piece = Image.open(io.BytesIO(clean_bytes)).convert("RGB")
-        cw, ch = piece.size
-        side = max(int(max(cw, ch) / 0.76), cw, ch)
-        canvas = Image.new("RGB", (side, side), (255, 255, 255))
-        canvas.paste(piece, ((side - cw) // 2, (side - ch) // 2))
-        out_buf = io.BytesIO()
-        canvas.save(out_buf, "PNG")
-        logger.info("[ref-crop] piece centered on %dx%d white canvas", side, side)
-        return out_buf.getvalue()
+        return buf.getvalue()
     except Exception as e:
         logger.warning("[ref-crop] crop failed: %s", e)
         return image_bytes
@@ -4300,15 +4251,6 @@ def generate_with_fallback(
     # Font-template: use the rendered glyph image as the (only) reference blob for generation.
     if font_template:
         ref_blobs = [base64.b64decode(font_template["b64"])]
-    # ANNOTATED-REFERENCE CROP (create/initial only) — RE-ENABLED: a brief / spec-sheet reference shows the
-    # piece surrounded by written notes, dimensions and a separate font sample. The image model copies that
-    # embedded text — and often DUPLICATES the piece — no matter what the prompt says (the lean no-annotation
-    # prompt rule proved insufficient: the NOE brief still rendered with ghosted notes + a duplicated pendant),
-    # so physically crop the input down to just the jewelry. Fires ONLY when a vision check actually finds
-    # surrounding text (otherwise a no-op) and is fail-open on any error. Skipped for refines (the previous
-    # render is the source of truth, no annotations to strip) and for font-template runs (glyph IS the ref).
-    if ref_blobs and not is_refine and not font_template:
-        ref_blobs = [crop_reference_to_jewelry(b) for b in ref_blobs]
     input_b64 = base64.b64encode(ref_blobs[0]).decode("utf-8") if ref_blobs else None
 
     # (Removed two pre-generation vision calls from the image-create path:
