@@ -2503,57 +2503,21 @@ def _remove_stray_bg_blobs(img: "Image.Image", tag: str = "bg") -> "Image.Image"
 
 
 def _whiten_background(image_bytes: bytes, tag: str = "bg") -> bytes:
-    """Replace a dark/colored background with pure white and scrub stray patches.
+    """No-op — the pure-white background is now PROMPT-DRIVEN, exactly like the Lovable prototype.
 
-    Two passes:
-    1. Border flood-fill — starts from the image BORDER and only spreads through
-       CONNECTED background pixels, so the centered jewelry is never touched (even
-       its dark shadows/black accents), reliably yielding a pure white (#FFFFFF)
-       backdrop while fully preserving the design.
-    2. Stray-blob scrub — repaints small, isolated, desaturated gray patches in the
-       INTERIOR that the flood-fill can't reach (disconnected from the border).
+    Lovable makes its background pure white PURELY through the render prompt (its OUTPUT_CONTRACT /
+    HOUSE_STYLE: "...on a PURE WHITE (#FFFFFF) seamless background — no environment, cast shadow,
+    reflection plate or gradient floor...") and runs ZERO pixel post-processing on the output. Our
+    system prompt already carries the same instruction (COMMON_SYSTEM_PROMPT in prompts/common.py:
+    "...on a pure solid white (#FFFFFF) seamless background with no scene, props, hands, environment,
+    reflections or cast shadows"), so the model renders the white background itself.
 
-    gpt-image-2's /images/edits endpoint copies the reference background color and
-    its outputs sometimes carry a dark backdrop, so we run this on BOTH the input
-    references and the generated output to guarantee white everywhere.
+    The old border flood-fill + stray-blob scrub was the ONLY thing that diverged from Lovable, and it
+    was the source of the artifacts (the black enclosed centre of loop pieces, leftover shadows, gray
+    smudges/"dhabbe", slow renders). It is therefore removed to match Lovable exactly: the image is
+    returned untouched and the prompt alone guarantees the white background.
     """
-    try:
-        from PIL import ImageDraw
-
-        img = Image.open(BytesIO(image_bytes)).convert("RGB")
-        w, h = img.size
-
-        avg_brightness = _border_avg_brightness(img)
-        if avg_brightness < 215:
-            logger.info("[%s] Non-white background detected (border brightness=%.0f) → flooding to white", tag, avg_brightness)
-            # Flood-fill from many border seed points so we catch the whole backdrop
-            # even if a piece of jewelry touches one edge. thresh controls how far the
-            # fill spreads from each seed's colour — generous enough to swallow shadows
-            # and gradients, but it still stops at the bright jewelry.
-            seeds = [
-                (1, 1), (w - 2, 1), (1, h - 2), (w - 2, h - 2),          # corners
-                (w // 2, 1), (w // 2, h - 2), (1, h // 2), (w - 2, h // 2),  # edge midpoints
-                (w // 4, 1), (3 * w // 4, 1), (w // 4, h - 2), (3 * w // 4, h - 2),
-            ]
-            for seed in seeds:
-                try:
-                    ImageDraw.floodfill(img, seed, (255, 255, 255), thresh=90)
-                except Exception:
-                    pass
-            logger.info("[%s] Background flooded to white", tag)
-
-        # Always scrub interior stray gray patches — the flood-fill (or the
-        # already-white border early-exit) leaves disconnected smudges behind.
-        img = _remove_stray_bg_blobs(img, tag=tag)
-
-        buf = BytesIO()
-        img.save(buf, format="PNG")
-        buf.seek(0)
-        return buf.getvalue()
-
-    except Exception as e:
-        logger.warning("[%s] Failed to whiten background: %s — using original", tag, e)
-        return image_bytes
+    return image_bytes
 
 
 def _ensure_white_background(image_bytes: bytes) -> bytes:
