@@ -4073,8 +4073,9 @@ def detect_jewelry_crop_box(image_b64: str) -> Optional[Dict[str, float]]:
     instruction = (
         "Look at this image. Does it contain written TEXT / notes / dimensions / measurements / labels / "
         "captions / spec-sheet writing AROUND the jewelry (text that is NOT engraved on the piece itself)? "
-        "If YES, give the TIGHT bounding box of ONLY the main jewelry piece (exclude all that surrounding "
-        "text). If there are multiple pieces, give a box covering all the jewelry but none of the text. "
+        "If YES, give the bounding box of ONLY the main jewelry piece — you MUST INCLUDE its bail / loop / "
+        "hanging attachment at the TOP inside the box (never cut the bail off) — while excluding all that "
+        "surrounding text. If there are multiple pieces, give a box covering all the jewelry but none of the text. "
         "Respond ONLY as JSON: {\"has_text\": true|false, \"box\": {\"x\":0.0,\"y\":0.0,\"w\":1.0,\"h\":1.0}} "
         "where x,y is the top-left corner and w,h the width/height as fractions (0-1) of the image."
     )
@@ -4125,7 +4126,11 @@ def crop_reference_to_jewelry(image_bytes: bytes) -> bytes:
         x, y = box["x"] * W, box["y"] * H
         w, h = box["w"] * W, box["h"] * H
         pad_x, pad_y = 0.03 * W, 0.03 * H
-        left = max(0, int(x - pad_x)); top = max(0, int(y - pad_y))
+        # Extra HEADROOM at the top so the bail / loop at the very top of the piece is never clipped — a
+        # clipped bail makes the model think the piece has none and add a WRONG second bail. Any stray text
+        # that this headroom catches is scrubbed by the whiten pass below.
+        pad_top = 0.11 * H
+        left = max(0, int(x - pad_x)); top = max(0, int(y - pad_top))
         right = min(W, int(x + w + pad_x)); bottom = min(H, int(y + h + pad_y))
         # sanity: ignore a degenerate / near-full box
         if (right - left) < W * 0.15 or (bottom - top) < H * 0.15 or (right - left) * (bottom - top) > W * H * 0.97:

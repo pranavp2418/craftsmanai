@@ -219,10 +219,12 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
             out += ("\n\nPENDANT BAIL — custom bail requested: REPLACE the existing/default bail with the "
                     "user-specified bail. Do NOT stack two bails. Do NOT keep both.")
         else:
-            out += ("\n\nBail: keep the reference's OWN bail if it already has one (do NOT duplicate it). If it has "
-                    "NONE, add ONE classic STANDARD LOOP BAIL in the same metal — a smooth, polished bail with a "
-                    "gently FLARED, softly rounded top that TAPERS downward into a small round loop / jump-ring at "
-                    "its base for the chain — fixed at the very top of the pendant, facing forward.")
+            out += ("\n\nBail: if the reference piece ALREADY has a bail / loop / hanging attachment at the top, "
+                    "keep ONLY that one EXACTLY as shown — do NOT add, enlarge or DUPLICATE it, and NEVER stack a "
+                    "second/new bail on top of an existing one. ONLY if the piece has NO bail or loop at all, add "
+                    "ONE classic STANDARD LOOP BAIL in the same metal — a smooth, polished bail with a gently "
+                    "FLARED, softly rounded top that TAPERS downward into a small round loop / jump-ring at its "
+                    "base for the chain — fixed at the very top of the pendant, facing forward.")
 
     out += "\n\n" + NEGATIVE_PROMPT
     return out
