@@ -4129,7 +4129,12 @@ def crop_reference_to_jewelry(image_bytes: bytes) -> bytes:
         buf = io.BytesIO()
         im.crop((left, top, right, bottom)).save(buf, "PNG")
         logger.info("[ref-crop] annotated reference cropped to jewelry box (%d,%d,%d,%d) of %dx%d", left, top, right, bottom, W, H)
-        return buf.getvalue()
+        # Faint text fragments that sat RIGHT BESIDE the piece can fall INSIDE the crop box and survive
+        # (the "of Noe" / "range enamel" leftovers). Whiten the cropped backdrop and strip small stray
+        # (text) blobs so ONLY the piece remains: the piece is the LARGEST connected region and is always
+        # preserved untouched — only small desaturated gray/text specks in the background get removed, and
+        # the studio backdrop flattens to clean white. Fail-open inside _whiten_background.
+        return _whiten_background(buf.getvalue(), tag="ref_crop_clean")
     except Exception as e:
         logger.warning("[ref-crop] crop failed: %s", e)
         return image_bytes
