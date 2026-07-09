@@ -4111,7 +4111,11 @@ def crop_reference_to_jewelry(image_bytes: bytes) -> bytes:
     model can't reproduce the surrounding text. Returns the original bytes when there's no text to strip
     or anything goes wrong (fail-open)."""
     try:
-        box = detect_jewelry_crop_box(base64.b64encode(image_bytes).decode("utf-8"))
+        _b64 = base64.b64encode(image_bytes).decode("utf-8")
+        # ONE retry: the text-detect vision call is stochastic and ~1 in 5 returns None on a real brief,
+        # which would skip the crop and leave the piece stuck in its off-to-the-side brief position (the
+        # "side me bana" report). A single retry lifts reliability well above 90%.
+        box = detect_jewelry_crop_box(_b64) or detect_jewelry_crop_box(_b64)
         if not box:
             return image_bytes
         import io
@@ -4134,7 +4138,19 @@ def crop_reference_to_jewelry(image_bytes: bytes) -> bytes:
         # (text) blobs so ONLY the piece remains: the piece is the LARGEST connected region and is always
         # preserved untouched — only small desaturated gray/text specks in the background get removed, and
         # the studio backdrop flattens to clean white. Fail-open inside _whiten_background.
-        return _whiten_background(buf.getvalue(), tag="ref_crop_clean")
+        clean_bytes = _whiten_background(buf.getvalue(), tag="ref_crop_clean")
+        # CENTER the piece on a clean white SQUARE canvas so the render comes out CENTERED like every other
+        # generation — not stuck in the top/side spot it occupied in the brief. Piece fills ~76% with even
+        # margins; white-on-white paste is seamless (the crop's backdrop was just flattened to white above).
+        piece = Image.open(io.BytesIO(clean_bytes)).convert("RGB")
+        cw, ch = piece.size
+        side = max(int(max(cw, ch) / 0.76), cw, ch)
+        canvas = Image.new("RGB", (side, side), (255, 255, 255))
+        canvas.paste(piece, ((side - cw) // 2, (side - ch) // 2))
+        out_buf = io.BytesIO()
+        canvas.save(out_buf, "PNG")
+        logger.info("[ref-crop] piece centered on %dx%d white canvas", side, side)
+        return out_buf.getvalue()
     except Exception as e:
         logger.warning("[ref-crop] crop failed: %s", e)
         return image_bytes
