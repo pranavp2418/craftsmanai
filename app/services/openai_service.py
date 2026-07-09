@@ -2439,17 +2439,17 @@ def _border_avg_brightness(img: "Image.Image") -> float:
 
 
 def _remove_stray_bg_blobs(img: "Image.Image", tag: str = "bg") -> "Image.Image":
-    """Whiten small, isolated, desaturated gray patches left in the background.
+    """Whiten EVERY non-jewellery region the border flood-fill can't reach, so ONLY the jewellery's
+    own colours remain and everything else is pure white.
 
-    The border flood-fill only cleans backdrop pixels CONNECTED to an edge. Some
-    generated images carry a stray gray smudge/patch in the INTERIOR (a "dhabba"),
-    disconnected from the border, so the flood-fill never reaches it — and when the
-    border is already white the flood-fill is skipped entirely, leaving it untouched.
+    The border flood-fill only cleans backdrop pixels CONNECTED to an edge, so two kinds of stains
+    survive it: (1) the DARK ENCLOSED region in the middle of a loop piece — e.g. the black hole inside
+    a necklace/bracelet ring — which is walled off from the border by the jewellery itself; and cast
+    SHADOWS + leftover dark backdrop; plus (2) small isolated gray smudges / annotation-text specks.
 
-    This pass labels every non-white connected region, keeps the main subject (the
-    largest region) and every substantial region, and repaints ONLY the small +
-    desaturated (gray/off-white) strays to pure white. Colored (gold/enamel) or
-    large elements are never touched, so the jewellery is fully preserved.
+    Pass 1 wipes LARGE dark/flat-gray regions (the enclosed hole, shadows, dark backdrop). Pass 2 wipes
+    small desaturated specks. Both PRESERVE the jewellery: gold/enamel (saturated) and bright metal /
+    diamonds (bright) are excluded, and small dark crevices BETWEEN stones stay below the size gate.
     """
     try:
         import numpy as np
@@ -2464,41 +2464,48 @@ def _remove_stray_bg_blobs(img: "Image.Image", tag: str = "bg") -> "Image.Image"
         b = arr[:, :, 2].astype(np.int16)
         mx = np.maximum(np.maximum(r, g), b)
         mn = np.minimum(np.minimum(r, g), b)
-        sat = mx - mn                       # 0..255 chroma (0 = pure gray)
-
-        # "content" = anything that isn't near-pure-white background
-        content = mx < 236
-        if not content.any():
-            return img
-
-        labels, n = ndimage.label(content, structure=np.ones((3, 3), dtype=int))  # 8-connectivity
-        if n == 0:
-            return img
-        sizes = ndimage.sum(np.ones_like(labels), labels, index=np.arange(1, n + 1))
-        largest = int(np.argmax(sizes)) + 1          # main subject label (never removed)
+        sat = mx - mn                          # 0..255 chroma (0 = pure gray)
+        brightness = (r + g + b) // 3
         img_area = float(h * w)
-
+        struct = np.ones((3, 3), dtype=int)    # 8-connectivity
         remove_mask = np.zeros((h, w), dtype=bool)
-        removed = 0
-        for lbl in range(1, n + 1):
-            if lbl == largest:
-                continue
-            comp = labels == lbl
-            area = float(comp.sum())
-            if area / img_area >= 0.02:              # substantial region → keep (could be a real part)
-                continue
-            if float(sat[comp].mean()) >= 35:        # colored element (gold/enamel/gem) → keep
-                continue
-            remove_mask |= comp                      # small + gray + isolated → a background smudge
-            removed += 1
 
-        if removed:
+        # PASS 1 — LARGE dark / flat-gray NON-jewellery regions the flood-fill can't reach: the enclosed
+        # centre of a loop piece (black hole), cast shadows, leftover dark backdrop. Dark+grey
+        # (brightness < 150) AND desaturated (sat < 30) is background; GOLD/enamel (saturated) and BRIGHT
+        # metal / DIAMONDS (brightness >= 150) are excluded → jewellery kept. Only regions >= 1% of the
+        # image are wiped; tiny dark specks between stones (metal crevices) stay below the gate and remain.
+        bg_dark = (brightness < 150) & (sat < 30)
+        if bg_dark.any():
+            lab, nn = ndimage.label(bg_dark, structure=struct)
+            if nn:
+                szs = ndimage.sum(np.ones_like(lab), lab, index=np.arange(1, nn + 1))
+                big = np.nonzero(szs / img_area >= 0.01)[0] + 1   # labels of LARGE dark regions
+                if big.size:
+                    remove_mask |= np.isin(lab, big)
+
+        # PASS 2 — small isolated desaturated specks anywhere (annotation-text fragments, dots, smudges).
+        content = mx < 236
+        if content.any():
+            lab2, n2 = ndimage.label(content, structure=struct)
+            if n2:
+                idx2 = np.arange(1, n2 + 1)
+                szs2 = ndimage.sum(np.ones_like(lab2), lab2, index=idx2)
+                sat_mean = ndimage.mean(sat, lab2, index=idx2)
+                largest = int(np.argmax(szs2)) + 1                # main jewellery mass — never removed
+                small_gray = (szs2 / img_area < 0.02) & (sat_mean < 35)
+                small_gray[largest - 1] = False                  # never wipe the main jewellery mass
+                small_labels = idx2[small_gray]
+                if small_labels.size:
+                    remove_mask |= np.isin(lab2, small_labels)    # vectorised (no per-label full-image loop)
+
+        if remove_mask.any():
             arr[remove_mask] = 255
-            logger.info("[%s] Removed %d stray gray background blob(s) → pure white", tag, removed)
+            logger.info("[%s] whitened non-jewellery regions (enclosed holes / shadows / specks) → white", tag)
             return Image.fromarray(arr, "RGB")
         return img
     except Exception as e:
-        logger.warning("[%s] stray-blob removal skipped: %s", tag, e)
+        logger.warning("[%s] bg cleanup skipped: %s", tag, e)
         return img
 
 
@@ -2526,20 +2533,36 @@ def _whiten_background(image_bytes: bytes, tag: str = "bg") -> bytes:
         avg_brightness = _border_avg_brightness(img)
         if avg_brightness < 215:
             logger.info("[%s] Non-white background detected (border brightness=%.0f) → flooding to white", tag, avg_brightness)
-            # Flood-fill from many border seed points so we catch the whole backdrop
-            # even if a piece of jewelry touches one edge. thresh controls how far the
-            # fill spreads from each seed's colour — generous enough to swallow shadows
-            # and gradients, but it still stops at the bright jewelry.
+            # PIL flood-fill is O(pixels)·seeds and CRAWLS (~10s at 2K) on a large uniform backdrop, so run
+            # it on a DOWNSCALED copy and upscale the "turned-white" mask back to full resolution — same
+            # result, ~10x faster. Many border seeds catch the whole backdrop even if a piece touches an edge;
+            # thresh controls how far the fill spreads from each seed's colour (swallows shadows/gradients but
+            # still stops at the bright jewelry).
+            import numpy as np
+            scale = max(1, round(max(w, h) / 800))
+            work = img.resize((max(1, w // scale), max(1, h // scale)), Image.NEAREST) if scale > 1 else img.copy()
+            ww, wh = work.size
+            before = np.asarray(work).copy()
             seeds = [
-                (1, 1), (w - 2, 1), (1, h - 2), (w - 2, h - 2),          # corners
-                (w // 2, 1), (w // 2, h - 2), (1, h // 2), (w - 2, h // 2),  # edge midpoints
-                (w // 4, 1), (3 * w // 4, 1), (w // 4, h - 2), (3 * w // 4, h - 2),
+                (1, 1), (ww - 2, 1), (1, wh - 2), (ww - 2, wh - 2),          # corners
+                (ww // 2, 1), (ww // 2, wh - 2), (1, wh // 2), (ww - 2, wh // 2),  # edge midpoints
+                (ww // 4, 1), (3 * ww // 4, 1), (ww // 4, wh - 2), (3 * ww // 4, wh - 2),
             ]
             for seed in seeds:
                 try:
-                    ImageDraw.floodfill(img, seed, (255, 255, 255), thresh=90)
+                    ImageDraw.floodfill(work, seed, (255, 255, 255), thresh=90)
                 except Exception:
                     pass
+            after = np.asarray(work)
+            turned = (after >= 250).all(axis=2) & ~(before >= 250).all(axis=2)   # newly whitened backdrop only
+            if turned.any():
+                if scale > 1:
+                    turned = np.asarray(
+                        Image.fromarray((turned * np.uint8(255))).resize((w, h), Image.NEAREST)
+                    ) > 127
+                full = np.array(img)
+                full[turned] = 255
+                img = Image.fromarray(full, "RGB")
             logger.info("[%s] Background flooded to white", tag)
 
         # Always scrub interior stray gray patches — the flood-fill (or the
