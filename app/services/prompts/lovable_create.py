@@ -113,10 +113,31 @@ _FIELDS = ("design_subject", "item_type", "metal_phrase", "stone_phrase",
            "user_request", "components", "color_mapping", "sketch_annotations")
 
 
+# Lovable's OUTPUT_CONTRACT + HOUSE_STYLE (its SHARED_RULES white-background block), verbatim + one
+# clarifying line for reference photos. Lovable appends this to EVERY render, which is what forces the
+# model to draw ONLY the jewellery on a pure white background and DROP the reference's scene (mannequin /
+# bust / neck / hands / table / patterned wallpaper). Our create prompt was MISSING it — it only said
+# "isolated or minimally distracting background" — so the model copied the whole reference photo, mannequin
+# and backdrop included. This restores parity with Lovable's render prompt.
+WHITE_BG_CONTRACT = (
+    "\n\nOUTPUT: Exactly ONE image. Front-facing hero angle. CAD-styled approval render on a PURE WHITE "
+    "(#FFFFFF) seamless background. Centered piece, no environment, no cast shadow, no reflection plate, "
+    "no gradient floor."
+    "\n\nSTYLE: Clean CAD-styled jewelry approval render. Isolated piece on a PURE WHITE (#FFFFFF) seamless "
+    "background — no body, neck, bust, mannequin, hands, props, environment, gradient, vignette, reflection "
+    "plate, or cast/ground shadow under the piece. If the reference shows the jewellery on a mannequin / "
+    "bust / neck / hand / table or any patterned or coloured backdrop, that backdrop is NOT part of the "
+    "piece: render ONLY the jewellery itself and REPLACE the entire background with pure solid white "
+    "(#FFFFFF). Front-facing hero angle, centered, crisp edges, premium feel, manufacturable look. Realistic "
+    "metal and stones. Soft uniform studio lighting only — no dramatic, contact, or drop shadows on the background."
+)
+
+
 def build_lovable_create(directive: str, **fields) -> str:
-    """Master (verbatim) + the selected Lovable generation directive, placeholders filled. Missing
-    placeholders resolve to '' (same as Lovable when the structured field is empty)."""
-    out = LOVABLE_MASTER + directive
+    """Master (verbatim) + the selected Lovable generation directive + Lovable's white-background contract
+    (WHITE_BG_CONTRACT), placeholders filled. Missing placeholders resolve to '' (same as Lovable when the
+    structured field is empty)."""
+    out = LOVABLE_MASTER + directive + WHITE_BG_CONTRACT
     for k in _FIELDS:
         out = out.replace("{" + k + "}", str(fields.get(k, "") or ""))
     return out
