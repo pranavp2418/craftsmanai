@@ -1,16 +1,17 @@
 import csv
-from io import StringIO
+from io import StringIO, BytesIO
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
-from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func, or_
 import uuid
+import httpx
 
 from app.core.dependencies import get_db, get_current_superuser as get_current_admin
 from app.models.user import User
-from app.models.subscription import Payment, PaymentStatus, SubscriptionPlan
+from app.models.subscription import Payment, PaymentStatus, SubscriptionPlan, TopupPack, UserSubscription, SubscriptionStatus
 from app.models.invoice import Invoice
+from app.services.invoice_service import generate_invoice_pdf_bytes
 
 router = APIRouter()
 
@@ -228,9 +229,11 @@ def download_payment_history(
     """
     Download a specific payment invoice. (Admin only)
     
-    If an invoice PDF URL exists (Supabase), redirects to that URL.
-    Otherwise, generates and downloads a CSV file with payment details.
+    Downloads PDF from Supabase if available, otherwise generates PDF on-the-fly.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     # Fetch payment with invoice information
     data = (
         db.query(
@@ -254,37 +257,80 @@ def download_payment_history(
         
     payment, retailer_name, plan_name, pdf_url = data
     
-    # If PDF URL exists (Supabase), redirect to it
+    # If PDF URL exists (Supabase), download and return the PDF
     if pdf_url:
-        return RedirectResponse(url=pdf_url, status_code=status.HTTP_302_FOUND)
+        try:
+            logger.info(f"Attempting to download PDF from: {pdf_url}")
+            response = httpx.get(pdf_url, follow_redirects=True, timeout=10.0)
+            logger.info(f"PDF download status: {response.status_code}")
+            
+            if response.status_code == 200:
+                pdf_bytes = response.content
+                logger.info(f"PDF downloaded successfully from Supabase, size: {len(pdf_bytes)} bytes, content-type: {response.headers.get('content-type', 'unknown')}")
+                filename = f"invoice_{payment.invoice_id or payment_id}.pdf"
+                
+                # Verify we actually got PDF content
+                if response.headers.get('content-type') == 'application/pdf' or pdf_bytes[:4] == b'%PDF':
+                    logger.info(f"Returning PDF response with filename: {filename}")
+                    return Response(
+                        content=pdf_bytes,
+                        media_type="application/pdf",
+                        headers={
+                            "Content-Disposition": f'attachment; filename="{filename}"',
+                            "Cache-Control": "no-cache, no-store, must-revalidate",
+                            "Pragma": "no-cache",
+                            "Expires": "0",
+                            "X-PDF-Source": "supabase"
+                        }
+                    )
+                else:
+                    logger.warning(f"Downloaded content is not a PDF, content-type: {response.headers.get('content-type')}, first bytes: {pdf_bytes[:20]}")
+            else:
+                logger.warning(f"PDF download returned status {response.status_code}")
+        except Exception as e:
+            logger.error(f"Error downloading PDF: {str(e)}")
+            # Fall back to PDF generation
     
-    # Otherwise, generate CSV as fallback
-    output = StringIO()
-    writer = csv.writer(output)
-    writer.writerow([
-        "Date", "Invoice ID", "Retailer", "Plan", 
-        "Amount", "Currency", "Status", "Payment Method"
-    ])
-    writer.writerow([
-        payment.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-        payment.invoice_id,
-        retailer_name or "Unknown Retailer",
-        plan_name or "Unknown Plan",
-        payment.amount,
-        payment.currency,
-        payment.status.value if hasattr(payment.status, 'value') else payment.status,
-        payment.payment_method or "N/A"
-    ])
-    
-    csv_content = output.getvalue()
-    output.close()
-    
-    filename = f"payment_{payment.invoice_id or payment_id}.csv"
-    
-    return Response(
-        content=csv_content,
-        media_type="text/csv",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        }
-    )
+    # Generate PDF on-the-fly as fallback
+    try:
+        logger.info("Generating PDF on-the-fly")
+        
+        # Query additional data needed for PDF generation
+        topup_pack = None
+        if payment.topup_pack_id:
+            topup_pack = db.query(TopupPack).filter(TopupPack.id == payment.topup_pack_id).first()
+        
+        # Get active subscription for billing period
+        active_sub = None
+        if payment.user_id:
+            active_sub = db.query(UserSubscription).filter(
+                UserSubscription.user_id == payment.user_id,
+                UserSubscription.status == SubscriptionStatus.ACTIVE
+            ).first()
+        
+        # Attach to payment object for PDF generation
+        payment._topup_pack = topup_pack
+        payment._active_sub = active_sub
+        
+        # Generate PDF
+        pdf_bytes = generate_invoice_pdf_bytes(payment, db)
+        logger.info(f"PDF generated successfully, size: {len(pdf_bytes)} bytes")
+        
+        filename = f"invoice_{payment.invoice_id or payment_id}.pdf"
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error generating PDF: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to download or generate invoice PDF: {str(e)}"
+        )
