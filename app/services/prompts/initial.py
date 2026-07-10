@@ -191,6 +191,14 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
     out = build_lovable_create(directive, design_subject=design_subject, item_type=item_type,
                                metal_phrase=mp, stone_phrase=stone_phrase, user_request=user_request)
 
+    # MANDATORY PRESERVE LIST (Lovable parity) — freeze the reference's exact identity (silhouette,
+    # proportions, stone coverage/arrangement, setting, borders, letter construction, relief/depth, negative
+    # space, centering, …) on pure-reproduce / enhancement jobs. NOT added for convert/sketch, which are meant
+    # to transform the input.
+    if directive in (RENDER_AS_IS, IMAGE_ENHANCEMENT):
+        from app.services.prompts.lovable_create import MANDATORY_PRESERVE_LIST
+        out += MANDATORY_PRESERVE_LIST
+
     # PER-TYPE LAYER (Lovable taxonomy): the type's verbatim default_output_behavior + render-family rule
     # (standalone component for bail/clasp/buckle/body, matching-set layout, custom-object). The verbatim
     # NEGATIVE is appended ONCE at the very end.
