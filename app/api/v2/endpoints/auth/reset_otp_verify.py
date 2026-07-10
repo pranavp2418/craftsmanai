@@ -3,7 +3,8 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from typing import Any
-
+from app.core.timezone import now as tz_now
+ 
 from app.core.database import get_db
 from app.core.rate_limiter import check_password_reset_rate_limit
 from app.schemas.auth import PasswordResetConfirm, MessageResponse
