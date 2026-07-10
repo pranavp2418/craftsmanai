@@ -2,6 +2,7 @@ import csv
 from io import StringIO
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func, or_
 import uuid
@@ -9,6 +10,7 @@ import uuid
 from app.core.dependencies import get_db, get_current_superuser as get_current_admin
 from app.models.user import User
 from app.models.subscription import Payment, PaymentStatus, SubscriptionPlan
+from app.models.invoice import Invoice
 
 router = APIRouter()
 
@@ -224,16 +226,22 @@ def download_payment_history(
     current_user: User = Depends(get_current_admin)
 ) -> Response:
     """
-    Download a specific payment record as a CSV file. (Admin only)
+    Download a specific payment invoice. (Admin only)
+    
+    If an invoice PDF URL exists (Supabase), redirects to that URL.
+    Otherwise, generates and downloads a CSV file with payment details.
     """
+    # Fetch payment with invoice information
     data = (
         db.query(
             Payment,
             User.full_name.label("retailer_name"),
-            SubscriptionPlan.name.label("plan_name")
+            SubscriptionPlan.name.label("plan_name"),
+            Invoice.pdf_url
         )
         .outerjoin(User, Payment.user_id == User.id)
         .outerjoin(SubscriptionPlan, Payment.plan_id == SubscriptionPlan.id)
+        .outerjoin(Invoice, Payment.id == Invoice.payment_id)
         .filter(Payment.id == payment_id)
         .first()
     )
@@ -244,8 +252,13 @@ def download_payment_history(
             detail="Payment not found"
         )
         
-    payment, retailer_name, plan_name = data
+    payment, retailer_name, plan_name, pdf_url = data
     
+    # If PDF URL exists (Supabase), redirect to it
+    if pdf_url:
+        return RedirectResponse(url=pdf_url, status_code=status.HTTP_302_FOUND)
+    
+    # Otherwise, generate CSV as fallback
     output = StringIO()
     writer = csv.writer(output)
     writer.writerow([

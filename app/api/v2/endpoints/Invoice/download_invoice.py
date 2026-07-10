@@ -2,7 +2,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from datetime import datetime
 from app.core.timezone import now as tz_now
@@ -18,7 +18,7 @@ from reportlab.lib import colors
 
 from app.api import deps
 from app.models.user import User
-from app.models.subscription import Payment
+from app.models.subscription import Payment, TopupPack, UserSubscription, SubscriptionStatus
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -82,7 +82,53 @@ async def download_invoice_pdf(
 
         # Fallback: Generate PDF invoice using the official layout template
         logger.info(f"Generating ad-hoc PDF for invoice {payment.invoice_id or payment_id}")
-        pdf_bytes = generate_invoice_pdf_bytes(payment, db.sync_session)
+        
+        # Query additional data needed for PDF generation
+        topup_pack = None
+        if payment.topup_pack_id:
+            query_topup = select(TopupPack).where(TopupPack.id == payment.topup_pack_id)
+            result_topup = await db.execute(query_topup)
+            topup_pack = result_topup.scalar_one_or_none()
+        
+        # Get active subscription for billing period
+        active_sub = None
+        if payment.user_id:
+            query_sub = select(UserSubscription).where(
+                UserSubscription.user_id == payment.user_id,
+                UserSubscription.status == SubscriptionStatus.ACTIVE
+            ).limit(1)
+            result_sub = await db.execute(query_sub)
+            active_sub = result_sub.scalar_one_or_none()
+        
+        # Create a mock session object with query method for PDF generation
+        class MockSession:
+            def query(self, model):
+                # This won't be used as we pass topup_pack and active_sub directly
+                pass
+        
+        # We need to modify the PDF generation to accept pre-fetched data
+        # For now, create a simple sync session wrapper
+        from sqlalchemy.orm import Session
+        from app.core.database import SessionLocal
+        
+        sync_db = SessionLocal()
+        try:
+            # Re-query the needed data in sync session
+            if payment.topup_pack_id and not topup_pack:
+                topup_pack = sync_db.query(TopupPack).filter(TopupPack.id == payment.topup_pack_id).first()
+            if payment.user_id and not active_sub:
+                active_sub = sync_db.query(UserSubscription).filter(
+                    UserSubscription.user_id == payment.user_id,
+                    UserSubscription.status == SubscriptionStatus.ACTIVE
+                ).first()
+            
+            # Temporarily attach to payment object for PDF generation
+            payment._topup_pack = topup_pack
+            payment._active_sub = active_sub
+            
+            pdf_bytes = generate_invoice_pdf_bytes(payment, sync_db)
+        finally:
+            sync_db.close()
         
         filename = f"invoice_{payment.invoice_id or payment_id}.pdf"
         
@@ -98,7 +144,7 @@ async def download_invoice_pdf(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to generate invoice PDF: {str(e)}")
+        logger.error(f"Failed to generate invoice PDF: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to generate invoice PDF: {str(e)}")
 
 

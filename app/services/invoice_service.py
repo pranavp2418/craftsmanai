@@ -23,6 +23,20 @@ def generate_invoice_pdf_bytes(payment: Payment, db: Session = None) -> bytes:
     """
     Generate ReportLab PDF bytes for a payment invoice matching the CraftsmanAI design template.
     """
+    # Use pre-fetched data if available (for async context)
+    topup_pack = getattr(payment, '_topup_pack', None)
+    active_sub = getattr(payment, '_active_sub', None)
+    
+    # Fallback to database queries if not pre-fetched
+    if not topup_pack and payment.topup_pack_id and db:
+        topup_pack = db.query(TopupPack).filter(TopupPack.id == payment.topup_pack_id).first()
+    
+    if not active_sub and payment.user_id and db:
+        active_sub = db.query(UserSubscription).filter(
+            UserSubscription.user_id == payment.user_id,
+            UserSubscription.status == SubscriptionStatus.ACTIVE
+        ).first()
+    
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -165,12 +179,6 @@ def generate_invoice_pdf_bytes(payment: Payment, db: Session = None) -> bytes:
     ]
     billed_to_box = create_info_box("BILLED TO", billed_to_lines, 259)
     
-    # Get top-up pack details if applicable
-    topup_pack = None
-    if payment.topup_pack_id and db:
-        from app.models.subscription import TopupPack
-        topup_pack = db.query(TopupPack).filter(TopupPack.id == payment.topup_pack_id).first()
-        
     plan = payment.plan
     purchase_type = "Render Top-Up" if topup_pack else "Plan Upgrade"
     
@@ -179,22 +187,17 @@ def generate_invoice_pdf_bytes(payment: Payment, db: Session = None) -> bytes:
     
     billing_period_val = "N/A"
     if payment.created_at:
-        if topup_pack and db:
-            active_sub = db.query(UserSubscription).filter(
-                UserSubscription.user_id == payment.user_id,
-                UserSubscription.status == SubscriptionStatus.ACTIVE
-            ).first()
-            if active_sub:
-                start_date_val = active_sub.start_date.strftime("%m/%d/%Y")
-                end_date_val = active_sub.end_date.strftime("%m/%d/%Y")
-                billing_period_val = f"{start_date_val} - {end_date_val}"
-            else:
-                billing_period_val = payment.created_at.strftime("%m/%d/%Y")
-        else:
+        if topup_pack and active_sub:
+            start_date_val = active_sub.start_date.strftime("%m/%d/%Y")
+            end_date_val = active_sub.end_date.strftime("%m/%d/%Y")
+            billing_period_val = f"{start_date_val} - {end_date_val}"
+        elif not topup_pack:
             duration_days = plan.duration_days if (plan and plan.duration_days) else 30
             end_date_val = (payment.created_at + timedelta(days=duration_days)).strftime("%m/%d/%Y")
             start_date_val = payment.created_at.strftime("%m/%d/%Y")
             billing_period_val = f"{start_date_val} - {end_date_val}"
+        else:
+            billing_period_val = payment.created_at.strftime("%m/%d/%Y")
             
     purchase_lines = [
         f"Type: {purchase_type}",
