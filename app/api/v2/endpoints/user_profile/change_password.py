@@ -1,4 +1,5 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
+from app.core.timezone import now as tz_now, CST_TZ
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from sqlalchemy.orm import Session
 from app.core.dependencies import get_db, get_current_user
@@ -88,7 +89,7 @@ def change_password(
             RefreshToken.is_active == True
         ).all()
 
-        now = datetime.now(timezone.utc)
+        now = tz_now()
 
         for token_record in active_refresh_tokens:
             # 1. Blacklist the associated access token in Redis and DB
@@ -140,7 +141,7 @@ def change_password(
             options={"verify_exp": False}
         )
         access_token_jti = access_payload.get("jti")
-        access_token_exp = datetime.fromtimestamp(access_payload.get("exp"), tz=timezone.utc) if access_payload.get("exp") else None
+        access_token_exp = datetime.fromtimestamp(access_payload.get("exp"), tz=CST_TZ) if access_payload.get("exp") else None
 
         # Create new refresh token
         refresh_token, token_id, expires_at = create_refresh_token(

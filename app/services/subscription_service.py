@@ -6,7 +6,7 @@ from app.models.user import User
 from app.models.subscription import UserSubscription, SubscriptionStatus
 
 from sqlalchemy import or_
-from datetime import datetime, timezone
+from app.core.timezone import now as tz_now
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class SubscriptionService:
     def check_and_update_subscription_expiry(db: Session, subscription: Optional[UserSubscription]) -> Optional[UserSubscription]:
         if not subscription:
             return None
-        now = datetime.now(timezone.utc)
+        now = tz_now()
         if subscription.end_date < now:
             if subscription.status == SubscriptionStatus.ACTIVE:
                 subscription.status = SubscriptionStatus.EXPIRED if not subscription.cancellation_date else SubscriptionStatus.CANCELLED
@@ -58,7 +58,7 @@ class SubscriptionService:
             return None
 
         owner_id = SubscriptionService.get_subscription_owner_id(user)
-        now = datetime.now(timezone.utc)
+        now = tz_now()
         
         # Query the active subscription for the owner with a row lock to prevent race conditions
         subscription = db.query(UserSubscription).filter(

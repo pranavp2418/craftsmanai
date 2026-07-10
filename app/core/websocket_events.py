@@ -6,7 +6,7 @@ the global Socket.IO server instance (sio) via register_event_handler().
 """
 
 from typing import Optional
-from datetime import datetime, UTC
+from app.core.timezone import now as tz_now
 import logging
 
 from app.core.socket_manager import sio, emit_to_room, get_sio
@@ -136,7 +136,7 @@ async def send_chat_message(sid: str, data: dict) -> dict:
         return {"success": False, "error": "User ID not found in session"}
 
     request = SendChatMessageRequest(**data)
-    msg_id = f"msg_{datetime.now(UTC).timestamp()}_{sid[:6]}"
+    msg_id = f"msg_{tz_now().timestamp()}_{sid[:6]}"
 
     chat_msg = ChatMessageData(
         id=msg_id,
@@ -145,7 +145,7 @@ async def send_chat_message(sid: str, data: dict) -> dict:
         sender_name=username,
         message=request.message,
         message_type=request.message_type,
-        timestamp=datetime.now(UTC).isoformat(),
+        timestamp=tz_now().isoformat(),
         attachments=request.attachments,
     ).model_dump()
 
@@ -156,7 +156,7 @@ async def send_chat_message(sid: str, data: dict) -> dict:
     await sio.emit("message_sent", {
         "message_id": msg_id,
         "room_id": request.room_id,
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": tz_now().isoformat(),
     }, to=sid)
 
     logger.info("Chat msg sid=%s room=%s msg_id=%s", sid, request.room_id, msg_id)
@@ -218,7 +218,7 @@ async def mark_messages_read(sid: str, data: dict) -> dict:
         "room_id": request.room_id,
         "message_ids": request.message_ids,
         "user_id": user_id,
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": tz_now().isoformat(),
     }, to=sid)
     return {"success": True, "message_ids": request.message_ids}
 
@@ -247,7 +247,7 @@ async def send_notification(sid: str, data: dict) -> dict:
         "title": request.title,
         "message": request.message,
         "data": request.data or {},
-        "created_at": datetime.now(UTC).isoformat(),
+        "created_at": tz_now().isoformat(),
     }
 
     if request.broadcast:
@@ -294,7 +294,7 @@ async def get_stats(sid: str, _data: dict = None) -> dict:
 async def ping(sid: str, _data: dict = None) -> dict:
     """Client → Server: Heartbeat – respond with pong."""
     await sio.emit("pong", {
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": tz_now().isoformat(),
     }, to=sid)
     return {"success": True}
 
@@ -336,7 +336,7 @@ async def join_chat_room(sid: str, data: dict) -> dict:
         "type": "user_joined",
         "user_id": session.get("user_id"),
         "user_name": username,
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": tz_now().isoformat(),
     }, room=chat_room, skip_sid=sid)
 
     await sio.emit("room_joined", {"room_id": chat_room}, to=sid)
@@ -370,7 +370,7 @@ async def leave_chat_room(sid: str, data: dict) -> dict:
         "type": "user_left",
         "user_id": session.get("user_id"),
         "user_name": username,
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": tz_now().isoformat(),
     }, room=chat_room, skip_sid=sid)
 
     return {"success": True, "room": chat_room}

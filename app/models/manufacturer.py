@@ -1,9 +1,11 @@
 import uuid
+from datetime import datetime
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.core.timezone import CST_TZ
 
 
 class Manufacturer(Base):
@@ -20,8 +22,8 @@ class Manufacturer(Base):
     public_token = Column(String(64), unique=True, nullable=False, index=True, default=lambda: f"m-{uuid.uuid4().hex}")
     is_active = Column(Boolean, default=True, nullable=False)
     is_deleted = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
 
     quotes = relationship("ManufacturerQuote", back_populates="manufacturer")
     orders = relationship("Order", back_populates="manufacturer", foreign_keys="Order.current_manufacturer_id")

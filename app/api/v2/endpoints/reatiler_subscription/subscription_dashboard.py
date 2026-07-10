@@ -2,7 +2,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
-from datetime import datetime, timezone
+from app.core.timezone import now as tz_now, CST_TZ
 import logging
 import stripe
 
@@ -36,7 +36,7 @@ def get_subscription_dashboard(
             UserSubscription.is_queued == False,
             or_(
                 UserSubscription.status == SubscriptionStatus.ACTIVE,
-                (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= timezone.utc) if 'timezone' in globals() else (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= datetime.now(timezone.utc))
+                (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= CST_TZ) if 'timezone' in globals() else (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= tz_now())
             )
         ).order_by(UserSubscription.created_at.desc()).first()
 
@@ -73,7 +73,7 @@ def get_subscription_dashboard(
         
         # Add subscription data if exists
         if subscription and plan:
-            now = datetime.now(timezone.utc)
+            now = tz_now()
             days_remaining = (subscription.end_date - now).days if subscription.end_date > now else 0
             
             dashboard_data["currentSubscription"] = {
@@ -112,7 +112,7 @@ def get_subscription_dashboard(
         return {
             "success": True,
             "data": dashboard_data,
-            "lastUpdated": datetime.now().isoformat()
+            "lastUpdated": tz_now().isoformat()
         }
         
     except Exception as e:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from app.core.timezone import now as tz_now
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import insert
@@ -53,7 +53,7 @@ class AuditLogService:
                     "endpoint": endpoint,
                     "filters": filters or {},
                 },
-                timestamp=datetime.now(timezone.utc),
+                timestamp=tz_now(),
             )
             
             self.db.add(audit_entry)

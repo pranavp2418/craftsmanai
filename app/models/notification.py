@@ -8,6 +8,8 @@ from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Foreign
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.sql import func
 from app.core.database import Base
+from datetime import datetime
+from app.core.timezone import CST_TZ
 
 
 class Notification(Base):
@@ -34,8 +36,8 @@ class Notification(Base):
     reference_id = Column(Integer, nullable=True, doc="ID of the referenced entity (e.g., order_id, design_id)")
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), index=True)
+    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
 
     def __repr__(self):
         return f"<Notification(id={self.id}, user_id={self.user_id}, type={self.type}, is_read={self.is_read})>"

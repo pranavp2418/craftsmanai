@@ -9,7 +9,7 @@ All real-time event *handler* logic is in app/core/websocket_events.py.
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import datetime, UTC
+from app.core.timezone import now as tz_now
 import logging
 
 from app.core.socket_manager import (
@@ -102,7 +102,7 @@ class WebSocketService:
         """
         message_data.sender_id = sender_id
         message_data.sender_name = sender_name
-        message_data.timestamp = datetime.now(UTC).isoformat()
+        message_data.timestamp = tz_now().isoformat()
         payload = message_data.model_dump()
 
         await emit_to_room(room_id, "chat_message", payload)

@@ -1,7 +1,9 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey
 from sqlalchemy.orm import relationship
+from datetime import datetime
 from sqlalchemy.sql import func
 from app.core.database import Base
+from app.core.timezone import CST_TZ
 
 
 class AuditLog(Base):
@@ -17,7 +19,7 @@ class AuditLog(Base):
     success = Column(Boolean, default=True)
     error_message = Column(Text, nullable=True)
     extra_data = Column(Text, nullable=True)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    timestamp = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), index=True)
 
     # Relationships
     user = relationship("User", back_populates="audit_logs")

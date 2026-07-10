@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, cast, String, and_
 from datetime import datetime
+from app.core.timezone import now as tz_now
 import logging
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
@@ -149,7 +150,7 @@ def get_payment_history(
                     "hasPrev": has_prev
                 }
             },
-            "lastUpdated": datetime.now().isoformat()
+            "lastUpdated": tz_now().isoformat()
         }
         
     except HTTPException:

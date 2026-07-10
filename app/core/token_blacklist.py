@@ -1,6 +1,8 @@
 import redis
 from typing import Optional
-from datetime import datetime, timezone, timedelta
+from datetime import timedelta
+from datetime import datetime
+from app.core.timezone import now as tz_now
 import logging
 
 from app.core.config import settings
@@ -78,7 +80,7 @@ class TokenBlacklist:
             return False
         try:
             # Calculate TTL until token expiration
-            now = datetime.now(timezone.utc)
+            now = tz_now()
             ttl = int((expires_at - now).total_seconds())
 
             if ttl > 0:

@@ -1,5 +1,6 @@
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
+from app.core.timezone import now as tz_now
 from typing import Optional
 
 from fastapi import HTTPException, status
@@ -87,7 +88,7 @@ class TeamSettingsService:
             token=secrets.token_urlsafe(32),
             invited_by=current_user_id,
             password=password_hash,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+            expires_at=tz_now() + timedelta(days=7),
             is_accepted=False,
         )
         self.invitation_repo.create(invitation)
@@ -117,7 +118,7 @@ class TeamSettingsService:
         if not invitation:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid or expired invitation")
 
-        now = datetime.now(timezone.utc)
+        now = tz_now()
         if invitation.is_accepted or invitation.expires_at <= now:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invitation is no longer valid")
 

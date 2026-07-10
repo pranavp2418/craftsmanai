@@ -5,6 +5,8 @@ ContactSubmission model - stores contact form submissions from the public websit
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean
 from sqlalchemy.sql import func
 from app.core.database import Base
+from datetime import datetime
+from app.core.timezone import CST_TZ
 
 
 class ContactSubmission(Base):
@@ -23,8 +25,8 @@ class ContactSubmission(Base):
     email_sent_at = Column(DateTime(timezone=True), nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ))
+    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
 
     def __repr__(self):
         return f"<ContactSubmission(id={self.id}, name={self.full_name}, email={self.email})>"

@@ -3,7 +3,7 @@ Repository for persisting and retrieving user notifications.
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
+from app.core.timezone import now as tz_now
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -84,14 +84,14 @@ class NotificationRepository:
         )
         if notification:
             notification.is_read = True
-            notification.read_at = datetime.now(timezone.utc)
+            notification.read_at = tz_now()
             self.db.commit()
             self.db.refresh(notification)
         return notification
 
     def mark_all_as_read(self, user_id: int) -> int:
         """Mark all unread notifications as read. Returns count of updated rows."""
-        now = datetime.now(timezone.utc)
+        now = tz_now()
         result = (
             self.db.query(Notification)
             .filter(

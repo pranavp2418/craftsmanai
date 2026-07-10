@@ -136,13 +136,13 @@ def customer_access_design(
     from app.models.manufacturer import Manufacturer
     from app.models.order import ManufacturerQuote
     from sqlalchemy import or_
-    from datetime import datetime, timezone
+    from app.core.timezone import now as tz_now
     
     brand_setting = BrandSettingRepository(db).get_by_user_id(design.user_id)
     
     # Check if user has all 3 branding feature flags enabled
     powered_by = False
-    now = datetime.now(timezone.utc)
+    now = tz_now()
     active_sub = db.query(UserSubscription).join(SubscriptionPlan).filter(
         UserSubscription.user_id == design.user_id,
         UserSubscription.is_queued == False,
@@ -182,7 +182,7 @@ def customer_access_design(
             deadline = None
             if approved_quote and approved_quote.delivery_time_days:
                 # Use quote creation date as the submission date
-                base_date = approved_quote.created_at.date() if approved_quote.created_at else datetime.now(timezone.utc).date()
+                base_date = approved_quote.created_at.date() if approved_quote.created_at else tz_now().date()
                 deadline_date = base_date + timedelta(days=approved_quote.delivery_time_days)
                 deadline = deadline_date.isoformat()
             

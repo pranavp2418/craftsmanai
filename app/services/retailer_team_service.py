@@ -2,7 +2,8 @@ import logging
 import json
 import secrets
 from typing import Optional, List, Tuple
-from datetime import datetime, timezone, timedelta
+from datetime import timedelta
+from app.core.timezone import now as tz_now
 from sqlalchemy.orm import Session
 
 from app.repositories.retailer_team import (
@@ -226,7 +227,7 @@ class TeamInvitationService:
         
         # Generate invitation token
         token = secrets.token_urlsafe(32)
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=self.invitation_expiry_hours * 24)
+        expires_at = tz_now() + timedelta(hours=self.invitation_expiry_hours * 24)
         
         # Create invitation
         invitation = self.repo.create_invitation(
@@ -310,7 +311,7 @@ class TeamInvitationService:
             raise ValueError(f"Invitation is {invitation.status.value}")
         
         # Check expiration
-        if invitation.expires_at < datetime.now(timezone.utc):
+        if invitation.expires_at < tz_now():
             raise ValueError("Invitation has expired")
         
         # Accept invitation

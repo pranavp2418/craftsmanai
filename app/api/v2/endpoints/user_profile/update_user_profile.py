@@ -19,10 +19,10 @@ def split_full_name(full_name: str | None) -> tuple[str, str]:
 def get_subscription_status(db: Session, user: User) -> tuple[bool, bool, str | None]:
     from app.services.subscription_service import SubscriptionService
     from app.models.subscription import UserSubscription, SubscriptionStatus, SubscriptionPlan
-    from datetime import datetime, timezone
+    from app.core.timezone import now as tz_now
 
     owner_id = SubscriptionService.get_subscription_owner_id(user)
-    now = datetime.now(timezone.utc)
+    now = tz_now()
     
     subscription = db.query(UserSubscription).filter(
         UserSubscription.user_id == owner_id,

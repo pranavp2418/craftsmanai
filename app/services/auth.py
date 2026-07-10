@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status, Request
 from typing import Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from datetime import timedelta
+from app.core.timezone import now as tz_now
 import uuid
 import logging
 
@@ -299,7 +300,7 @@ class AuthService:
         
         # Generate new OTP
         otp_code = generate_otp()
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        expires_at = tz_now() + timedelta(minutes=10)
         
         # Save OTP
         otp = OTP(
@@ -322,7 +323,7 @@ class AuthService:
             OTP.otp_code == otp_code,
             OTP.otp_type == "email_verification",
             OTP.is_used == False,
-            OTP.expires_at > datetime.now(timezone.utc)
+            OTP.expires_at > tz_now()
         ).first()
         
         if not otp:

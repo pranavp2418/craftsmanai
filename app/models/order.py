@@ -1,4 +1,5 @@
 from enum import Enum
+from datetime import datetime
 
 from sqlalchemy import (
     Column,
@@ -15,6 +16,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.core.timezone import CST_TZ
 
 
 class OrderStatus(str, Enum):
@@ -41,8 +43,8 @@ class Order(Base):
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True, index=True)
     current_manufacturer_id = Column(Integer, ForeignKey("manufacturers.id"), nullable=True, index=True)
     status = Column(SqlEnum(OrderStatus, native_enum=False, length=32), nullable=False, default=OrderStatus.CREATED)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
 
     design = relationship("Design", back_populates="orders")
     share = relationship("DesignShare", back_populates="order")
@@ -62,7 +64,7 @@ class ManufacturerQuote(Base):
     delivery_time_days = Column(Integer, nullable=True)
     notes = Column(Text, nullable=True)
     status = Column(SqlEnum(ManufacturerQuoteStatus, native_enum=False, length=32), nullable=False, default=ManufacturerQuoteStatus.SUBMITTED)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), nullable=False)
 
     order = relationship("Order", back_populates="quotes")
     manufacturer = relationship("Manufacturer", back_populates="quotes")
@@ -76,7 +78,7 @@ class OrderActivityLog(Base):
     action_type = Column(String(64), nullable=False)
     message = Column(String(500), nullable=True)
     metadata_json = Column(JSON, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), nullable=False)
 
     order = relationship("Order", back_populates="activity_logs")
 

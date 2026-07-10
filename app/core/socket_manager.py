@@ -13,7 +13,7 @@ Architecture:
 """
 
 from typing import Any, Callable, List, Mapping, Optional, TypedDict
-from datetime import datetime, UTC
+from app.core.timezone import now as tz_now
 import logging
 import urllib.parse
 
@@ -34,8 +34,8 @@ class AuthenticatedUser(TypedDict):
 
 
 def _now_utc_iso() -> str:
-    """Return an ISO-8601 UTC timestamp."""
-    return datetime.now(UTC).isoformat()
+    """Return an ISO-8601 CST timestamp."""
+    return tz_now().isoformat()
 
 
 # ---------------------------------------------------------------------------

@@ -3,7 +3,8 @@ JWT utility functions for token creation and validation.
 
 Uses python-jose (matching app/core/security.py) for JWT operations.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from app.core.timezone import now as tz_now
 from typing import Optional, Tuple
 from jose import JWTError, jwt
 from app.core.config import settings
@@ -11,7 +12,7 @@ from app.core.config import settings
 
 def create_access_token(user_id: int) -> Tuple[str, str, datetime]:
     """Create a JWT access token with standard claims (sub, email, username)."""
-    now = datetime.now(timezone.utc)
+    now = tz_now()
     token_id = f"jti_{user_id}_{int(now.timestamp())}"
     payload = {
         "sub": str(user_id),
@@ -27,7 +28,7 @@ def create_access_token(user_id: int) -> Tuple[str, str, datetime]:
 
 def create_refresh_token(user_id: int) -> Tuple[str, str, datetime]:
     """Create a JWT refresh token."""
-    now = datetime.now(timezone.utc)
+    now = tz_now()
     token_id = f"jti_ref_{user_id}_{int(now.timestamp())}"
     payload = {
         "sub": str(user_id),

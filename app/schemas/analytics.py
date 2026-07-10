@@ -65,7 +65,7 @@ class DateRangeFilter(BaseModel):
 
     @validator("start_date", "end_date")
     def validate_future_dates(cls, value):
-        if value and value > datetime.now(value.tzinfo or None):
+        if value and value > tz_now():
             raise ValueError("Date cannot be in the future")
         return value
 

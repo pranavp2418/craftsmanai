@@ -1,4 +1,5 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
+from app.core.timezone import now as tz_now, CST_TZ
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
 from typing import Any
@@ -165,14 +166,14 @@ async def login(
                 
                 # Get all active devices sorted by last_used (oldest first)
                 all_active_devices = auth_service.device_repo.get_user_devices(user.id, active_only=True)
-                all_active_devices.sort(key=lambda x: x.last_used or datetime.min.replace(tzinfo=timezone.utc))
+                all_active_devices.sort(key=lambda x: x.last_used or datetime.min.replace(tzinfo=CST_TZ))
                 
                 # Determine how many to revoke (we keep MAX_ACTIVE_DEVICES - 1, 1 slot goes to new device)
                 keep_count = max(settings.MAX_ACTIVE_DEVICES - 1, 0)
                 devices_to_revoke = all_active_devices[:-keep_count] if keep_count > 0 else all_active_devices
                 
                 # Blacklist all tokens and revoke devices that exceed the limit
-                now = datetime.now(timezone.utc)
+                now = tz_now()
                 for device in devices_to_revoke:
                     if device.device_id:
                         # Get all active refresh tokens for this device
@@ -229,7 +230,7 @@ async def login(
         options={"verify_exp": False}
     )
     access_token_jti = access_payload.get("jti")
-    access_token_exp = datetime.fromtimestamp(access_payload.get("exp"), tz=timezone.utc) if access_payload.get("exp") else None
+    access_token_exp = datetime.fromtimestamp(access_payload.get("exp"), tz=CST_TZ) if access_payload.get("exp") else None
     
     refresh_token, token_id, expires_at = create_refresh_token(
         str(user.id), login_data.remember_me

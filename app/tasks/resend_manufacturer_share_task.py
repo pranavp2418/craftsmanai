@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from app.core.timezone import now as tz_now
 
 from app.services.email_service import EmailService
 from app.tasks.base import create_task
@@ -250,7 +250,7 @@ def resend_manufacturer_share_email(
                 resend_log.retry_count = retry_count
                 resend_log.error_message = None
                 resend_log.smtp_response = "Resent successfully via ZeptoMail"
-                resend_log.sent_at = datetime.now(timezone.utc)
+                resend_log.sent_at = tz_now()
                 db.commit()
         else:
             logger.warning(

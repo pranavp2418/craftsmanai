@@ -27,14 +27,14 @@ def get_user_profile(
     from app.services.subscription_service import SubscriptionService
     from app.models.subscription import UserSubscription, SubscriptionStatus, SubscriptionPlan
     from sqlalchemy import or_
-    from datetime import datetime, timezone
+    from app.core.timezone import now as tz_now
 
     first_name, last_name = split_full_name(current_user.full_name)
     role = "Admin" if current_user.is_superuser else "User"
 
     # Query latest subscription (active, expired, or cancelled)
     owner_id = SubscriptionService.get_subscription_owner_id(current_user)
-    now = datetime.now(timezone.utc)
+    now = tz_now()
     
     subscription = db.query(UserSubscription).filter(
         UserSubscription.user_id == owner_id,

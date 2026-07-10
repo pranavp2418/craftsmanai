@@ -190,11 +190,11 @@ def get_active_topup_users(
     Get all users with active top-up plans (Admin only).
     """
     from sqlalchemy import or_, text
-    from datetime import datetime, timezone
+    from app.core.timezone import now as tz_now
     from app.models.subscription import UserSubscription, SubscriptionPlan, TopupPack, Payment, PaymentStatus
     from app.models.user import User
 
-    now = datetime.now(timezone.utc)
+    now = tz_now()
 
     from sqlalchemy.orm import aliased
     CurrentSub = aliased(UserSubscription, name="current_sub")
@@ -391,7 +391,7 @@ def get_retailer_topup_details(
     """
     Get detailed top-up and render usage information for a specific retailer by ID (Admin only).
     """
-    from datetime import datetime, timezone
+    from app.core.timezone import now as tz_now
     from app.models.subscription import UserSubscription, SubscriptionPlan, TopupPack
     from app.models.user import User
     from sqlalchemy import or_
@@ -400,7 +400,7 @@ def get_retailer_topup_details(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    now = datetime.now(timezone.utc)
+    now = tz_now()
     # Get active or cancelled-but-not-expired subscription
     sub = db.query(UserSubscription).filter(
         UserSubscription.user_id == retailer_id,

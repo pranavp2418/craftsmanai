@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
 from typing import Any
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
+from app.core.timezone import now as tz_now, CST_TZ
 
 from app.core.database import get_db
 from app.core.rate_limiter import check_auth_rate_limit
@@ -69,7 +70,7 @@ def _blacklist_access_token_jti(db: Session, jti: str, expires_at: datetime, rea
     if not jti or not expires_at:
         return
     
-    now = datetime.now(timezone.utc)
+    now = tz_now()
     remaining_seconds = max(int((expires_at - now).total_seconds()), 0)
     remaining_minutes = max(remaining_seconds // 60, 1)
     
@@ -132,7 +133,7 @@ async def logout(
         user_id_from_token = refresh_payload.get("sub")
         
         if refresh_jti and refresh_exp:
-            expires_at = datetime.fromtimestamp(refresh_exp, tz=timezone.utc)
+            expires_at = datetime.fromtimestamp(refresh_exp, tz=CST_TZ)
             
             # 0. Blacklist the associated access token from DB
             if refresh_jti:

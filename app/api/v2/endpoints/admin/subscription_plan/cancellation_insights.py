@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 from datetime import datetime
+from app.core.timezone import now as tz_now
 from typing import Any, Optional
 
 from app.core.dependencies import get_db, get_current_superuser as get_current_admin
@@ -50,7 +51,7 @@ def get_cancellation_summary(
         avg_tenure_months = round((total_days / len(tenures)) / 30.44, 1)
 
     # 3. Churn Rate (Current Month)
-    now = datetime.now()
+    now = tz_now()
     start_of_current_month = datetime(now.year, now.month, 1)
     
     cancelled_this_month = db.query(func.count(UserSubscription.id)).filter(
@@ -190,7 +191,7 @@ def get_cancellation_trends(
     Get monthly cancellation counts for the bar chart.
     """
     trends = []
-    now = datetime.now()
+    now = tz_now()
     
     for i in range(months - 1, -1, -1):
         year = now.year

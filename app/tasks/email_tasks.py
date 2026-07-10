@@ -3,7 +3,7 @@ Email-related background tasks using Celery
 All email sending operations are handled here
 """
 
-from datetime import datetime, timezone
+from app.core.timezone import now as tz_now
 import logging
 import json
 
@@ -158,7 +158,7 @@ def send_signup_otp_email(self, to: str, otp: str, user_name: str):
             email_log.retry_count = retry_count
             email_log.error_message = None
             email_log.smtp_response = "Message sent successfully via ZeptoMail"
-            email_log.sent_at = datetime.now(timezone.utc)
+            email_log.sent_at = tz_now()
             db.commit()
         
         logger.info(f"✅ {task_name} completed successfully for {to}")
@@ -257,7 +257,7 @@ def send_password_reset_email(self, to: str, otp: str, user_name: str):
             email_log.retry_count = retry_count
             email_log.error_message = None
             email_log.smtp_response = "Message sent successfully via ZeptoMail"
-            email_log.sent_at = datetime.now(timezone.utc)
+            email_log.sent_at = tz_now()
             db.commit()
         
         logger.info(f"✅ {task_name} completed successfully for {to}")
@@ -355,7 +355,7 @@ def send_welcome_email(self, to: str, user_name: str, dashboard_url: str = "#"):
             email_log.retry_count = retry_count
             email_log.error_message = None
             email_log.smtp_response = "Message sent successfully via ZeptoMail"
-            email_log.sent_at = datetime.now(timezone.utc)
+            email_log.sent_at = tz_now()
             db.commit()
         
         logger.info(f"✅ {task_name} completed successfully for {to}")
@@ -561,7 +561,7 @@ def send_design_review_email(
             email_log.retry_count = retry_count
             email_log.error_message = None
             email_log.smtp_response = "Message sent successfully via ZeptoMail"
-            email_log.sent_at = datetime.now(timezone.utc)
+            email_log.sent_at = tz_now()
             db.commit()
 
         logger.info(f"✅ {task_name} completed successfully for {to_email}")

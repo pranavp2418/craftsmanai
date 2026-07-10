@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from app.core.timezone import now as tz_now, CST_TZ
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
 from typing import Any
@@ -44,7 +44,7 @@ async def verify_otp(
         OTP.otp_code == otp_data.otp,
         OTP.otp_type == otp_type,
         OTP.is_used == False,
-        OTP.expires_at > datetime.now(timezone.utc)
+        OTP.expires_at > tz_now()
     ).first()
     
     if not otp:
@@ -127,7 +127,7 @@ async def verify_otp(
         options={"verify_exp": False}
     )
     access_token_jti = access_payload.get("jti")
-    access_token_exp = datetime.fromtimestamp(access_payload.get("exp"), tz=timezone.utc) if access_payload.get("exp") else None
+    access_token_exp = datetime.fromtimestamp(access_payload.get("exp"), tz=CST_TZ) if access_payload.get("exp") else None
     
     refresh_token, token_id, expires_at = create_refresh_token(str(user.id), False)
     

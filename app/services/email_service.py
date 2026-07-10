@@ -65,7 +65,7 @@ class EmailService:
             
         from app.core.database import SessionLocal
         from app.models.email_log import EmailLog, EmailStatus
-        from datetime import datetime, timezone
+        from app.core.timezone import now as tz_now
         
         db = SessionLocal()
         try:
@@ -73,7 +73,7 @@ class EmailService:
             if email_log:
                 email_log.status = status
                 if status == EmailStatus.SENT:
-                    email_log.sent_at = datetime.now(timezone.utc)
+                    email_log.sent_at = tz_now()
                 if error_message is not None:
                     email_log.error_message = error_message
                 if smtp_response is not None:
@@ -95,7 +95,7 @@ class EmailService:
         from app.models.email_log import EmailLog, EmailStatus
         from app.models.user import User
         from sqlalchemy import func
-        from datetime import datetime, timezone
+        from app.core.timezone import now as tz_now
 
         db = SessionLocal()
         try:
@@ -109,7 +109,7 @@ class EmailService:
                 template_variables=json.dumps(variables) if variables else None,
                 status=EmailStatus.SENT,
                 user_id=user_id,
-                sent_at=datetime.now(timezone.utc),
+                sent_at=tz_now(),
                 smtp_response=smtp_response,
             )
             db.add(email_log)

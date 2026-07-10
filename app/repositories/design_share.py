@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from app.core.timezone import now as tz_now
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
@@ -78,7 +78,7 @@ class DesignShareRepository:
     ) -> DesignShare:
         share.status = status
         share.comment = comment
-        share.reviewed_at = datetime.now(timezone.utc)
+        share.reviewed_at = tz_now()
         self.db.commit()
         self.db.refresh(share)
         return share

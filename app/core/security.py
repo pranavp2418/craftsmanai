@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt, ExpiredSignatureError
 import hashlib
@@ -6,6 +6,7 @@ import secrets
 import string
 import uuid
 from .config import settings
+from app.core.timezone import now as tz_now
 
 
 def get_password_hash(password: str) -> str:
@@ -46,13 +47,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
+    expire = tz_now() + (
         expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     
     to_encode.update({
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": tz_now(),
         "jti": str(uuid.uuid4()),
         "type": "access"
     })
@@ -69,12 +70,12 @@ def create_refresh_token(user_id: str, remember_me: bool = False):
         else settings.REFRESH_TOKEN_DAYS
     )
 
-    expire = datetime.now(timezone.utc) + expires_delta
+    expire = tz_now() + expires_delta
 
     payload = {
         "sub": user_id,
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": tz_now(),
         "jti": token_id,
         "type": "refresh"
     }
@@ -160,7 +161,7 @@ def generate_token_id() -> str:
 
 
 def is_token_expired(exp: int) -> bool:
-    return datetime.now(timezone.utc).timestamp() > exp
+    return tz_now().timestamp() > exp
 
 
 def hash_token(token: str) -> str:
@@ -182,8 +183,8 @@ def create_reset_token(email: str, expires_delta: Optional[timedelta] = None) ->
     to_encode = {
         "sub": email,
         "type": "reset",
-        "exp": datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15)),
-        "iat": datetime.now(timezone.utc),
+        "exp": tz_now() + (expires_delta or timedelta(minutes=15)),
+        "iat": tz_now(),
         "jti": str(uuid.uuid4())
     }
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)

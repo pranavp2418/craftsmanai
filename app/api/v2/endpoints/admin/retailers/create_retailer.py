@@ -7,7 +7,7 @@ from app.core.security import get_password_hash
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 import uuid
-import datetime
+from app.core.timezone import now as tz_now
 
 router = APIRouter()
 
@@ -34,7 +34,7 @@ async def create_retailer(
         if phone_res.scalars().first():
             raise HTTPException(status_code=400, detail="Retailer with this phone number already exists")
         
-    year = datetime.datetime.now().year
+    year = tz_now().year
     random_part = uuid.uuid4().hex[:4].upper()
     identifier = f"RET-{year}-{random_part}"
     

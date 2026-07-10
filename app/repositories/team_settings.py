@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from app.core.timezone import now as tz_now
 from typing import List, Optional
 
 from sqlalchemy import and_, func
@@ -15,7 +15,7 @@ class MemberInvitationRepository:
         return self.db.query(MemberInvitation).filter(MemberInvitation.token == token).first()
 
     def get_active_pending_by_account_and_email(self, account_id: Optional[int], email: str) -> Optional[MemberInvitation]:
-        now = datetime.now(timezone.utc)
+        now = tz_now()
         filters = [
             func.lower(MemberInvitation.email) == email.lower(),
             MemberInvitation.is_accepted.is_(False),
@@ -34,7 +34,7 @@ class MemberInvitationRepository:
 
     def mark_accepted(self, invitation: MemberInvitation) -> MemberInvitation:
         invitation.is_accepted = True
-        invitation.accepted_at = datetime.now(timezone.utc)
+        invitation.accepted_at = tz_now()
         self.db.commit()
         self.db.refresh(invitation)
         return invitation
@@ -136,7 +136,7 @@ class AccountMemberRepository:
             member.invited_by = invited_by
             member.status = "active"
             member.deleted_at = None
-            member.updated_at = datetime.now(timezone.utc)
+            member.updated_at = tz_now()
             self.db.commit()
             self.db.refresh(member)
             return member
@@ -159,7 +159,7 @@ class AccountMemberRepository:
             return None
 
         member.role = role
-        member.updated_at = datetime.now(timezone.utc)
+        member.updated_at = tz_now()
         self.db.commit()
         self.db.refresh(member)
         return member
@@ -170,8 +170,8 @@ class AccountMemberRepository:
             return None
 
         member.status = "deleted"
-        member.deleted_at = datetime.now(timezone.utc)
-        member.updated_at = datetime.now(timezone.utc)
+        member.deleted_at = tz_now()
+        member.updated_at = tz_now()
         self.db.commit()
         self.db.refresh(member)
         return member

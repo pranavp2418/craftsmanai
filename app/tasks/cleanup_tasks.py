@@ -25,18 +25,18 @@ def cleanup_expired_otps():
         
         from app.core.database import SessionLocal
         from app.models.otp import OTP
-        from datetime import datetime, timezone
+        from app.core.timezone import now as tz_now
         
         db = SessionLocal()
         try:
             # Count expired OTPs before deletion
             expired_count = db.query(OTP).filter(
-                OTP.expires_at <= datetime.now(timezone.utc)
+                OTP.expires_at <= tz_now()
             ).count()
             
             # Delete expired OTPs
             deleted_count = db.query(OTP).filter(
-                OTP.expires_at <= datetime.now(timezone.utc)
+                OTP.expires_at <= tz_now()
             ).delete()
             
             db.commit()
@@ -102,12 +102,12 @@ def cleanup_blacklisted_tokens():
         # 2. Database cleanup
         from app.core.database import SessionLocal
         from app.models.blacklisted_token import BlacklistedToken
-        from datetime import datetime, timezone
+        from app.core.timezone import now as tz_now
         
         db = SessionLocal()
         try:
             deleted_count = db.query(BlacklistedToken).filter(
-                BlacklistedToken.expires_at <= datetime.now(timezone.utc)
+                BlacklistedToken.expires_at <= tz_now()
             ).delete()
             db.commit()
             logger.info(f"✅ {task_name}: Deleted {deleted_count} expired blacklisted tokens from DB")

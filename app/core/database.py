@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from .config import settings
@@ -23,6 +23,15 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
+
+
+# Set PostgreSQL timezone to America/Chicago (CST) for all new connections
+@event.listens_for(engine, "connect")
+def set_timezone_on_connect(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("SET timezone = 'America/Chicago'")
+    cursor.close()
+    dbapi_connection.commit()
 
 
 def get_db():

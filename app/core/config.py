@@ -55,8 +55,8 @@ class Settings(BaseSettings):
     CELERY_TASK_SERIALIZER: str = "json"
     CELERY_RESULT_SERIALIZER: str = "json"
     CELERY_ACCEPT_CONTENT: List[str] = ["json"]
-    CELERY_TIMEZONE: str = "UTC"
-    CELERY_ENABLE_UTC: bool = True
+    CELERY_TIMEZONE: str = "America/Chicago"
+    CELERY_ENABLE_UTC: bool = False
     # Worker concurrency + memory safety. High-quality image tasks (pro+2K ~210MB, 4K ~356MB working
     # set; child RSS incl. interpreter ~0.5-1GB). Server has 32GB RAM, so 4 concurrent is comfortably
     # safe (4 * ~1GB = ~4GB, leaving plenty for API + Redis). Could go higher (6-8) for more throughput.
@@ -133,6 +133,9 @@ class Settings(BaseSettings):
     # Contact Form Settings
     CONTACT_NOTIFICATION_EMAIL: str = "abhishek@fonixtech.io"
     
+    # Timezone
+    TIMEZONE: str = "America/Chicago"
+
     # Frontend URL
     # FRONTEND_URL: str = "https://z296mjqz-3000.inc1.devtunnels.ms/"
     FRONTEND_URL: str = "https://craftsmanai.app/"

@@ -132,13 +132,13 @@ def manufacturer_access_shared_variant(
     from app.repositories.brand_setting import BrandSettingRepository
     from app.models.subscription import UserSubscription, SubscriptionPlan, SubscriptionStatus
     from sqlalchemy import or_
-    from datetime import datetime, timezone
+    from app.core.timezone import now as tz_now
     
     brand_setting = BrandSettingRepository(db).get_by_user_id(design.user_id)
     
     # Check if user has all 3 branding feature flags enabled
     powered_by = False
-    now = datetime.now(timezone.utc)
+    now = tz_now()
     active_sub = db.query(UserSubscription).join(SubscriptionPlan).filter(
         UserSubscription.user_id == design.user_id,
         UserSubscription.is_queued == False,

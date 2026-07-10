@@ -1,7 +1,8 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from datetime import datetime
 from app.core.database import Base
+from app.core.timezone import CST_TZ
 
 
 class User(Base):
@@ -32,8 +33,8 @@ class User(Base):
     subscription_plan = Column(String(50), default="Starter", nullable=False)
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ))
+    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
     last_login = Column(DateTime(timezone=True))
     
     # Relationships

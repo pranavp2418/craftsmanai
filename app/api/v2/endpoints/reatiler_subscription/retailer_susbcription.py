@@ -2,7 +2,8 @@ from typing import Any, List
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
+from app.core.timezone import now as tz_now, CST_TZ
 import uuid
 import stripe
 import logging
@@ -122,7 +123,7 @@ def create_checkout_session(
         )
 
         # Create a pending payment record
-        current_year = datetime.now().year
+        current_year = tz_now().year
         invoice_id = f"INV-{current_year}-{str(uuid.uuid4())[:8].upper()}"
 
         payment = Payment(
@@ -228,7 +229,7 @@ def create_topup_checkout_session(
         )
 
         # Create a pending payment record
-        current_year = datetime.now().year
+        current_year = tz_now().year
         invoice_id = f"INV-{current_year}-{str(uuid.uuid4())[:8].upper()}"
 
         payment = Payment(
@@ -345,7 +346,7 @@ def verify_payment(
                         topup_pack = db.query(TopupPack).filter(TopupPack.id == payment.topup_pack_id).first()
                         plan_name = f"Topup Pack - {topup_pack.renders} Renders" if topup_pack else "Topup Pack"
                         formatted_amount = f"${float(payment.amount):.2f}" if payment.amount else "$0.00"
-                        billing_date = datetime.now(timezone.utc).strftime("%B %d, %Y")
+                        billing_date = tz_now().strftime("%B %d, %Y")
                         billing_url = f"{settings.FRONTEND_URL}/retailer/settings" if hasattr(settings, "FRONTEND_URL") else "#"
                         
                         send_topup_purchase_confirmation_email.delay(
@@ -443,13 +444,13 @@ def verify_payment(
 
             is_queued = False
             activates_after_id = None
-            start_date = datetime.now(timezone.utc)
+            start_date = tz_now()
             end_date = start_date + timedelta(days=duration)
 
             if active_subscription:
                 # Deactivate the old active subscription immediately
                 active_subscription.status = SubscriptionStatus.EXPIRED
-                active_subscription.end_date = datetime.now(timezone.utc)
+                active_subscription.end_date = tz_now()
                 
                 # Cancel the old subscription on Stripe immediately to avoid double-charging
                 if active_subscription.stripe_subscription_id:
@@ -576,7 +577,7 @@ def verify_payment(
                         user_name = retailer_user.full_name or retailer_user.email.split("@")[0]
                         plan_name = plan.name
                         formatted_amount = f"${float(payment.amount):.2f}" if payment.amount else "$0.00"
-                        billing_date = user_sub.start_date.strftime("%B %d, %Y") if user_sub.start_date else datetime.now(timezone.utc).strftime("%B %d, %Y")
+                        billing_date = user_sub.start_date.strftime("%B %d, %Y") if user_sub.start_date else tz_now().strftime("%B %d, %Y")
                         billing_url = f"{settings.FRONTEND_URL}/retailer/settings" if hasattr(settings, "FRONTEND_URL") else "#"
                         
                         send_plan_purchase_confirmation_email.delay(
@@ -739,7 +740,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                             topup_pack = db.query(TopupPack).filter(TopupPack.id == payment.topup_pack_id).first()
                             plan_name = f"Topup Pack - {topup_pack.renders} Renders" if topup_pack else "Topup Pack"
                             formatted_amount = f"${float(payment.amount):.2f}" if payment.amount else "$0.00"
-                            billing_date = datetime.now(timezone.utc).strftime("%B %d, %Y")
+                            billing_date = tz_now().strftime("%B %d, %Y")
                             billing_url = f"{settings.FRONTEND_URL}/retailer/settings" if hasattr(settings, "FRONTEND_URL") else "#"
                             
                             send_topup_purchase_confirmation_email.delay(
@@ -843,7 +844,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                         user_name = user.full_name or user.email.split("@")[0]
                         plan_name = plan.name
                         access_end_date = sub.end_date.strftime("%Y-%m-%d") if sub.end_date else "N/A"
-                        cancellation_date = sub.cancellation_date.strftime("%Y-%m-%d") if sub.cancellation_date else datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                        cancellation_date = sub.cancellation_date.strftime("%Y-%m-%d") if sub.cancellation_date else tz_now().strftime("%Y-%m-%d")
                         manage_billing_url = f"{settings.FRONTEND_URL}/retailer" if hasattr(settings, 'FRONTEND_URL') else "#"
                         
                         send_subscription_cancellation_confirmation_email.delay(
@@ -872,7 +873,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             if sub:
                 if stripe_sub.get('cancel_at_period_end'):
                     if not sub.cancellation_date:
-                        sub.cancellation_date = datetime.now(timezone.utc)
+                        sub.cancellation_date = tz_now()
                         sub.cancellation_reason = CancellationReason.OTHER
                 
                 stripe_status = stripe_sub.get('status')
@@ -940,14 +941,14 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                             next_renewal_ts = period_data.get('end')
                             start_ts = period_data.get('start')
                             if next_renewal_ts:
-                                next_renewal = datetime.fromtimestamp(next_renewal_ts, timezone.utc).strftime("%B %d, %Y")
-                                period_end = datetime.fromtimestamp(next_renewal_ts, timezone.utc)
+                                next_renewal = datetime.fromtimestamp(next_renewal_ts, CST_TZ).strftime("%B %d, %Y")
+                                period_end = datetime.fromtimestamp(next_renewal_ts, CST_TZ)
                             if start_ts:
-                                period_start = datetime.fromtimestamp(start_ts, timezone.utc)
+                                period_start = datetime.fromtimestamp(start_ts, CST_TZ)
                         
                         if not next_renewal:
-                            period_end = datetime.now(timezone.utc) + timedelta(days=30)
-                            period_start = datetime.now(timezone.utc)
+                            period_end = tz_now() + timedelta(days=30)
+                            period_start = tz_now()
                             next_renewal = period_end.strftime("%B %d, %Y")
                             
                         # Update subscription dates and reset usage/topups for the new cycle
@@ -994,7 +995,7 @@ def activate_queued_subscriptions(
     Background job to activate queued subscriptions when their parent subscription ends.
     """
     try:
-        now = datetime.now(timezone.utc)
+        now = tz_now()
         
         queued_subscriptions = db.query(UserSubscription).filter(
             UserSubscription.is_queued == True,
@@ -1067,7 +1068,7 @@ def reset_monthly_tokens(
     Background job to reset monthly tokens for users whose reset date has passed.
     """
     try:
-        now = datetime.now(timezone.utc)
+        now = tz_now()
         
         # Find all active subscriptions
         active_subs = db.query(UserSubscription).filter(
@@ -1127,7 +1128,7 @@ def get_token_status(
         from sqlalchemy import or_
         from app.services.subscription_service import SubscriptionService
         
-        now = datetime.now(timezone.utc)
+        now = tz_now()
         
         active_sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == current_user_id,
@@ -1202,7 +1203,7 @@ def get_my_subscriptions(
     """
     from sqlalchemy import or_
     from sqlalchemy.orm import joinedload
-    now = datetime.now(timezone.utc)
+    now = tz_now()
     sub = db.query(UserSubscription).filter(
         UserSubscription.user_id == current_user.id,
         UserSubscription.is_queued == False,

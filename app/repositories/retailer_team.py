@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from typing import Optional, List
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
+from app.core.timezone import now as tz_now
 
 from app.models.retailer_team import RetailerTeam, TeamMember, TeamInvitation, TeamRole, TeamRolePermission, InvitationStatus, TeamRole as TeamRoleEnum
 from app.models.user import User
@@ -64,7 +65,7 @@ class RetailerTeamRepository:
         if description is not None:
             team.description = description
         
-        team.updated_at = datetime.now(timezone.utc)
+        team.updated_at = tz_now()
         self.db.commit()
         self.db.refresh(team)
         return team
@@ -76,7 +77,7 @@ class RetailerTeamRepository:
             return False
         
         team.is_active = False
-        team.updated_at = datetime.now(timezone.utc)
+        team.updated_at = tz_now()
         self.db.commit()
         return True
 
@@ -142,7 +143,7 @@ class TeamMemberRepository:
             return None
         
         member.role = role
-        member.updated_at = datetime.now(timezone.utc)
+        member.updated_at = tz_now()
         self.db.commit()
         self.db.refresh(member)
         return member
@@ -154,7 +155,7 @@ class TeamMemberRepository:
             return False
         
         member.is_active = False
-        member.updated_at = datetime.now(timezone.utc)
+        member.updated_at = tz_now()
         self.db.commit()
         return True
 
@@ -220,7 +221,7 @@ class TeamInvitationRepository:
                 and_(
                     TeamInvitation.email == email.lower(),
                     TeamInvitation.status == InvitationStatus.PENDING,
-                    TeamInvitation.expires_at > datetime.now(timezone.utc)
+                    TeamInvitation.expires_at > tz_now()
                 )
             )
         
@@ -236,13 +237,13 @@ class TeamInvitationRepository:
             return None
         
         # Check if invitation is still valid
-        if invitation.status != InvitationStatus.PENDING or invitation.expires_at < datetime.now(timezone.utc):
+        if invitation.status != InvitationStatus.PENDING or invitation.expires_at < tz_now():
             return None
         
         invitation.status = InvitationStatus.ACCEPTED
         invitation.accepted_by_id = user_id
-        invitation.accepted_at = datetime.now(timezone.utc)
-        invitation.updated_at = datetime.now(timezone.utc)
+        invitation.accepted_at = tz_now()
+        invitation.updated_at = tz_now()
         self.db.commit()
         self.db.refresh(invitation)
         return invitation
@@ -254,7 +255,7 @@ class TeamInvitationRepository:
             return None
         
         invitation.status = InvitationStatus.DECLINED
-        invitation.updated_at = datetime.now(timezone.utc)
+        invitation.updated_at = tz_now()
         self.db.commit()
         self.db.refresh(invitation)
         return invitation
@@ -275,7 +276,7 @@ class TeamInvitationRepository:
             return False
         
         invitation.status = InvitationStatus.EXPIRED
-        invitation.updated_at = datetime.now(timezone.utc)
+        invitation.updated_at = tz_now()
         self.db.commit()
         return True
 
@@ -342,7 +343,7 @@ class TeamRolePermissionRepository:
         if permissions is not None:
             role.permissions = json.dumps(permissions)
         
-        role.updated_at = datetime.now(timezone.utc)
+        role.updated_at = tz_now()
         self.db.commit()
         self.db.refresh(role)
         return role
@@ -354,6 +355,6 @@ class TeamRolePermissionRepository:
             return False
         
         role.is_active = False
-        role.updated_at = datetime.now(timezone.utc)
+        role.updated_at = tz_now()
         self.db.commit()
         return True

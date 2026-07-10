@@ -49,7 +49,7 @@ def get_user_detail(
     
     # 2. Get active or most recent subscription
     from sqlalchemy import or_
-    from datetime import datetime, timezone
+    from app.core.timezone import now as tz_now
     from app.services.subscription_service import SubscriptionService
     
     subscription = db.query(UserSubscription).filter(
@@ -57,7 +57,7 @@ def get_user_detail(
         UserSubscription.is_queued == False,
         or_(
             UserSubscription.status == SubscriptionStatus.ACTIVE,
-            (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= datetime.now(timezone.utc))
+            (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= tz_now())
         )
     ).order_by(UserSubscription.created_at.desc()).first()
 

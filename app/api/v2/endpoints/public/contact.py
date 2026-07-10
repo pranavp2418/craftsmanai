@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from app.core.timezone import now as tz_now
 
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
@@ -74,7 +74,7 @@ async def submit_contact_form(
 
         # Mark email as dispatched
         submission.email_sent = True
-        submission.email_sent_at = datetime.now(timezone.utc)
+        submission.email_sent_at = tz_now()
         db.commit()
 
         logger.info(

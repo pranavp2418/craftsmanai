@@ -13,7 +13,7 @@ import stripe
 from app.core.config import settings
 from app.models.subscription import UserSubscription, SubscriptionPlan, SubscriptionStatus, CancellationReason
 
-from datetime import datetime, timezone
+from app.core.timezone import now as tz_now
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ def get_smaller_plans(
             UserSubscription.is_queued == False,
             or_(
                 UserSubscription.status == SubscriptionStatus.ACTIVE,
-                (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= datetime.now(timezone.utc))
+                (UserSubscription.status == SubscriptionStatus.CANCELLED) & (UserSubscription.end_date >= tz_now())
             )
         ).order_by(UserSubscription.created_at.desc()).first()
 
@@ -213,7 +213,7 @@ def cancel_user_plan(
         # Update subscription status and cancellation details in database
         subscription.status = SubscriptionStatus.CANCELLED
         subscription.cancellation_reason = reason_enum
-        subscription.cancellation_date = datetime.now(timezone.utc)
+        subscription.cancellation_date = tz_now()
 
         # Log cancellation activity
         try:
@@ -241,7 +241,7 @@ def cancel_user_plan(
             user_name = current_user.full_name or current_user.email.split("@")[0]
             plan_name = subscription.plan_name or current_plan.name or "Current Plan"
             access_end_date = subscription.end_date.strftime("%Y-%m-%d") if subscription.end_date else "N/A"
-            cancellation_date = subscription.cancellation_date.strftime("%Y-%m-%d") if subscription.cancellation_date else datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            cancellation_date = subscription.cancellation_date.strftime("%Y-%m-%d") if subscription.cancellation_date else tz_now().strftime("%Y-%m-%d")
             manage_billing_url = f"{settings.FRONTEND_URL}/retailer/settings" if hasattr(settings, 'FRONTEND_URL') else "#"
             
             send_subscription_cancellation_confirmation_email.delay(

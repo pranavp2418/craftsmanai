@@ -9,7 +9,7 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": tz_now().isoformat(),
         "service": "craftmen-backend"
     }
 
@@ -19,6 +19,6 @@ async def endpoints_health_check():
     """Health check endpoint for backward compatibility"""
     return {
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": tz_now().isoformat(),
         "service": "craftmen-backend"
     }

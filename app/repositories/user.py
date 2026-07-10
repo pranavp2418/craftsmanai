@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from typing import Optional, List
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
+from app.core.timezone import now as tz_now, CST_TZ
 import logging
 
 from app.models.user import User
@@ -96,7 +97,7 @@ class UserRepository:
         """Update user's last login timestamp"""
         user = self.get_user_by_id(user_id)
         if user:
-            user.last_login = datetime.now(timezone.utc)
+            user.last_login = tz_now()
             self.db.commit()
             return True
         return False
@@ -203,7 +204,7 @@ class DeviceRepository:
         """Update device last used timestamp"""
         device = self.get_device_by_id(device_id)
         if device:
-            device.last_used = datetime.now(timezone.utc)
+            device.last_used = tz_now()
             self.db.commit()
             return True
         return False
@@ -229,7 +230,7 @@ class DeviceRepository:
         """Get the oldest devices for a user that should be revoked"""
         devices = self.get_user_devices(user_id, active_only=True)
         # Sort by last_used (oldest first)
-        devices.sort(key=lambda x: x.last_used or datetime.min.replace(tzinfo=timezone.utc))
+        devices.sort(key=lambda x: x.last_used or datetime.min.replace(tzinfo=CST_TZ))
         return devices[:count]
 
     def revoke_old_devices(self, user_id: int, max_devices: int) -> int:
@@ -296,7 +297,7 @@ class RefreshTokenRepository:
             and_(
                 RefreshToken.hashed_token == hashed_token,
                 RefreshToken.is_active == True,
-                RefreshToken.expires_at > datetime.now(timezone.utc)
+                RefreshToken.expires_at > tz_now()
             )
         ).first()
 
@@ -305,7 +306,7 @@ class RefreshTokenRepository:
         token = self.get_refresh_token_by_id(token_id)
         if token:
             token.is_active = False
-            token.revoked_at = datetime.now(timezone.utc)
+            token.revoked_at = tz_now()
             self.db.commit()
             return True
         return False
@@ -319,7 +320,7 @@ class RefreshTokenRepository:
         revoked_count = 0
         for token in tokens:
             token.is_active = False
-            token.revoked_at = datetime.now(timezone.utc)
+            token.revoked_at = tz_now()
             revoked_count += 1
         
         self.db.commit()
@@ -338,7 +339,7 @@ class RefreshTokenRepository:
         revoked_count = 0
         for token in tokens:
             token.is_active = False
-            token.revoked_at = datetime.now(timezone.utc)
+            token.revoked_at = tz_now()
             revoked_count += 1
         
         self.db.commit()
@@ -347,7 +348,7 @@ class RefreshTokenRepository:
     def cleanup_expired_tokens(self) -> int:
         """Clean up expired refresh tokens"""
         expired_tokens = self.db.query(RefreshToken).filter(
-            RefreshToken.expires_at <= datetime.now(timezone.utc)
+            RefreshToken.expires_at <= tz_now()
         ).all()
         
         count = len(expired_tokens)

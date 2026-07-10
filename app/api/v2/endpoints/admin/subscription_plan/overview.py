@@ -2,7 +2,8 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, extract, case
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
+from app.core.timezone import now as tz_now
 
 from app.core.dependencies import get_db, get_current_superuser as get_current_admin
 from app.models.user import User
@@ -36,7 +37,7 @@ def get_subscription_overview_stats(
     Includes MRR, ARR, Active Subscriptions, New Subscriptions, Churn Rate, and Total Revenue.
     """
     # Calculate time delta based on period
-    now = datetime.now(timezone.utc)
+    now = tz_now()
     if period == "7days":
         start_date = now - timedelta(days=7)
     elif period == "30days":
@@ -135,7 +136,7 @@ def get_revenue_growth_chart(
     Get revenue growth data for the MRR line chart (last 8 months).
     Calculated from actual subscription data grouped by month.
     """
-    now = datetime.now(timezone.utc)
+    now = tz_now()
     eight_months_ago = now - timedelta(days=240)
     
     # Get monthly revenue from subscriptions created in last 8 months
@@ -184,7 +185,7 @@ def get_subscription_growth_chart(
     Get subscription growth data (New vs Churned) for the bar chart.
     Calculated from actual subscription data grouped by month.
     """
-    now = datetime.now(timezone.utc)
+    now = tz_now()
     eight_months_ago = now - timedelta(days=240)
     
     # Get monthly new subscriptions

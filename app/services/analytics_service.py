@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from app.core.timezone import now as tz_now, CST_TZ
 from typing import Any, Dict, List, Optional
 from sqlalchemy import and_, func, or_, select, distinct
 from fastapi import HTTPException, status
@@ -65,12 +66,12 @@ class AnalyticsService:
     def _calculate_cutoff(self, months: int = 6) -> datetime:
         """Calculate the cutoff date for the given number of months"""
         self._validate_months_range(months)
-        return datetime.now(timezone.utc) - timedelta(days=30.44 * months)  # Average days per month
+        return tz_now() - timedelta(days=30.44 * months)  # Average days per month
 
     def _build_month_starts(self, months: int = 6) -> List[datetime]:
         """Build list of month start dates for the last N calendar months"""
         self._validate_months_range(months)
-        now = datetime.now(timezone.utc)
+        now = tz_now()
         month_starts = []
         current_year = now.year
         current_month = now.month
@@ -81,7 +82,7 @@ class AnalyticsService:
             while month_index <= 0:
                 month_index += 12
                 year -= 1
-            month_starts.append(datetime(year, month_index, 1, tzinfo=timezone.utc))
+            month_starts.append(datetime(year, month_index, 1, tzinfo=CST_TZ))
 
         return month_starts
 
@@ -239,7 +240,7 @@ class AnalyticsService:
         months = self._validate_months_range(filter_data.months)
         month_starts = self._build_month_starts(months)
         window_start = month_starts[0]
-        window_end = datetime.now(timezone.utc) + timedelta(days=1)
+        window_end = tz_now() + timedelta(days=1)
         design_filter = self._get_design_filter()
 
         try:
@@ -259,7 +260,7 @@ class AnalyticsService:
                     continue
                 created_at_dt = created_at
                 if created_at_dt.tzinfo is None:
-                    created_at_dt = created_at_dt.replace(tzinfo=timezone.utc)
+                    created_at_dt = created_at_dt.replace(tzinfo=CST_TZ)
                 counts[(created_at_dt.year, created_at_dt.month)] += 1
 
             months_data = []
@@ -292,7 +293,7 @@ class AnalyticsService:
         months = self._validate_months_range(filter_data.months)
         month_starts = self._build_month_starts(months)
         window_start = month_starts[0]
-        window_end = datetime.now(timezone.utc) + timedelta(days=1)
+        window_end = tz_now() + timedelta(days=1)
         design_filter = self._get_design_filter()
 
         try:
@@ -315,7 +316,7 @@ class AnalyticsService:
                     continue
                 created_at_dt = created_at
                 if created_at_dt.tzinfo is None:
-                    created_at_dt = created_at_dt.replace(tzinfo=timezone.utc)
+                    created_at_dt = created_at_dt.replace(tzinfo=CST_TZ)
                 counts[(created_at_dt.year, created_at_dt.month)] += 1
 
             months_data = []
@@ -441,7 +442,7 @@ class AnalyticsService:
                 if value is None:
                     return None
                 if value.tzinfo is None:
-                    return value.replace(tzinfo=timezone.utc)
+                    return value.replace(tzinfo=CST_TZ)
                 return value
 
             approval_durations = []

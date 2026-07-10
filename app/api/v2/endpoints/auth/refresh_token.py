@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
 from typing import Any
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
+from app.core.timezone import now as tz_now, CST_TZ
 
 from app.core.database import get_db
 from app.core.rate_limiter import check_auth_rate_limit
@@ -46,7 +47,7 @@ def _blacklist_access_token_jti(db: Session, jti: str, expires_at: datetime, use
     if not jti or not expires_at:
         return
     
-    now = datetime.now(timezone.utc)
+    now = tz_now()
     remaining_seconds = max(int((expires_at - now).total_seconds()), 0)
     remaining_minutes = max(remaining_seconds // 60, 1)
     
@@ -161,7 +162,7 @@ async def refresh_token(
         options={"verify_exp": False}
     )
     new_access_token_jti = new_access_payload.get("jti")
-    new_access_token_exp = datetime.fromtimestamp(new_access_payload.get("exp"), tz=timezone.utc) if new_access_payload.get("exp") else None
+    new_access_token_exp = datetime.fromtimestamp(new_access_payload.get("exp"), tz=CST_TZ) if new_access_payload.get("exp") else None
     
     # Update the refresh token record with new access token info
     if refresh_jti and new_access_token_jti:

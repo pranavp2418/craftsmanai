@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from datetime import datetime
+from app.core.timezone import now as tz_now
 import logging
 import csv
 from io import StringIO, BytesIO
@@ -157,7 +158,7 @@ async def export_all_payments(
         csv_content = output.getvalue()
         output.close()
         
-        filename = f"payment_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        filename = f"payment_history_{tz_now().strftime('%Y%m%d_%H%M%S')}.csv"
         
         def iterfile():
             yield csv_content.encode('utf-8')

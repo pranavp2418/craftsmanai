@@ -38,7 +38,7 @@ async def reset_password_with_otp(
         OTP.otp_code == reset_data.token,
         OTP.otp_type == "password_reset",
         OTP.is_used == False,
-        OTP.expires_at > datetime.utcnow()
+        OTP.expires_at > tz_now()
     ).first()
     
     if not otp:

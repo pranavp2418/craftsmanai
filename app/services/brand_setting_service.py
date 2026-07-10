@@ -15,9 +15,9 @@ class BrandSettingService:
         if setting and setting.user:
             from app.models.subscription import UserSubscription, SubscriptionStatus, SubscriptionPlan
             from sqlalchemy import or_
-            from datetime import datetime, timezone
+            from app.core.timezone import now as tz_now
             
-            now = datetime.now(timezone.utc)
+            now = tz_now()
             
             # Query the database to check if this user has any active/valid subscription
             active_sub = self.db.query(UserSubscription).join(SubscriptionPlan).filter(
@@ -81,9 +81,9 @@ class BrandSettingService:
         """Update brand settings with strict plan-tier validations"""
         from app.models.subscription import UserSubscription, SubscriptionStatus, SubscriptionPlan
         from sqlalchemy import or_
-        from datetime import datetime, timezone
+        from app.core.timezone import now as tz_now
         
-        now = datetime.now(timezone.utc)
+        now = tz_now()
         
         # Query active subscription dynamically
         active_sub = self.db.query(UserSubscription).join(SubscriptionPlan).filter(

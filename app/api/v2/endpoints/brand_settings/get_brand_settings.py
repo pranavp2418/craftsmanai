@@ -6,7 +6,7 @@ from app.services.brand_setting_service import BrandSettingService
 from app.models.user import User
 from app.models.subscription import UserSubscription, SubscriptionPlan, SubscriptionStatus
 from sqlalchemy import or_
-from datetime import datetime, timezone
+from app.core.timezone import now as tz_now
 
 router = APIRouter()
 
@@ -24,7 +24,7 @@ def get_brand_settings(
     can_use_brand_name = False
     can_use_custom_color = False
     
-    now = datetime.now(timezone.utc)
+    now = tz_now()
     active_sub = db.query(UserSubscription).join(SubscriptionPlan).filter(
         UserSubscription.user_id == current_user.id,
         UserSubscription.is_queued == False,
