@@ -414,8 +414,8 @@ class AnalyticsService:
                 .join(Design, Order.design_id == Design.id)
                 .where(
                     and_(
-                        Order.status == OrderStatus.COMPLETED,
-                        Order.updated_at >= cutoff,
+                        Design.status == DesignStatus.COMPLETED,
+                        Order.created_at >= cutoff,
                         design_filter,
                     )
                 )
