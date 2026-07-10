@@ -112,9 +112,9 @@ def get_payment_history(
                 "currency": payment.currency,
                 "status": payment.status.value,
                 "paymentMethod": payment.payment_method,
-                "stripeSessionId": payment.stripe_session_id,
-                "stripePaymentIntentId": payment.stripe_payment_intent_id,
-                "stripeCustomerId": payment.stripe_customer_id,
+                # "stripeSessionId": payment.stripe_session_id,
+                # "stripePaymentIntentId": payment.stripe_payment_intent_id,
+                # "stripeCustomerId": payment.stripe_customer_id,
                 "createdAt": payment.created_at.isoformat() if payment.created_at else None,
                 "updatedAt": payment.updated_at.isoformat() if payment.updated_at else None,
                 "plan": None
