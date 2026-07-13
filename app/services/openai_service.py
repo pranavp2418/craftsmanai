@@ -3455,12 +3455,22 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
                 "hero; the swivel toggle bar / post sits BEHIND the face and toward the BOTTOM, NOT protruding above "
                 "the TOP edge of the face. Show them ISOLATED on white (no shirt or cuff).")
     if "ring" in t:
+        # CAMERA/VIEW for rings. The form rules below only describe the SHAPE, so the model was free to tilt
+        # the ring or shoot it down the finger hole, which left the top/face angled away or cut off (the
+        # reported bug). A ring's approval shot must read its TOP squarely, so anchor the camera explicitly.
+        _ring_view = (
+            " VIEW: present the ring UPRIGHT and FRONT-FACING so the ENTIRE TOP / FACE (the head, centre stone "
+            "and setting) is FULLY VISIBLE and squarely faces the camera, with the band / shank forming a clear "
+            "circle below it. Do NOT tilt, rotate or foreshorten the ring so that the top is cut off, hidden or "
+            "angled away; do NOT look down the finger hole; do NOT show only the band's side profile. The whole "
+            "face and every stone on it must be clearly readable."
+        )
         if "signet" in t or "class ring" in t or "signet" in lower or "class ring" in lower:
             return (" Render a wearable SIGNET / CLASS RING: a FLAT or gently domed planar signet FACE (a solid "
                     "plate, NOT a gemstone dome) on top, symmetric shoulders, and a realistic taper from the face "
-                    "down to a smooth shank. Treat any logo / lettering as the EXACT centre-face content.")
+                    "down to a smooth shank. Treat any logo / lettering as the EXACT centre-face content." + _ring_view)
         return (" Present the design as the face/top of a wearable RING on a smooth polished band/shank, with a "
-                "realistic taper from the face down to the shank.")
+                "realistic taper from the face down to the shank." + _ring_view)
     if "bangle" in t:
         return " Render as a wearable BANGLE — a rigid closed circular band worn over the hand (no clasp needed)."
     if "cuff" in t and "link" not in t:

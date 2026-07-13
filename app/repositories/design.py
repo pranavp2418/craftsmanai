@@ -110,7 +110,7 @@ class DesignRepository:
                 Design.is_archived.is_(True),
                 Design.is_deleted.is_(False),
             )
-            .order_by(Design.created_at.desc())
+            .order_by(Design.created_at.desc(), Design.id.desc())
             .offset(offset)
             .limit(limit)
             .all()
@@ -144,7 +144,7 @@ class DesignRepository:
             query = query.filter(Design.status == status)
         if search:
             query = query.filter(Design.design_code.ilike(f"%{search.strip()}%"))
-        return query.order_by(Design.created_at.desc()).offset(offset).limit(limit).all()
+        return query.order_by(Design.created_at.desc(), Design.id.desc()).offset(offset).limit(limit).all()
 
     def list_by_team_owner(
         self,
@@ -161,7 +161,7 @@ class DesignRepository:
             query = query.filter(Design.status == status)
         if search:
             query = query.filter(Design.design_code.ilike(f"%{search.strip()}%"))
-        return query.order_by(Design.created_at.desc()).offset(offset).limit(limit).all()
+        return query.order_by(Design.created_at.desc(), Design.id.desc()).offset(offset).limit(limit).all()
 
     def list_by_created_by(
         self,
@@ -184,7 +184,7 @@ class DesignRepository:
             query = query.filter(Design.status == status)
         if search:
             query = query.filter(Design.design_code.ilike(f"%{search.strip()}%"))
-        return query.order_by(Design.created_at.desc()).offset(offset).limit(limit).all()
+        return query.order_by(Design.created_at.desc(), Design.id.desc()).offset(offset).limit(limit).all()
 
     def count_by_user(
         self,

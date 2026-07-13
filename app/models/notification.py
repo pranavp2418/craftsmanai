@@ -36,8 +36,8 @@ class Notification(Base):
     reference_id = Column(Integer, nullable=True, doc="ID of the referenced entity (e.g., order_id, design_id)")
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), index=True)
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), index=True)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), onupdate=lambda: datetime.now(CST_TZ))
 
     def __repr__(self):
         return f"<Notification(id={self.id}, user_id={self.user_id}, type={self.type}, is_read={self.is_read})>"

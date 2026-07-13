@@ -25,8 +25,8 @@ class ContactSubmission(Base):
     email_sent_at = Column(DateTime(timezone=True), nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ))
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), onupdate=lambda: datetime.now(CST_TZ))
 
     def __repr__(self):
         return f"<ContactSubmission(id={self.id}, name={self.full_name}, email={self.email})>"

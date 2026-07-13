@@ -353,6 +353,19 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
     # PER-TYPE LAYER (Lovable taxonomy) — the type's default_output_behavior + render-family rule; NEGATIVE last.
     from app.services.prompts.lovable_create import per_type_tail, NEGATIVE_PROMPT
     out += "\n\n" + per_type_tail(item_type, label=(user_prompt or item_type), include_negative=False)
+
+    # PER-TYPE FORM / VIEW — the same clause the IMAGE path already adds (svc._type_form_clause). The
+    # text-only path had none, so a plain "make a gold ring" gave the model zero camera guidance and it
+    # tilted the ring / shot it down the finger hole, leaving the TOP (head + centre stone) angled away or
+    # cut off — the reported bug. Skipped for pendant-like and generic types, whose form is already covered
+    # by the taxonomy tail and the bail rules.
+    _ct = (item_type or "").strip().lower()
+    _generic_t = (not _ct) or _ct in ("jewelry", "jewellery", "custom", "custom object", "other", "charm")
+    if not _generic_t and not svc._is_pendant_like(item_type, user_prompt):
+        _form = svc._type_form_clause(item_type, user_prompt)
+        if _form:
+            out += f"\n\nForm: present the design as the requested {item_type}:{_form}"
+
     _is_yellow_gold = (("yellow gold" in lower) or ("gold" in lower and "white" not in lower and "rose" not in lower)
                        or (mp == "yellow_gold_default"))
     if _is_yellow_gold:

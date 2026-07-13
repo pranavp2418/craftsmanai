@@ -165,7 +165,7 @@ class DesignVariantRepository:
                 DesignVariant.is_archived.is_(False),
                 DesignVariant.is_deleted.is_(False),
             )
-            .order_by(DesignVariant.created_at.desc())
+            .order_by(DesignVariant.created_at.desc(), DesignVariant.id.desc())
         )
         if skip is not None:
             query = query.offset(skip)
@@ -193,7 +193,7 @@ class DesignVariantRepository:
                 DesignVariant.is_archived.is_(True),
                 DesignVariant.is_deleted.is_(False),
             )
-            .order_by(DesignVariant.created_at.desc())
+            .order_by(DesignVariant.created_at.desc(), DesignVariant.id.desc())
         )
         if skip is not None:
             query = query.offset(skip)

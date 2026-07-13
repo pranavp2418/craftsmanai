@@ -19,8 +19,8 @@ class Customer(Base):
     public_token = Column(String(64), unique=True, nullable=False, index=True)
     is_active = Column(Boolean, default=True, nullable=False)
     is_deleted = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), nullable=False)
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), onupdate=lambda: datetime.now(CST_TZ))
 
     design_shares = relationship("DesignShare", back_populates="customer", cascade="all, delete-orphan")
     orders = relationship("Order", back_populates="customer")

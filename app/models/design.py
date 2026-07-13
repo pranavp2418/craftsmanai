@@ -61,8 +61,8 @@ class Design(Base):
     status = Column(SqlEnum(DesignStatus, native_enum=False, length=32), nullable=False, default=DesignStatus.DRAFT)
     is_archived = Column(Boolean, nullable=False, default=False)
     is_deleted = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), nullable=False)
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), onupdate=lambda: datetime.now(CST_TZ))
 
     variants = relationship("DesignVariant", back_populates="design", cascade="all, delete-orphan")
     activity_logs = relationship("DesignActivityLog", back_populates="design", cascade="all, delete-orphan")
@@ -92,7 +92,7 @@ class   DesignVariant(Base):
     design_focus = Column(String(100), nullable=True)
     style_tags = Column(String(255), nullable=True)
     reference_images_json = Column(JSON, nullable=True, doc="List of reference image URLs used as input for refinement")
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), nullable=False)
 
     design = relationship("Design", back_populates="variants")
     parent_variant = relationship("DesignVariant", remote_side=[id], backref="child_variants")
@@ -127,7 +127,7 @@ class DesignShare(Base):
     require_approval = Column(Boolean, nullable=False, default=False)
     
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), nullable=False)
 
     design_variant = relationship("DesignVariant", back_populates="shares")
     customer = relationship("Customer", back_populates="design_shares")
@@ -160,7 +160,7 @@ class DesignVariantManufacturerShare(Base):
     shared_angles = Column(JSON, nullable=True)
     # The primary email address used for this share (first email from the emails array)
     sent_to_email = Column(String(255), nullable=True, index=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), nullable=False)
 
     design_variant = relationship("DesignVariant", back_populates="manufacturer_shares")
     manufacturer = relationship("Manufacturer", back_populates="variant_shares")

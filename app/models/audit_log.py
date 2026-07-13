@@ -19,7 +19,7 @@ class AuditLog(Base):
     success = Column(Boolean, default=True)
     error_message = Column(Text, nullable=True)
     extra_data = Column(Text, nullable=True)
-    timestamp = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), index=True)
+    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), index=True)
 
     # Relationships
     user = relationship("User", back_populates="audit_logs")

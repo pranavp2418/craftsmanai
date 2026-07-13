@@ -33,8 +33,8 @@ class User(Base):
     subscription_plan = Column(String(50), default="Starter", nullable=False)
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ))
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), onupdate=lambda: datetime.now(CST_TZ))
     last_login = Column(DateTime(timezone=True))
     
     # Relationships

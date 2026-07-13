@@ -44,8 +44,8 @@ class SubscriptionPlan(Base):
     can_use_brand_name = Column(Boolean, default=False, nullable=False)
     can_use_custom_color = Column(Boolean, default=False, nullable=False)
     has_unlimited_renders = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ))
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), onupdate=lambda: datetime.now(CST_TZ))
 
     # Relationships
     subscriptions = relationship("UserSubscription", back_populates="plan", cascade="all, delete-orphan")
@@ -73,8 +73,8 @@ class UserSubscription(Base):
     status = Column(Enum(SubscriptionStatus), default=SubscriptionStatus.ACTIVE, nullable=False)
     cancellation_reason = Column(Enum(CancellationReason), nullable=True)
     cancellation_date = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ))
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), onupdate=lambda: datetime.now(CST_TZ))
     
     # -------------------------
     # Subscription Queue & Token Tracking
@@ -118,8 +118,8 @@ class Payment(Base):
     stripe_customer_id = Column(String, nullable=True)
     stripe_webhook_event_id = Column(String, nullable=True, index=True)  # For webhook idempotency
     payment_method = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ))
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), onupdate=lambda: datetime.now(CST_TZ))
 
     # Relationships
     user = relationship("User", back_populates="payments")
@@ -147,7 +147,7 @@ class SubscriptionActivityLog(Base):
     triggered_by = Column(String, nullable=False)  # e.g., "Admin", "System", "Retailer"
     triggered_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     details = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), index=True)
 
     # Relationships
     user = relationship("User", foreign_keys=[user_id], back_populates="subscription_logs")
@@ -160,8 +160,8 @@ class TopupPack(Base):
     renders = Column(Integer, nullable=False, default=0)
     price = Column(Numeric(10, 2), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ))
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), onupdate=lambda: datetime.now(CST_TZ))
 
 
 class UserTopup(Base):
@@ -178,8 +178,8 @@ class UserTopup(Base):
     
     start_date = Column(DateTime(timezone=True), nullable=True)
     end_date = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ))
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), onupdate=lambda: datetime.now(CST_TZ))
 
     # Relationships
     user = relationship("User", foreign_keys=[user_id])

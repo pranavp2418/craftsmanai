@@ -634,7 +634,7 @@ def send_customer_share_sms(self, to_number: str, customer_name: str, preview_ur
     try:
         logger.info(f"📱 Starting {task_name} for {to_number}")
         
-        from app.services.sms_service import sms_service
+        from app.services.sms_service import sms_service, SMSPermanentError
         from app.services.template_renderer import render_template_sync
         from bs4 import BeautifulSoup
         
@@ -676,11 +676,23 @@ def send_customer_share_sms(self, to_number: str, customer_name: str, preview_ur
             return True
         else:
             raise Exception("Failed to send SMS via Twilio.")
-            
+
+    except SMSPermanentError as exc:
+        # PERMANENT Twilio failure — e.g. 21408 (region not enabled in Geo Permissions: the India
+        # failures) or 30007 (carrier violation from the unverified US toll-free sender). A retry can
+        # NEVER deliver these: it only turns ONE failed message into FOUR (1 send + 3 retries) and keeps
+        # hitting the Twilio API on the 60s / 120s / 240s backoff — exactly the "240 failed outbound
+        # messages" and "Twilio called every 2 minutes" the client reported. Fail fast, log the real code.
+        logger.error(
+            "❌ %s PERMANENTLY failed for %s — %s. NOT retrying (fix this in the Twilio console).",
+            task_name, to_number, exc,
+        )
+        return False
+
     except Exception as exc:
         logger.error(f"❌ {task_name} failed for {to_number}: {str(exc)}")
         raise self.retry(
-            exc=exc, 
+            exc=exc,
             countdown=60 * (2 ** self.request.retries),
             max_retries=3
         )
@@ -740,7 +752,7 @@ def send_manufacturer_share_sms(self, to_number: str, manufacturer_name: str, pr
     try:
         logger.info(f"📱 Starting {task_name} for {to_number}")
         
-        from app.services.sms_service import sms_service
+        from app.services.sms_service import sms_service, SMSPermanentError
         from app.services.template_renderer import render_template_sync
         from bs4 import BeautifulSoup
         
@@ -782,11 +794,23 @@ def send_manufacturer_share_sms(self, to_number: str, manufacturer_name: str, pr
             return True
         else:
             raise Exception("Failed to send SMS via Twilio.")
-            
+
+    except SMSPermanentError as exc:
+        # PERMANENT Twilio failure — e.g. 21408 (region not enabled in Geo Permissions: the India
+        # failures) or 30007 (carrier violation from the unverified US toll-free sender). A retry can
+        # NEVER deliver these: it only turns ONE failed message into FOUR (1 send + 3 retries) and keeps
+        # hitting the Twilio API on the 60s / 120s / 240s backoff — exactly the "240 failed outbound
+        # messages" and "Twilio called every 2 minutes" the client reported. Fail fast, log the real code.
+        logger.error(
+            "❌ %s PERMANENTLY failed for %s — %s. NOT retrying (fix this in the Twilio console).",
+            task_name, to_number, exc,
+        )
+        return False
+
     except Exception as exc:
         logger.error(f"❌ {task_name} failed for {to_number}: {str(exc)}")
         raise self.retry(
-            exc=exc, 
+            exc=exc,
             countdown=60 * (2 ** self.request.retries),
             max_retries=3
         )

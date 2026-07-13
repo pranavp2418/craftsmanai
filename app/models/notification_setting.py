@@ -20,8 +20,8 @@ class NotificationSetting(Base):
     quote_reminders = Column(Boolean, default=False, nullable=False)
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), nullable=False)
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(CST_TZ), onupdate=datetime.now(CST_TZ), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), onupdate=lambda: datetime.now(CST_TZ), nullable=False)
 
     # Relationship
     user = relationship("User", back_populates="notification_settings")
