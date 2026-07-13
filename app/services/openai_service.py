@@ -3455,51 +3455,12 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
                 "hero; the swivel toggle bar / post sits BEHIND the face and toward the BOTTOM, NOT protruding above "
                 "the TOP edge of the face. Show them ISOLATED on white (no shirt or cuff).")
     if "ring" in t:
-        # SIDE-ONLY FEATURES override the face-up hero view below. A HIDDEN HALO is a ring of small accent
-        # stones set UNDERNEATH the centre stone (between its pavilion and the gallery/shank) — it is
-        # INVISIBLE in a face-up shot and only reads from the SIDE, which is why every hidden-halo product
-        # photo is a low profile shot. Forcing the face-up view here would hide the exact feature the client
-        # asked for. Same logic for other under-stone / gallery detailing.
-        if any(k in lower for k in (
-            "hidden halo", "hidden-halo", "under halo", "under-halo", "underhalo",
-            "surprise diamond", "surprise stone", "peek a boo", "peek-a-boo", "peekaboo",
-            "hidden accent", "hidden stone", "hidden diamond",
-            "gallery rail", "under gallery", "under-gallery", "gallery detail",
-        )):
-            return (" Render a wearable RING whose HIDDEN HALO / under-stone accent is the HERO feature: a ring of "
-                    "small accent stones set UNDERNEATH the centre stone, between the stone's pavilion and the "
-                    "gallery / shank, sparkling out sideways."
-                    " VIEW — the classic HIDDEN-HALO product shot: shoot the ring from a LOW SIDE / PROFILE "
-                    "(three-quarter) angle, camera roughly at the height of the gallery, so the hidden halo under "
-                    "the centre stone is FULLY VISIBLE and clearly readable. The centre stone is seen from its "
-                    "SIDE (its pavilion and the prongs), and the shank sweeps down as a clean open circle below. "
-                    "Do NOT shoot this ring face-up or top-down — a face-up view HIDES the hidden halo completely "
-                    "and defeats the whole design. The hidden halo must be the most legible detail in the render.")
-
-        # CAMERA/VIEW for rings. The form rules below only describe the SHAPE, so the model was free to tilt
-        # the ring or shoot it down the finger hole, which left the top/face angled away or cut off (the
-        # reported bug). A ring's approval shot must read its TOP squarely, so anchor the camera explicitly.
-        _ring_view = (
-            " VIEW — CLASSIC RING HERO SHOT (this exact camera, like a bridal / engagement-ring catalogue photo): "
-            "the camera looks STRAIGHT AT THE FACE of the ring. The centre stone's TABLE (its flat top facet) and "
-            "the ENTIRE head / setting face the viewer HEAD-ON and sit in the upper part of the frame, while the "
-            "shank / band sweeps DOWN AND AWAY behind the head so its circle reads in perspective (you see the top "
-            "of the band curving back, not its outline). Every stone on the face — centre stone, halo, side stones "
-            "— must be fully visible, front-on and readable. "
-            "This is a FRONT / FACE-UP view — it is NOT a side view: do NOT render the ring in PROFILE (band "
-            "silhouette turned toward the camera with the centre stone seen edge-on / from its side), do NOT rotate "
-            "the ring so the head points left or right, do NOT look down through the finger hole, and do NOT tilt "
-            "or foreshorten the ring so any part of the face is cut off or angled away. "
-            "PRIORITY: for a RING this face-up hero view OVERRIDES any instruction to preserve the reference "
-            "image's camera angle — even if the reference photo shows the ring in profile or at an angle, re-shoot "
-            "it FACE-UP exactly as described here. Keep the DESIGN identical to the reference; only the camera moves."
-        )
         if "signet" in t or "class ring" in t or "signet" in lower or "class ring" in lower:
             return (" Render a wearable SIGNET / CLASS RING: a FLAT or gently domed planar signet FACE (a solid "
                     "plate, NOT a gemstone dome) on top, symmetric shoulders, and a realistic taper from the face "
-                    "down to a smooth shank. Treat any logo / lettering as the EXACT centre-face content." + _ring_view)
+                    "down to a smooth shank. Treat any logo / lettering as the EXACT centre-face content.")
         return (" Present the design as the face/top of a wearable RING on a smooth polished band/shank, with a "
-                "realistic taper from the face down to the shank." + _ring_view)
+                "realistic taper from the face down to the shank.")
     if "bangle" in t:
         return " Render as a wearable BANGLE — a rigid closed circular band worn over the hand (no clasp needed)."
     if "cuff" in t and "link" not in t:
