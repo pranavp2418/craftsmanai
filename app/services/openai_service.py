@@ -3455,6 +3455,27 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
                 "hero; the swivel toggle bar / post sits BEHIND the face and toward the BOTTOM, NOT protruding above "
                 "the TOP edge of the face. Show them ISOLATED on white (no shirt or cuff).")
     if "ring" in t:
+        # SIDE-ONLY FEATURES override the face-up hero view below. A HIDDEN HALO is a ring of small accent
+        # stones set UNDERNEATH the centre stone (between its pavilion and the gallery/shank) — it is
+        # INVISIBLE in a face-up shot and only reads from the SIDE, which is why every hidden-halo product
+        # photo is a low profile shot. Forcing the face-up view here would hide the exact feature the client
+        # asked for. Same logic for other under-stone / gallery detailing.
+        if any(k in lower for k in (
+            "hidden halo", "hidden-halo", "under halo", "under-halo", "underhalo",
+            "surprise diamond", "surprise stone", "peek a boo", "peek-a-boo", "peekaboo",
+            "hidden accent", "hidden stone", "hidden diamond",
+            "gallery rail", "under gallery", "under-gallery", "gallery detail",
+        )):
+            return (" Render a wearable RING whose HIDDEN HALO / under-stone accent is the HERO feature: a ring of "
+                    "small accent stones set UNDERNEATH the centre stone, between the stone's pavilion and the "
+                    "gallery / shank, sparkling out sideways."
+                    " VIEW — the classic HIDDEN-HALO product shot: shoot the ring from a LOW SIDE / PROFILE "
+                    "(three-quarter) angle, camera roughly at the height of the gallery, so the hidden halo under "
+                    "the centre stone is FULLY VISIBLE and clearly readable. The centre stone is seen from its "
+                    "SIDE (its pavilion and the prongs), and the shank sweeps down as a clean open circle below. "
+                    "Do NOT shoot this ring face-up or top-down — a face-up view HIDES the hidden halo completely "
+                    "and defeats the whole design. The hidden halo must be the most legible detail in the render.")
+
         # CAMERA/VIEW for rings. The form rules below only describe the SHAPE, so the model was free to tilt
         # the ring or shoot it down the finger hole, which left the top/face angled away or cut off (the
         # reported bug). A ring's approval shot must read its TOP squarely, so anchor the camera explicitly.
