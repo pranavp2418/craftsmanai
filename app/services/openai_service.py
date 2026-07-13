@@ -3459,11 +3459,19 @@ def _type_form_clause(item_type: str, user_prompt: str) -> str:
         # the ring or shoot it down the finger hole, which left the top/face angled away or cut off (the
         # reported bug). A ring's approval shot must read its TOP squarely, so anchor the camera explicitly.
         _ring_view = (
-            " VIEW: present the ring UPRIGHT and FRONT-FACING so the ENTIRE TOP / FACE (the head, centre stone "
-            "and setting) is FULLY VISIBLE and squarely faces the camera, with the band / shank forming a clear "
-            "circle below it. Do NOT tilt, rotate or foreshorten the ring so that the top is cut off, hidden or "
-            "angled away; do NOT look down the finger hole; do NOT show only the band's side profile. The whole "
-            "face and every stone on it must be clearly readable."
+            " VIEW — CLASSIC RING HERO SHOT (this exact camera, like a bridal / engagement-ring catalogue photo): "
+            "the camera looks STRAIGHT AT THE FACE of the ring. The centre stone's TABLE (its flat top facet) and "
+            "the ENTIRE head / setting face the viewer HEAD-ON and sit in the upper part of the frame, while the "
+            "shank / band sweeps DOWN AND AWAY behind the head so its circle reads in perspective (you see the top "
+            "of the band curving back, not its outline). Every stone on the face — centre stone, halo, side stones "
+            "— must be fully visible, front-on and readable. "
+            "This is a FRONT / FACE-UP view — it is NOT a side view: do NOT render the ring in PROFILE (band "
+            "silhouette turned toward the camera with the centre stone seen edge-on / from its side), do NOT rotate "
+            "the ring so the head points left or right, do NOT look down through the finger hole, and do NOT tilt "
+            "or foreshorten the ring so any part of the face is cut off or angled away. "
+            "PRIORITY: for a RING this face-up hero view OVERRIDES any instruction to preserve the reference "
+            "image's camera angle — even if the reference photo shows the ring in profile or at an angle, re-shoot "
+            "it FACE-UP exactly as described here. Keep the DESIGN identical to the reference; only the camera moves."
         )
         if "signet" in t or "class ring" in t or "signet" in lower or "class ring" in lower:
             return (" Render a wearable SIGNET / CLASS RING: a FLAT or gently domed planar signet FACE (a solid "
