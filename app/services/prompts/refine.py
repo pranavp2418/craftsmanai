@@ -126,6 +126,9 @@ def build_refine_prompt(
         # stays LLM-driven via interpret_refinement; these are the deterministic retailer-language handlers).
         from app.services.prompts.common import normalize_retailer_language as _nrl
         _edge = _nrl(user_prompt)
+        # CAD_FINISH_LINE appended the same way as the edge directives (client 2026-07: every output in
+        # the jewellery-CAD render look) — finish only, it never touches the edit/preserve rules above.
+        from app.services.prompts.common import CAD_FINISH_LINE as _cadfin
         return (LOVABLE_REFINE_PROMPT
                 .replace("{attempt}", str(attempt))
                 .replace("{target}", target)
@@ -133,7 +136,7 @@ def build_refine_prompt(
                 .replace("{attribute}", attribute)
                 .replace("{change_line}", change_line)
                 .replace("{normalized}", normalized or (user_prompt or ""))
-                .replace("{base_prompt}", "") + _edge)
+                .replace("{base_prompt}", "") + _edge + "\n\n" + _cadfin)
 
     # Detect a genuine TEXT change (regex + LLM intent gate).
     replacements = svc.extract_text_replacements(user_prompt)
@@ -172,7 +175,7 @@ def build_refine_prompt(
             "2) Preserve everything else on the FIRST piece exactly — same design, silhouette, metal colour, stones, "
             "proportions and camera angle. NEVER let preservation cancel the edit. Do NOT copy the additional "
             f"image's background, metal colour or any unrelated part — use ONLY the element the request refers to.{_mi_intensity}\n\n"
-            "Clean CAD-style render on a pure solid white (#FFFFFF) background. One image only."
+            "Clean CAD-style render (jewellery-CAD software look — matte digital metal, idealized stones, NOT a photograph) on a pure solid white (#FFFFFF) background. One image only."
         )
 
     # BIG ADDITIVE COVERAGE refine (plain -> fully iced / add full diamonds): the heavy, preserve-laden
@@ -202,7 +205,7 @@ def build_refine_prompt(
             "ATTRIBUTE TO CHANGE: stone coverage — change it from PLAIN / bare metal to FULLY ICED (covered in "
             "diamonds). Apply this CLEARLY and OBVIOUSLY — the edit must be unmistakable, not subtle: the plain metal "
             f"surface MUST become fully diamond-covered. Never return the image unchanged.{_intensity}\n\n"
-            "Clean CAD-style render on a pure solid white (#FFFFFF) background. One image only."
+            "Clean CAD-style render (jewellery-CAD software look — matte digital metal, idealized stones, NOT a photograph) on a pure solid white (#FFFFFF) background. One image only."
         )
 
     # BAIL RE-DRIFT GUARD: the model tends to "complete" a pendant by re-adding a bail even when the

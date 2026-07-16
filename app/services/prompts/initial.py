@@ -349,8 +349,9 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
         metal_named = svc._detected_metal_phrase(user_prompt) or (effective_metal or "white gold")
         bail_line = " Add ONE simple loop bail at the top for a chain." if profile.bail_policy != "none" else ""
         return (
-            "You are CraftsmanAI, a precise CAD jewelry render engine. Produce ONE clean, photorealistic "
-            "CAD-style 3D render on a pure solid white (#FFFFFF) background, sharp focus.\n\n"
+            "You are CraftsmanAI, a precise CAD jewelry render engine. Produce ONE clean "
+            "CAD-style 3D render (jewellery-CAD software look, NOT a photograph) on a pure solid white "
+            "(#FFFFFF) background, sharp focus.\n\n"
             f"Create a fully ICED-OUT {item_type} in {metal_named}, built exactly from the design below."
             f"{bail_line}\n\n"
             "BUST-DOWN — 100% DIAMOND COVERAGE: every letter and every surface is a SOLID SHEET of small "

@@ -182,7 +182,8 @@ STYLE: Clean CAD-styled jewelry approval render. Isolated piece on a pure, solid
 - Absolutely NO hands, fingers, skin, neck, body parts, props, display boxes, or real-world environments.
 - Even if the reference image shows the jewelry on a hand/body or in a box, you MUST remove/strip the hand/body/box and render the jewelry piece completely isolated.
 - The render MUST be a clean, front-facing hero angle, centered, with crisp edges and a premium, manufacturable look.
-- Realistic metal and stones. No cinematic atmosphere or heavy shadows. Always ignore the background/props/hands of any reference image and render the piece on pure solid white.
+- No cinematic atmosphere or heavy shadows. Always ignore the background/props/hands of any reference image and render the piece on pure solid white.
+- CAD RENDER FINISH (mandatory): the image must look like a 3D render from jewellery CAD software, NOT a photograph — smooth satin/semi-matte digital metal with no photographic environment reflections, idealized crisply-faceted stones, razor-sharp edges, even shadowless diffuse lighting, NO photo artifacts (no depth-of-field blur, bokeh, grain, vignette, dust or glare).
 """
 
 STONE_RULES = """
@@ -1580,54 +1581,61 @@ def _describe_reference_for_relettering(image_b64: str) -> Optional[str]:
         return None
 
 
-def _confirm_lettering_matches(image_b64: str, expected: str) -> Optional[bool]:
-    """SECOND-OPINION check, used only after the free-form OCR reports a mismatch.
+def _confirm_lettering_matches(image_b64: str, expected: str) -> Optional[Dict[str, Any]]:
+    """SECOND-OPINION targeted lettering check.
 
     Pavé / diamond-set letters routinely trip free OCR (adjacent I+Y read as one M, doubled
     strokes read as doubled letters), which made a CORRECT render fail the spelling QA, burn
     all its retries, and ship the LAST attempt instead of the good one (verified empirically:
     a clean "PRIYA" render was OCR'd as "PRMYA"/"PRRIYA"). Framing the question as targeted
-    VERIFICATION of the expected word is far more reliable than blind OCR.
-    Returns True/False, or None when no provider could answer (caller keeps the OCR verdict)."""
+    VERIFICATION of the expected word is far more reliable than blind OCR. The same misreads
+    also produce false PASSES (TES-029: 'Tanish' free-OCR'd as 'Manish'), so this is used to
+    double-check BOTH verdicts on text-change jobs.
+    Returns {"matches": bool, "actual": str} or None when no provider could answer
+    (caller keeps the OCR verdict). Retries once — a single flake used to return None."""
     if not image_b64 or not expected:
         return None
     instruction = (
         f"This jewelry piece's lettering is INTENDED to read EXACTLY: \"{expected}\". "
         "The letters are pavé/diamond-set metal letters that can visually touch or sparkle into each "
-        "other, so examine them CHARACTER BY CHARACTER and count the letters before answering. "
+        "other, so examine them CHARACTER BY CHARACTER and count the letters before answering. Pay "
+        "special attention to the FIRST character — decorative script capitals are easily mistaken "
+        "for each other (T vs M vs N). "
         "Does the lettering read EXACTLY that (same letters, same count, ignore case/styling)? "
         "Respond ONLY as JSON: {\"matches\": true|false, \"actual\": \"<the letters you actually see>\"}."
     )
-    try:
-        resp = _analysis_post(
-            {
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {"role": "system", "content": "You are a meticulous jewelry lettering QA inspector. Respond ONLY with the requested JSON."},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": instruction},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_shrink_b64_for_vision(image_b64)}"}},
-                    ]},
-                ],
-                "response_format": {"type": "json_object"},
-                "max_tokens": 100,
-                "temperature": 0,
-            },
-            timeout=30,
-        )
-        if not resp.ok:
-            return None
-        parsed = _json_from_content(resp.json().get("choices", [{}])[0].get("message", {}).get("content") or "")
-        if "matches" not in parsed:
-            return None
-        logger.info("[spelling-confirm] expected='%s' matches=%s actual='%s'", expected, parsed.get("matches"), parsed.get("actual"))
-        return bool(parsed.get("matches"))
-    except Exception as e:
-        logger.warning("[spelling-confirm] failed: %s", e)
-        return None
+    shrunk = _shrink_b64_for_vision(image_b64)
+    for _try in range(2):
+        try:
+            resp = _analysis_post(
+                {
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {"role": "system", "content": "You are a meticulous jewelry lettering QA inspector. Respond ONLY with the requested JSON."},
+                        {"role": "user", "content": [
+                            {"type": "text", "text": instruction},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{shrunk}"}},
+                        ]},
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "max_tokens": 150,
+                    "temperature": 0,
+                },
+                timeout=30,
+            )
+            if not resp.ok:
+                continue
+            parsed = _json_from_content(resp.json().get("choices", [{}])[0].get("message", {}).get("content") or "")
+            if "matches" not in parsed:
+                continue
+            logger.info("[spelling-confirm] expected='%s' matches=%s actual='%s'", expected, parsed.get("matches"), parsed.get("actual"))
+            return {"matches": bool(parsed.get("matches")), "actual": str(parsed.get("actual") or "")}
+        except Exception as e:
+            logger.warning("[spelling-confirm] failed (try %d/2): %s", _try + 1, e)
+    return None
 
 
-def verify_text_spelling(image_b64: str, expected_texts: List[str]) -> Dict[str, Any]:
+def verify_text_spelling(image_b64: str, expected_texts: List[str], double_check_pass: bool = False) -> Dict[str, Any]:
     """OCR the rendered pendant lettering and verify it is spelled EXACTLY as expected.
 
     Returns {"passed": bool, "detected": str|None, "reason": str}.
@@ -1635,7 +1643,10 @@ def verify_text_spelling(image_b64: str, expected_texts: List[str]) -> Dict[str,
     verification can only ADD safety, never block an otherwise-valid render.
     A free-OCR MISMATCH is double-checked with a targeted second opinion before failing,
     because pavé lettering produces frequent OCR false-negatives (see _confirm_lettering_matches).
-    """
+    With double_check_pass=True a free-OCR MATCH is double-checked too: on text-CHANGE jobs the
+    old name anchors the render, and the free OCR — primed by the expected word — can misread the
+    result as the NEW name (TES-029: 'Tanish' shipped because OCR read it as 'Manish'). Use it
+    whenever a reference image is attached (create-edit, refine, final post-loop check)."""
     expected_texts = [t.strip() for t in (expected_texts or []) if t and t.strip()]
     if not expected_texts:
         return {"passed": True, "detected": None, "reason": "skipped"}
@@ -1654,9 +1665,16 @@ def verify_text_spelling(image_b64: str, expected_texts: List[str]) -> Dict[str,
     passed = any(detected_norm == e for e in expected_norm)
     if not passed:
         confirm = _confirm_lettering_matches(image_b64, expected_texts[0])
-        if confirm is True:
+        if confirm is not None and confirm.get("matches") is True:
             # The targeted check says the lettering IS correct — the free OCR misread it.
             return {"passed": True, "detected": detected, "reason": "ocr-misread-overridden"}
+    elif double_check_pass:
+        confirm = _confirm_lettering_matches(image_b64, expected_texts[0])
+        if confirm is not None and confirm.get("matches") is False:
+            # Targeted read wins over the primed free OCR: the render still shows the wrong name.
+            _actual = (confirm.get("actual") or "").strip()
+            if _norm(_actual) not in expected_norm:
+                return {"passed": False, "detected": _actual or detected, "reason": "false-pass-overridden"}
     return {"passed": passed, "detected": detected, "reason": "checked"}
 
 
@@ -1675,7 +1693,9 @@ def verify_edit_applied(input_b64: str, output_b64: str, user_request: str) -> D
         "The FIRST image is the original reference jewelry; the SECOND is a generated render. "
         f"The user requested this change: \"{user_request[:400]}\". "
         "Answer TWO questions by comparing the images. Ignore the background, camera angle, lighting and "
-        "minor re-render variance.\n"
+        "minor re-render variance. ALSO ignore the rendering FINISH/style: the second image is DELIBERATELY "
+        "a clean CAD-software-style render (matte digital metal, idealized stones, no photo reflections) "
+        "even when the first is a photograph — that style difference is expected and is NOT a change.\n"
         "1) applied: was the requested change VISIBLY applied in the second image?\n"
         "2) preserved: is EVERYTHING ELSE unchanged? Check especially: stone COUNT/SIZE/DENSITY (has the "
         "pavé been thinned out, or the stones enlarged/reduced?), letter or element THICKNESS and stroke "
@@ -4244,7 +4264,7 @@ def _legacy_build_concise_refine_prompt(user_prompt: str, refinement_intent: Opt
 
     # Ultra-minimal — just the change + one-line preserve instruction.
     # This is the exact ChatGPT flow: take the reference, apply ONLY the requested
-    # change, re-render photorealistically on a white background.
+    # change, re-render in the house CAD style on a white background.
     if replacement_block:
         return f"""{replacement_block} Keep the exact same design, backing plate, stones, shape, font style, underlines/lines, metal colour, and all other details unchanged — only the text/number content changes{(", plus the additional change described below" if residual_block else "")}.{residual_block}{metal_lock}
 
@@ -4669,16 +4689,30 @@ def generate_with_fallback(
         if (is_refine or needs_initial_edit_guard) and input_b64 and not _user_wants_metal_change(user_prompt) and _images_near_identical(input_b64, b64, max_distance=_noop_thresh):
             logger.warning("[%s no-op guard attempt %d] output ~identical to reference (thresh=%d) — forcing escalated retry",
                            "refine" if is_refine else "initial-edit", qa_attempt, _noop_thresh)
-            correction_notes = (
-                "The previous attempt returned an image almost IDENTICAL to the reference and did NOT visibly apply "
-                "the requested change. Apply the requested change STRONGLY and OBVIOUSLY this time — redraw the target "
-                "area fully if needed; preserve only the parts the user did not ask to change."
-            )
+            if expected_texts:
+                # TEXT-change no-op: a generic "redraw fully" note made attempt 3 redesign the piece AND
+                # keep the old first letter (TES-029: Tiera -> "Tanish" instead of "Manish"). Name the
+                # exact new lettering and pin the design instead.
+                correction_notes = (
+                    "The previous attempt returned an image almost IDENTICAL to the reference and did NOT apply "
+                    f"the text change. The lettering MUST read EXACTLY \"{', '.join(expected_texts)}\" — redraw "
+                    "EVERY character of the new name, INCLUDING THE FIRST LETTER; do NOT keep or reuse ANY letter "
+                    "from the old name on the reference. Keep the design itself identical: same lettering style, "
+                    "stone work, layers, border, bail, metal and proportions."
+                )
+            else:
+                correction_notes = (
+                    "The previous attempt returned an image almost IDENTICAL to the reference and did NOT visibly apply "
+                    "the requested change. Apply the requested change STRONGLY and OBVIOUSLY this time — redraw the target "
+                    "area fully if needed; preserve only the parts the user did not ask to change."
+                )
             continue
 
         # 1) Spelling verification (highest priority — fixes missing/extra/wrong letters).
+        #    With a reference attached the old name anchors the render AND primes the OCR, so a
+        #    claimed pass gets the targeted double-check too (TES-029: 'Tanish' OCR'd as 'Manish').
         if needs_spelling_check:
-            spell = verify_text_spelling(b64, expected_texts)
+            spell = verify_text_spelling(b64, expected_texts, double_check_pass=bool(input_b64))
             logger.info("[spelling_qa attempt %d] %s", qa_attempt, spell)
             if not spell.get("passed"):
                 logger.warning("[spelling_qa] misspelling — expected %s, got '%s'; retrying",
@@ -4774,7 +4808,7 @@ def generate_with_fallback(
     # if the final render STILL fails the spelling QA, describe the piece from the reference and
     # rebuild it ONCE without the anchoring image — keep the rebuild only if its lettering verifies.
     if final_b64 and needs_spelling_check and input_b64 and not is_refine:
-        _final_spell = verify_text_spelling(final_b64, expected_texts)
+        _final_spell = verify_text_spelling(final_b64, expected_texts, double_check_pass=True)
         if not _final_spell.get("passed"):
             logger.warning("[reletter-fallback] lettering still wrong after %d image-anchored attempts "
                            "(detected='%s', expected=%s) — rebuilding TEXT-ONLY from a described design",
@@ -4786,7 +4820,22 @@ def generate_with_fallback(
                     # Name the metal in plain words ("white gold") so the text-only assembler detects it
                     # (otherwise it falls to the yellow-gold default), and demand the described stone work
                     # explicitly (the first fallback test lost the pavé and came out plain).
+                    # The rebuild has NO image anchor, so the metal must come from the user's own words or
+                    # the REFERENCE — never from the pipeline's metal_tone default (TES-030: a misclassified
+                    # yellow_gold default rebuilt a white-gold "Tiera" piece in yellow gold).
                     _metal_words = (metal_tone or "yellow gold").replace("_", " ")
+                    _named_m = _detected_metal_phrase(original_request or user_prompt or "")
+                    if _named_m:
+                        _metal_words = _named_m
+                    else:
+                        try:
+                            _ref_m = detect_metal_color(input_b64)
+                            _metal_words = {"gold": "yellow gold", "silver": "white gold",
+                                            "rose_gold": "rose gold"}.get(_ref_m, _metal_words)
+                            logger.info("[reletter-fallback] metal from reference: %s -> '%s'", _ref_m, _metal_words)
+                        except Exception as _mde:
+                            logger.warning("[reletter-fallback] reference metal detect failed: %s — using metal_tone '%s'",
+                                           _mde, _metal_words)
                     _fb_prompt = _build_concise_initial_prompt(
                         f"{_desc}\n\nBuild EXACTLY this piece in {_metal_words}, with the SAME stone work as "
                         "described above (if it is pavé/iced, the rebuild must be fully pavé-set with the same "
@@ -4796,7 +4845,7 @@ def generate_with_fallback(
                         f"change the user asked for in this note: \"{(original_request or user_prompt or '')[:300]}\".",
                         parsed_data, metal_tone, False, 0)
                     _fb64 = generate_primary_image([], _fb_prompt, model=_img_model)
-                    _fb_spell = verify_text_spelling(_fb64, expected_texts)
+                    _fb_spell = verify_text_spelling(_fb64, expected_texts, double_check_pass=True)
                     logger.info("[reletter-fallback] rebuild spelling=%s", _fb_spell)
                     if _fb_spell.get("passed"):
                         final_b64 = _fb64
