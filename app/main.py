@@ -101,6 +101,14 @@ _static_dir = Path(__file__).parent / "static"
 if _static_dir.exists():
     fastapi_app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
+# Serve the local-storage fallback (uploads/) over HTTP so images saved when a Supabase upload
+# fails (e.g. 402) are still reachable BY URL — both for the frontend <img> display and for the
+# backend's own re-download in angles/refine (requests.get needs a scheme; a bare filesystem
+# path broke both). storage_service._save_to_local_storage returns {BACKEND_URL}/uploads/<path>.
+_uploads_dir = Path("uploads")
+_uploads_dir.mkdir(exist_ok=True)
+fastapi_app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
+
 # ------------------------------------------------------------------
 # Wrap everything: Socket.IO as outer app, FastAPI as fallback
 # This ensures Socket.IO handles /socket.io/ directly without going

@@ -102,11 +102,11 @@ class Settings(BaseSettings):
     GEMINI_IMAGE_MODEL: str = "gemini-3.1-flash-image-preview"
     # IMAGE-EDIT jobs (name/text change, enamel/colour change, add/remove elements — any
     # "reference + apply this change" request, in create-with-image AND the live refine): route to
-    # Nano Banana Pro (Gemini 3 Pro Image) — SOTA text rendering + localized edits. Flash reproduces
-    # the reference unchanged on such jobs (the "pendant name never updates" bug); Pro is built for
-    # exactly these surgical edits. ~$0.134/img (2K) vs Flash $0.101, charged only on edit jobs.
-    # Plain reproductions / metal swatches / angles stay on Flash. Empty string disables the split.
-    GEMINI_IMAGE_MODEL_TEXT: str = "gemini-3-pro-image-preview"
+    # Nano Banana Pro (Gemini 3 Pro Image) — SOTA text rendering + localized edits. ~$0.134/img (2K)
+    # vs Flash $0.101, charged only on edit jobs. Empty string DISABLES the split (everything runs on
+    # GEMINI_IMAGE_MODEL / Flash) — user reverted to Flash-everywhere on 2026-07-16 after TES-029/030
+    # showed Pro still no-ops the pavé re-letter (the QA/fallback pipeline handles correctness now).
+    GEMINI_IMAGE_MODEL_TEXT: str = ""
     # Output resolution for Gemini image gen ("1K" | "2K" | "4K"). Higher = better quality + more
     # tokens/time. Empty = model default. 2K = 2816x1536 (4x the default pixels).
     GEMINI_IMAGE_SIZE: str = "2K"
