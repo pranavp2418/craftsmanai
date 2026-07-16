@@ -270,6 +270,8 @@ NEGATIVE_PROMPT = (
     "random diamonds, changed reference structure, distorted text, asymmetry, blurry setting, loose stones, "
     "unrealistic plastic metal, fantasy elements, changed subtype, lazy diamond-grid wallpaper background, "
     "off-center framing, dramatic camera angles by default, halos or decorative extras the user did not ask for, "
+    "a SECOND/duplicate copy of the piece in the same image, a mirrored or ghosted duplicate, a faded "
+    "reflection copy of the piece behind or above it (render the piece ONCE only), "
     "ANY engraved or stamped "
     "text/letters/numbers/logos/brand-marks/watermarks/signatures that the user did not explicitly request "
     "(no 'CraftsmanAI', no 'Craftsman', no 'AI', no tool/brand names, no placeholder names like 'NAME' or "
