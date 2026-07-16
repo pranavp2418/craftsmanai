@@ -182,8 +182,7 @@ STYLE: Clean CAD-styled jewelry approval render. Isolated piece on a pure, solid
 - Absolutely NO hands, fingers, skin, neck, body parts, props, display boxes, or real-world environments.
 - Even if the reference image shows the jewelry on a hand/body or in a box, you MUST remove/strip the hand/body/box and render the jewelry piece completely isolated.
 - The render MUST be a clean, front-facing hero angle, centered, with crisp edges and a premium, manufacturable look.
-- No cinematic atmosphere or heavy shadows. Always ignore the background/props/hands of any reference image and render the piece on pure solid white.
-- CAD RENDER FINISH (mandatory): the image must look like a 3D render from jewellery CAD software, NOT a photograph — smooth satin/semi-matte digital metal with no photographic environment reflections, idealized crisply-faceted stones, razor-sharp edges, even shadowless diffuse lighting, NO photo artifacts (no depth-of-field blur, bokeh, grain, vignette, dust or glare).
+- Realistic metal and stones. No cinematic atmosphere or heavy shadows. Always ignore the background/props/hands of any reference image and render the piece on pure solid white.
 """
 
 STONE_RULES = """
@@ -425,53 +424,20 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
     }
 
     def clean_phrase(p: str) -> str:
-        # Strip surrounding quote marks FIRST — a captured "'PRIYA'" must verify as PRIYA, not
-        # as a name with literal apostrophes (interior apostrophes like O'Brien are kept).
-        p_clean = p.strip().strip("\"'“”‘’").strip()
+        p_clean = p.strip()
         lower = p_clean.lower()
         filler_prefixes = ["i want", "want", "use", "show", "have", "with", "the", "a", "an", "change", "replace"]
         for prefix in filler_prefixes:
             if lower.startswith(prefix + " "):
                 p_clean = p_clean[len(prefix) + 1:].strip()
                 lower = p_clean.lower()
-        return p_clean.strip("\"'“”‘’ ")
-
-    # A real name/word is SHORT and carries no instruction grammar. Phrases like "different T that goes
-    # well with the rest of the letters" or "something bolder" are STYLE requests, not literal text to
-    # engrave — treating them as expected lettering made the spelling QA compare the render against a
-    # whole instruction, so it could never pass and burned every retry (observed on TES-007).
-    _NOT_A_NAME = (
-        "different", "similar", "same", "matching", "goes well", "rest of", "style", "styled",
-        "bigger", "smaller", "thicker", "thinner", "bolder", "cleaner", "nicer", "better",
-        "that ", " with ", " like ", "which", "instead", "letters", "lettering", "spacing",
-        "curve", "curved", "script", "cursive", "block", "serif", "shape", "design", "something",
-    )
-
-    def _looks_like_literal_text(v: str) -> bool:
-        vl = (v or "").strip().lower()
-        if not vl or len(vl) > 24:            # names/words are short
-            return False
-        if len(vl.split()) > 3:               # "different T that goes well…" → instruction, not a name
-            return False
-        return not any(k in vl for k in _NOT_A_NAME)
+        return p_clean
 
     def _is_text_change(old_txt: str, new_txt: str) -> bool:
-        # A STYLE request is not literal text to engrave — route it to the general edit path instead.
-        if not _looks_like_literal_text(new_txt):
-            return False
-
         # Explicit name/text context ("change NAME to ...") is ALWAYS a text change, even if
         # the new value is also an animal/motif word (e.g. the name "RAM").
         if old_txt.strip().lower() in _GENERIC_TEXT_OLD:
             return True
-
-        # SINGLE-LETTER swap inside a word ("change the M to K"): the spelling QA verifies the WHOLE
-        # rendered text against expected, so a 1-char expectation can never pass (render says "KIKE",
-        # expected "K") and burns every retry. Route letter swaps to the general edit path, where the
-        # edit-applied vision check judges them correctly. Whole-text single chars ("change the number
-        # to 7") keep working via the generic-old branch above.
-        if len(re.sub(r"[^A-Za-z0-9]", "", old_txt)) <= 1 or len(re.sub(r"[^A-Za-z0-9]", "", new_txt)) <= 1:
-            return False
 
         old_lower = old_txt.lower()
         new_lower = new_txt.lower()
@@ -512,8 +478,8 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
         if new_txt and _is_text_change(old_txt, new_txt):
             replacements.append((old_txt, new_txt))
 
-    # Pattern 3: replace/swap [old] with [new]
-    matches3 = re.findall(r"\b(?:replace|swap)\s+([\w \t']{1,40})\s+with\s+([\w \t']{1,60})", prompt, re.IGNORECASE)
+    # Pattern 3: replace [old] with [new]
+    matches3 = re.findall(r"\breplace\s+([\w \t']{1,40})\s+with\s+([\w \t']{1,60})", prompt, re.IGNORECASE)
     for m in matches3:
         old_txt, new_txt = clean_phrase(m[0]), _trim_secondary_instruction(clean_phrase(m[1]))
         if any(x in old_txt.lower() or x in new_txt.lower() for x in ["metal", "color", "tone", "gold", "silver", "font", "fonts"]):
@@ -521,51 +487,7 @@ def extract_text_replacements(prompt: str) -> List[Tuple[str, str]]:
         if new_txt and _is_text_change(old_txt, new_txt):
             replacements.append((old_txt, new_txt))
 
-    # Patterns 4-6 cover the phrasings retailers ACTUALLY type, which 1-3 all missed (so the
-    # spelling QA never armed and a dropped rename shipped silently — the "pendant name never
-    # updates" bug). The old text is unknown in these forms, so it is recorded as generic "name"
-    # (a member of _GENERIC_TEXT_OLD, which _is_text_change always accepts).
-    _TEXT_KW = r"(?:name|text|lettering|letters?|word|engrav\w+|monogram|initials?|number)"
-
-    def _add_new_only(raw_val: str):
-        new_txt = _trim_secondary_instruction(clean_phrase(raw_val))
-        if not new_txt:
-            return
-        if any(x in new_txt.lower() for x in ["metal", "color", "tone", "gold", "silver", "font", "fonts"]):
-            return
-        if not _looks_like_literal_text(new_txt):
-            return
-        if _is_text_change("name", new_txt):
-            replacements.append(("name", new_txt))
-
-    # Pattern 4: update/rename/set/write/put the NAME/TEXT to/as [value]   (verb-first; quoted or bare)
-    for m in re.findall(
-            rf"\b(?:update|rename|set|write|put|make)\s+(?:the\s+|its\s+)?{_TEXT_KW}\s*(?:to|as|into|[:=])\s*[\"'“”‘’]?([\w \t']{{1,40}})",
-            prompt, re.IGNORECASE):
-        _add_new_only(m)
-
-    # Pattern 5: NAME should say / reads [value]
-    for m in re.findall(
-            rf"\b{_TEXT_KW}\b[^\n]{{0,20}}?\b(?:should\s+(?:say|read|be)|says?|reads?)\s*[:=]?\s*[\"'“”‘’]?([\w \t']{{1,40}})",
-            prompt, re.IGNORECASE):
-        _add_new_only(m)
-
-    # Pattern 6: NAME/TEXT … 'quoted value' — quoted-only catch-all; covers verb-after word orders
-    # too ("iska name update karo 'RAHUL'"). Quoting is what marks the value as literal lettering.
-    for m in re.findall(
-            rf"\b{_TEXT_KW}\b[^\"'“”‘’\n]{{0,40}}[\"'“”‘’]([^\"'“”‘’\n]{{1,40}})[\"'“”‘’]",
-            prompt, re.IGNORECASE):
-        _add_new_only(m)
-
-    # Dedupe (patterns overlap on purpose) — keep first occurrence order.
-    seen = set()
-    out: List[Tuple[str, str]] = []
-    for old_txt, new_txt in replacements:
-        key = new_txt.strip().lower()
-        if key and key not in seen:
-            seen.add(key)
-            out.append((old_txt, new_txt))
-    return out
+    return replacements
 
 
 _TEXT_CHANGE_LLM_CACHE: Dict[str, bool] = {}
@@ -606,38 +528,21 @@ def _analysis_post(payload: dict, timeout: int = 30):
 
 
 def _json_from_content(content: str) -> Dict[str, Any]:
-    """Parse a JSON OBJECT out of an LLM reply that may be wrapped in ```json fences, prefixed with
-    reasoning text, or wrapped in a top-level ARRAY. Returns {} if nothing parseable is found.
-
-    The array case is not theoretical: with response_format=json_object the model still sometimes
-    replies '[{"applied": true, ...}]'. That made every QA read as "unparseable" and fail open, so a
-    render the QA had actually judged shipped unchecked (observed on TES-010).
-    """
+    """Parse a JSON object out of an LLM reply that may be wrapped in ```json fences or have
+    reasoning text before/after it (Gemini reasoning models often do this, which breaks a strict
+    json.loads with 'Extra data'). Returns {} if nothing parseable is found."""
     if not content:
         return {}
-
-    def _obj(v: Any) -> Dict[str, Any]:
-        # Unwrap a single-element array wrapper; ignore anything that is not an object.
-        if isinstance(v, list):
-            v = next((x for x in v if isinstance(x, dict)), None)
-        return v if isinstance(v, dict) else {}
-
     try:
-        parsed = _obj(json.loads(content))
-        if parsed:
-            return parsed
+        return _json_from_content(content)
     except Exception:
         pass
-    # Fall back to the first {...} or [...] block embedded in surrounding prose / code fences.
-    for pattern in (r"\{.*\}", r"\[.*\]"):
-        m = re.search(pattern, content, re.DOTALL)
-        if m:
-            try:
-                parsed = _obj(json.loads(m.group(0)))
-                if parsed:
-                    return parsed
-            except Exception:
-                continue
+    m = re.search(r"\{.*\}", content, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except Exception:
+            pass
     return {}
 
 
@@ -1359,8 +1264,6 @@ def qa_initial_check(params: Dict[str, Any]) -> Dict[str, Any]:
                 "- the requested METAL colour is correct (e.g. rose gold is pink, white gold is silvery)\n"
                 "- requested stones/diamonds are present (and none invented if none were requested)\n"
                 "- it is a clean CAD-style jewelry render on a pure white background (no scene/props/hands)\n"
-                "- it shows EXACTLY ONE piece — set retry_recommended=true if there are TWO or more copies of "
-                "the piece, a mirrored/ghost duplicate, or a faded reflection copy behind/above it\n"
                 "- nothing MAJOR from the request is missing, and nothing major was added that wasn't asked for\n\n"
                 "Call emit_qa_verdict. Set retry_recommended=true ONLY for a CLEAR, fixable mismatch "
                 "(wrong/misspelled text, wrong metal colour, a clearly missing requested element, or wrong "
@@ -1436,7 +1339,7 @@ def _ocr_pendant_text(image_b64: str, expected_join: str) -> Optional[str]:
     """OCR the main lettering on a name pendant. Tries OpenAI vision first (the key we
     know exists), then Gemini if configured. Returns the detected text, or None if no
     provider could read it. Never raises."""
-    data_url = f"data:image/png;base64,{_shrink_b64_for_vision(image_b64)}"
+    data_url = f"data:image/png;base64,{image_b64}"
     instruction = (
         "This is a name/word jewelry pendant. Read ONLY the main lettering/name spelled out across "
         "the pendant (ignore the chain, the bail, and any decorative charm like a butterfly or dove). "
@@ -1500,153 +1403,13 @@ def _ocr_pendant_text(image_b64: str, expected_join: str) -> Optional[str]:
     return None
 
 
-def _shrink_b64_for_vision(image_b64: str, max_side: int = 1024) -> str:
-    """Downscale a base64 image before a VISION QA / OCR call. The full 2K renders (2816px) made every
-    QA round-trip 11-15s and token-heavy; lettering/preservation judgements survive 1024px easily.
-    Returns the original string untouched on any error or if already small (fail-open)."""
-    try:
-        raw = base64.b64decode(image_b64)
-        img = Image.open(BytesIO(raw)).convert("RGB")
-        w, h = img.size
-        if max(w, h) <= max_side:
-            return image_b64
-        s = max_side / float(max(w, h))
-        img = img.resize((max(1, int(w * s)), max(1, int(h * s))), Image.LANCZOS)
-        buf = BytesIO()
-        img.save(buf, "JPEG", quality=88)
-        return base64.b64encode(buf.getvalue()).decode("utf-8")
-    except Exception:
-        return image_b64
-
-
-_EDIT_WORDS = (
-    "change", "update", "replace", "rename", "instead", "remove", "delete", "add ",
-    "make it", "make the", "turn ", "swap", "convert", "bigger", "smaller", "thicker",
-    "thinner", "different", "apply only the following change",
-    # Comparative / dimension edits ("make a green diamond's length SAME AS the round diamonds",
-    # "make the emeralds MATCH THE rounds", "RESIZE", "LONGER/SHORTER") — the client's length-refine
-    # slipped past the list because it said "make a …" (only "make it/the" were matched).
-    "same as", "match the", "equal to", "resize", "shorter", "longer",
-    # Hinglish edit markers (deliberately NARROW — "bana do" / "karo" alone are how users ask for a
-    # plain reproduction, which must stay a single un-guarded shot):
-    "badal", "badlo", "hatao", "hata do", "alag tarike", "alag style", "alag se",
-)
-
-
-def _user_wants_edit(user_prompt: str) -> bool:
-    """True when a reference-image prompt asks to CHANGE the piece rather than reproduce it.
-
-    Single source of truth for the edit-vs-reproduce split: it arms the no-op / edit-applied QA and
-    retries in generate_with_fallback, and adds the SURGICAL EDIT clause in prompts/initial.py.
-    """
-    p = (user_prompt or "").strip().lower()
-    return bool(p) and any(w in p for w in _EDIT_WORDS)
-
-
-def _describe_reference_for_relettering(image_b64: str) -> Optional[str]:
-    """Describe a lettered piece's DESIGN (never its current name) precisely enough to rebuild it
-    from text. Used by the reletter fallback: with the reference image attached, the image model
-    reliably fails to change dense pavé lettering (it reproduces or garbles the OLD name — the SERGE
-    finding, re-confirmed on TES-017 where 'cool' came out as 'Fool' then gibberish), while a
-    TEXT-ONLY generation letters correctly. Returns None on any failure."""
-    if not image_b64:
-        return None
-    instruction = (
-        "Describe this jewelry piece's DESIGN in 3-5 short sentences, precisely enough for a jeweler "
-        "to rebuild the same piece with DIFFERENT lettering. Cover: the piece type; the lettering STYLE "
-        "(connected cursive script / block serif / brush etc., thick or thin strokes); the number of "
-        "layers and how they stack (e.g. an iced outline layer behind pavé letters); the stone work "
-        "(pavé density, stone size, setting); any border/outline; the bail style; the metal colour. "
-        "Do NOT mention or spell the word/name currently on the piece. Respond with the description only."
-    )
-    try:
-        resp = _analysis_post(
-            {
-                "model": "gpt-4o-mini",
-                "messages": [{"role": "user", "content": [
-                    {"type": "text", "text": instruction},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_shrink_b64_for_vision(image_b64)}"}},
-                ]}],
-                "max_tokens": 700,
-                "temperature": 0,
-            },
-            timeout=40,
-        )
-        if not resp.ok:
-            return None
-        txt = (resp.json().get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
-        return txt or None
-    except Exception as e:
-        logger.warning("[reletter-describe] failed: %s", e)
-        return None
-
-
-def _confirm_lettering_matches(image_b64: str, expected: str) -> Optional[Dict[str, Any]]:
-    """SECOND-OPINION targeted lettering check.
-
-    Pavé / diamond-set letters routinely trip free OCR (adjacent I+Y read as one M, doubled
-    strokes read as doubled letters), which made a CORRECT render fail the spelling QA, burn
-    all its retries, and ship the LAST attempt instead of the good one (verified empirically:
-    a clean "PRIYA" render was OCR'd as "PRMYA"/"PRRIYA"). Framing the question as targeted
-    VERIFICATION of the expected word is far more reliable than blind OCR. The same misreads
-    also produce false PASSES (TES-029: 'Tanish' free-OCR'd as 'Manish'), so this is used to
-    double-check BOTH verdicts on text-change jobs.
-    Returns {"matches": bool, "actual": str} or None when no provider could answer
-    (caller keeps the OCR verdict). Retries once — a single flake used to return None."""
-    if not image_b64 or not expected:
-        return None
-    instruction = (
-        f"This jewelry piece's lettering is INTENDED to read EXACTLY: \"{expected}\". "
-        "The letters are pavé/diamond-set metal letters that can visually touch or sparkle into each "
-        "other, so examine them CHARACTER BY CHARACTER and count the letters before answering. Pay "
-        "special attention to the FIRST character — decorative script capitals are easily mistaken "
-        "for each other (T vs M vs N). "
-        "Does the lettering read EXACTLY that (same letters, same count, ignore case/styling)? "
-        "Respond ONLY as JSON: {\"matches\": true|false, \"actual\": \"<the letters you actually see>\"}."
-    )
-    shrunk = _shrink_b64_for_vision(image_b64)
-    for _try in range(2):
-        try:
-            resp = _analysis_post(
-                {
-                    "model": "gpt-4o-mini",
-                    "messages": [
-                        {"role": "system", "content": "You are a meticulous jewelry lettering QA inspector. Respond ONLY with the requested JSON."},
-                        {"role": "user", "content": [
-                            {"type": "text", "text": instruction},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{shrunk}"}},
-                        ]},
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "max_tokens": 150,
-                    "temperature": 0,
-                },
-                timeout=30,
-            )
-            if not resp.ok:
-                continue
-            parsed = _json_from_content(resp.json().get("choices", [{}])[0].get("message", {}).get("content") or "")
-            if "matches" not in parsed:
-                continue
-            logger.info("[spelling-confirm] expected='%s' matches=%s actual='%s'", expected, parsed.get("matches"), parsed.get("actual"))
-            return {"matches": bool(parsed.get("matches")), "actual": str(parsed.get("actual") or "")}
-        except Exception as e:
-            logger.warning("[spelling-confirm] failed (try %d/2): %s", _try + 1, e)
-    return None
-
-
-def verify_text_spelling(image_b64: str, expected_texts: List[str], double_check_pass: bool = False) -> Dict[str, Any]:
+def verify_text_spelling(image_b64: str, expected_texts: List[str]) -> Dict[str, Any]:
     """OCR the rendered pendant lettering and verify it is spelled EXACTLY as expected.
 
     Returns {"passed": bool, "detected": str|None, "reason": str}.
     Fails OPEN (passed=True) whenever no vision provider can read the text — so spelling
     verification can only ADD safety, never block an otherwise-valid render.
-    A free-OCR MISMATCH is double-checked with a targeted second opinion before failing,
-    because pavé lettering produces frequent OCR false-negatives (see _confirm_lettering_matches).
-    With double_check_pass=True a free-OCR MATCH is double-checked too: on text-CHANGE jobs the
-    old name anchors the render, and the free OCR — primed by the expected word — can misread the
-    result as the NEW name (TES-029: 'Tanish' shipped because OCR read it as 'Manish'). Use it
-    whenever a reference image is attached (create-edit, refine, final post-loop check)."""
+    """
     expected_texts = [t.strip() for t in (expected_texts or []) if t and t.strip()]
     if not expected_texts:
         return {"passed": True, "detected": None, "reason": "skipped"}
@@ -1663,87 +1426,7 @@ def verify_text_spelling(image_b64: str, expected_texts: List[str], double_check
 
     expected_norm = [_norm(t) for t in expected_texts]
     passed = any(detected_norm == e for e in expected_norm)
-    if not passed:
-        confirm = _confirm_lettering_matches(image_b64, expected_texts[0])
-        if confirm is not None and confirm.get("matches") is True:
-            # The targeted check says the lettering IS correct — the free OCR misread it.
-            return {"passed": True, "detected": detected, "reason": "ocr-misread-overridden"}
-    elif double_check_pass:
-        confirm = _confirm_lettering_matches(image_b64, expected_texts[0])
-        if confirm is not None and confirm.get("matches") is False:
-            # Targeted read wins over the primed free OCR: the render still shows the wrong name.
-            _actual = (confirm.get("actual") or "").strip()
-            if _norm(_actual) not in expected_norm:
-                return {"passed": False, "detected": _actual or detected, "reason": "false-pass-overridden"}
     return {"passed": passed, "detected": detected, "reason": "checked"}
-
-
-def verify_edit_applied(input_b64: str, output_b64: str, user_request: str) -> Dict[str, Any]:
-    """Ask vision ONE question: was the user's requested change VISIBLY applied in the render?
-
-    The phash no-op guard only catches a near-IDENTICAL output; the model can also redraw the piece
-    (different enough to pass phash) while still IGNORING the requested change. This closes that gap
-    for non-text edits (add/remove elements, enamel/colour changes, size changes…). Returns
-    {"applied": bool, "reason": str} and fails OPEN (applied=True) so it can only add safety."""
-    if not (input_b64 and output_b64 and (user_request or "").strip()):
-        return {"applied": True, "preserved": True, "reason": "skipped"}
-    input_b64 = _shrink_b64_for_vision(input_b64)
-    output_b64 = _shrink_b64_for_vision(output_b64)
-    instruction = (
-        "The FIRST image is the original reference jewelry; the SECOND is a generated render. "
-        f"The user requested this change: \"{user_request[:400]}\". "
-        "Answer TWO questions by comparing the images. Ignore the background, camera angle, lighting and "
-        "minor re-render variance. ALSO ignore the rendering FINISH/style: the second image is DELIBERATELY "
-        "a clean CAD-software-style render (matte digital metal, idealized stones, no photo reflections) "
-        "even when the first is a photograph — that style difference is expected and is NOT a change.\n"
-        "1) applied: was the requested change VISIBLY applied in the second image?\n"
-        "2) preserved: is EVERYTHING ELSE unchanged? Check especially: stone COUNT/SIZE/DENSITY (has the "
-        "pavé been thinned out, or the stones enlarged/reduced?), letter or element THICKNESS and stroke "
-        "weight, the number of LAYERS and the raised/recessed relief depth, borders, bail, metal colour, "
-        "proportions and spacing. ALSO check STRUCTURAL CONNECTIVITY: every letter/element must still be "
-        "physically joined as ONE piece — set preserved=false if any letter or component is now floating "
-        "or DETACHED with a gap from the rest (an unmanufacturable pendant). Set preserved=false if the "
-        "piece was simplified, flattened, slimmed, smoothed or otherwise redesigned beyond the requested "
-        "change.\n"
-        "Respond ONLY as JSON: {\"applied\": true|false, \"preserved\": true|false, "
-        "\"reason\": \"<one short sentence>\"}."
-    )
-    # Up to 2 tries: on TES-008 the first response came back unparseable (the reasoning model spent its
-    # budget thinking and returned no JSON) and the fail-open shipped an edit the model had IGNORED.
-    # A generous max_tokens leaves room for reasoning + the JSON, and one re-ask covers the flake.
-    for _try in range(2):
-        try:
-            resp = _analysis_post(
-                {
-                    "model": "gpt-4o-mini",
-                    "messages": [
-                        {"role": "system", "content": "You are a precise jewelry render QA inspector. Respond ONLY with the requested JSON."},
-                        {"role": "user", "content": [
-                            {"type": "text", "text": instruction},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{input_b64}"}},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{output_b64}"}},
-                        ]},
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "max_tokens": 900,
-                    "temperature": 0,
-                },
-                timeout=40,
-            )
-            if not resp.ok:
-                continue
-            parsed = _json_from_content(resp.json().get("choices", [{}])[0].get("message", {}).get("content") or "")
-            if "applied" in parsed:
-                return {
-                    "applied": bool(parsed.get("applied")),
-                    # Absent "preserved" must not silently fail the render — default to preserved.
-                    "preserved": bool(parsed.get("preserved", True)),
-                    "reason": (parsed.get("reason") or "")[:200],
-                }
-            logger.warning("[edit_qa] unparseable response (try %d/2)", _try + 1)
-        except Exception as e:
-            logger.warning("[edit_qa] failed (try %d/2): %s", _try + 1, e)
-    return {"applied": True, "preserved": True, "reason": "qa-unavailable"}
 
 
 def verify_design_fidelity(input_b64: str, output_b64: str, intended_change: str = "") -> Dict[str, Any]:
@@ -2895,21 +2578,19 @@ def _images_near_identical(b64_a: str, b64_b: str, max_distance: int = 4) -> boo
         return False
 
 
-def generate_with_gemini_image(image_blobs, prompt_text: str, model: Optional[str] = None) -> Optional[str]:
+def generate_with_gemini_image(image_blobs, prompt_text: str) -> Optional[str]:
     """FALLBACK image generator via Gemini (gemini-2.5-flash-image). Used ONLY when OpenAI
     refuses a render on content-policy / copyright grounds — Gemini's moderation differs, so
     some OpenAI-blocked prompts succeed here. Returns base64 PNG, or None on any failure.
 
     image_blobs: optional reference image bytes (image-to-image); empty/None = text-to-image.
-    model: optional per-call model override (e.g. Nano Banana Pro for text-change jobs);
-           None = the configured default (settings.GEMINI_IMAGE_MODEL).
     """
     key = os.getenv("GEMINI_API_KEY") or getattr(settings, "GEMINI_API_KEY", None)
     if not key:
         logger.warning("Gemini image fallback skipped: no GEMINI_API_KEY")
         return None
     # Model is config-driven (settings.GEMINI_IMAGE_MODEL) so it can be changed without code edits.
-    _model = model or getattr(settings, "GEMINI_IMAGE_MODEL", None) or "gemini-2.5-flash-image"
+    _model = getattr(settings, "GEMINI_IMAGE_MODEL", None) or "gemini-2.5-flash-image"
     parts = [{"text": prompt_text}]
     for blob in (image_blobs or []):
         parts.append({"inline_data": {"mime_type": "image/png", "data": base64.b64encode(blob).decode("utf-8")}})
@@ -2959,7 +2640,6 @@ def generate_primary_image(
     prompt_text: str,
     pre_downloaded_blobs: list[bytes] | None = None,
     whiten_output: bool = True,
-    model: Optional[str] = None,
 ) -> str:
     """Primary jewelry image generator for MAIN generation, REFINEMENT and METAL-COLOUR change.
 
@@ -2985,7 +2665,7 @@ def generate_primary_image(
         # "api.openai.com" DNS error the user saw.
         for _attempt in range(3):
             try:
-                g64 = generate_with_gemini_image(blobs or [], prompt_text, model=model)
+                g64 = generate_with_gemini_image(blobs or [], prompt_text)
             except Exception as _ge:
                 logger.warning("Gemini primary generation errored (attempt %d/3): %s", _attempt + 1, _ge)
                 g64 = None
@@ -3005,7 +2685,7 @@ def generate_primary_image(
                     ).decode("utf-8")
                 except Exception as _w:
                     logger.warning("Gemini output white-bg post-process skipped: %s", _w)
-            logger.info("Primary image generated via Gemini (%s)", model or getattr(settings, "GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"))
+            logger.info("Primary image generated via Gemini (%s)", getattr(settings, "GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"))
             return g64
         # GEMINI-ONLY — no OpenAI image fallback (removed). Gemini returned no image after 3 attempts: this is
         # almost always a CONTENT REFUSAL (e.g. a specific real person / celebrity named in the prompt, which the
@@ -3387,27 +3067,17 @@ def _user_wants_front(user_prompt: str) -> bool:
 
 
 def _user_wants_variations(user_prompt: str) -> bool:
-    """True if the user asks for MULTIPLE variations in ONE image (e.g. 'show me 6 fonts').
-
-    SINGULAR forms ("change the T to A DIFFERENT FONT") are deliberately NOT matched — that is a
-    single targeted EDIT, not a request for a grid. Matching it produced a 4-up variations sheet for
-    a one-letter font change (TES-011) and the edit-QA then fought the grid for all 3 attempts.
-    Variations require a PLURAL ("different fonts") or an explicit count/quantifier ("6 fonts",
-    "several styles") or grid wording.
-    """
+    """True if the user asks for MULTIPLE variations in ONE image (e.g. 'show me 6 fonts')."""
     p = (user_prompt or "").lower()
     if any(w in p for w in [
-        "different fonts", "different versions", "different styles", "different designs",
+        "different font", "different fonts", "different version", "different versions",
+        "different style", "different styles", "different design", "different designs",
         "variations", "side by side", "side-by-side", "in a grid", "grid of", "collage",
         "multiple versions", "multiple options", "few options",
     ]):
         return True
     # "show me 6 fonts", "5 different styles", "several versions", etc.
-    if re.search(r"\b(\d+|few|several|some|multiple)\s+(different\s+)?(font|version|style|design|option|variation)s?\b", p):
-        return True
-    # Looser nouns ("6 different TYPE of style", "3 different ways") — 'different' is REQUIRED here so
-    # that "alternating 2 types of stones" (a design spec) does not read as a variations request.
-    return bool(re.search(r"\b(\d+|few|several|some|multiple)\s+different\s+(type|way|kind|look)s?\b", p))
+    return bool(re.search(r"\b(\d+|few|several|some|multiple)\s+(different\s+)?(font|version|style|design|option|variation)s?\b", p))
 
 
 def _user_wants_custom_bail(user_prompt: str, image_count: int = 0) -> bool:
@@ -4264,7 +3934,7 @@ def _legacy_build_concise_refine_prompt(user_prompt: str, refinement_intent: Opt
 
     # Ultra-minimal — just the change + one-line preserve instruction.
     # This is the exact ChatGPT flow: take the reference, apply ONLY the requested
-    # change, re-render in the house CAD style on a white background.
+    # change, re-render photorealistically on a white background.
     if replacement_block:
         return f"""{replacement_block} Keep the exact same design, backing plate, stones, shape, font style, underlines/lines, metal colour, and all other details unchanged — only the text/number content changes{(", plus the additional change described below" if residual_block else "")}.{residual_block}{metal_lock}
 
@@ -4511,25 +4181,20 @@ def generate_with_fallback(
     # no retry fired, and the rename was silently dropped (the image dominated and the old name came back).
     # The regex stays as a fail-open fallback (interpret_refinement is an LLM call that may return nothing).
     expected_texts: List[str] = []
-    if user_prompt and (is_refine or has_reference_image):
-        if is_refine:
-            ri = refinement_intent or {}
-            _attr = (ri.get("attribute_to_change") or "").lower()
-            if any(k in _attr for k in ("text", "letter", "name", "engrav", "number", "word", "spell", "digit")):
-                _to = ri.get("to_state") or ""
-                # to_state may be compound ("engraving_text: SERGE, size: 6 inch, ...") — pull the text value.
-                _m = re.search(r"(?:engrav\w*|letter\w*|text|name|word|number|digit)[^:=,]{0,16}[:=]\s*([^,;\n]{1,40})", _to, re.IGNORECASE)
-                if _m:
-                    expected_texts = [_m.group(1).strip().strip("\"'“”‘’ ")]
-                else:
-                    # no key:value in to_state — mine the LLM's clean normalized_prompt with the regex extractor.
-                    expected_texts = [new for (_o, new) in extract_text_replacements(ri.get("normalized_prompt") or "") if new and new.strip()]
+    if is_refine and user_prompt:
+        ri = refinement_intent or {}
+        _attr = (ri.get("attribute_to_change") or "").lower()
+        if any(k in _attr for k in ("text", "letter", "name", "engrav", "number", "word", "spell", "digit")):
+            _to = ri.get("to_state") or ""
+            # to_state may be compound ("engraving_text: SERGE, size: 6 inch, ...") — pull the text value.
+            _m = re.search(r"(?:engrav\w*|letter\w*|text|name|word|number|digit)[^:=,]{0,16}[:=]\s*([^,;\n]{1,40})", _to, re.IGNORECASE)
+            if _m:
+                expected_texts = [_m.group(1).strip().strip("\"'“”‘’ ")]
+            else:
+                # no key:value in to_state — mine the LLM's clean normalized_prompt with the regex extractor.
+                expected_texts = [new for (_o, new) in extract_text_replacements(ri.get("normalized_prompt") or "") if new and new.strip()]
         if not expected_texts:
-            # Regex on the raw prompt. This is the fail-open fallback for refines AND the ONLY extraction
-            # path for an image-CREATE that carries a text instruction ("update the name to 'X'") — that
-            # flow (and the live refine, which is routed through mode="initial") previously got NO
-            # expected_texts at all, so the spelling QA never ran and a dropped rename shipped silently:
-            # the reference image dominates and the model reproduces the OLD lettering (the reported bug).
+            # fallback: regex on the raw user prompt (also covers the LLM-unavailable / non-text-change case).
             expected_texts = [new for (_old, new) in extract_text_replacements(user_prompt) if new and new.strip()]
             if expected_texts and not _llm_is_text_change(user_prompt):
                 expected_texts = []
@@ -4616,54 +4281,24 @@ def generate_with_fallback(
     # we reproduce it faithfully — a QA pass that "checks vs the request" would second-guess and possibly
     # regenerate a correct faithful copy. So QA runs ONLY on TEXT-ONLY initials (no reference image).
     needs_initial_qa = bool((not is_refine) and (not has_reference_image) and os.getenv("GEMINI_API_KEY") and original_request)
-    # IMAGE-CREATE EDIT GUARD: an image-create whose prompt asks for a CHANGE (a name update, add/remove,
-    # resize…) is NOT a pure reproduction — the reference anchors the model so hard that it often ignores
-    # the instruction and returns the piece unchanged (the reported "pendant name never updates" bug), and
-    # with zero checks the drop shipped silently. The live refine ALSO runs through this initial path, so
-    # this guard covers both. Pure reproduce jobs (empty / "i need same" prompts, no change wording) keep
-    # the single-shot behaviour — for them identical-to-reference IS the desired outcome.
-    needs_initial_edit_guard = bool(
-        (not is_refine) and has_reference_image
-        and (bool(expected_texts) or _user_wants_edit(user_prompt))
-        # A VARIATIONS job intentionally outputs a multi-design grid — comparing it against the single
-        # reference would always read as "not preserved" and burn every retry fighting the grid.
-        and not _user_wants_variations(user_prompt)
-    )
-    any_check = needs_spelling_check or needs_visual_qa or needs_initial_qa or needs_initial_edit_guard
+    any_check = needs_spelling_check or needs_visual_qa or needs_initial_qa
     # Refines (Gemini) are fast & cheap, and the model sometimes drops the edit (stochastic no-op).
-    # Allow up to 3 generations so a dropped edit gets escalated corrective re-rolls (driven by the no-op
-    # guard below) instead of a single un-verified shot. Text/name changes on an image-create get the same
-    # 3-attempt budget — they are the stubbornest case (the reference's old lettering dominates).
-    _refine_cap = 3 if ((is_refine and refinement_intent) or needs_initial_edit_guard) else 2
+    # Allow up to 3 generations for a refine so a dropped edit gets escalated corrective re-rolls
+    # (driven by the no-op guard below) instead of a single un-verified shot.
+    _refine_cap = 3 if (is_refine and refinement_intent) else 2
     max_qa_attempts = _refine_cap if any_check else 1
     previous_ref_url = resolved_image_urls[0] if (is_refine and resolved_image_urls) else None
     final_b64 = None
     qa_result = None
     correction_notes = ""
 
-    # MODEL ROUTING — EVERY job in the PRIMARY pipeline goes to Nano Banana Pro
-    # (GEMINI_IMAGE_MODEL_TEXT). That is all four user scenarios: create from TEXT ONLY, create from
-    # image (reproduce), create from image+prompt (edit), and the live refine (routed through this
-    # initial path). Pro brings built-in THINKING (always on), localized edits and SOTA text/prompt
-    # adherence — Flash ignored requested changes on image jobs AND drifted on text-only jobs
-    # (TES-015: duplicated the bracelet + ghost reflection). Only the volume operations stay on
-    # Flash: metal-swatch changes (mode="refine") and angle sheets (they call generate_primary_image
-    # without a model override).
-    _img_model = (getattr(settings, "GEMINI_IMAGE_MODEL_TEXT", "") or "").strip() \
-        if (not is_refine) else ""
-    _img_model = _img_model or None
-    if _img_model:
-        logger.info("[model-routing] %s job (edit=%s, text=%s) → %s",
-                    "image" if has_reference_image else "text-only",
-                    bool(needs_initial_edit_guard), expected_texts or "no", _img_model)
-
     for qa_attempt in range(1, max_qa_attempts + 1):
         prompt_text = compose_prompt(qa_attempt, correction_notes)
 
-        logger.info("[image-gen provider=%s] Attempt %d/%d, mode=%s, model=%s, prompt_len=%d, spelling=%s, fidelity=%s",
+        logger.info("[image-gen provider=%s] Attempt %d/%d, mode=%s, prompt_len=%d, spelling=%s, fidelity=%s",
                     getattr(settings, "IMAGE_PROVIDER", "openai"), qa_attempt, max_qa_attempts, selected_mode,
-                    _img_model or "default", len(prompt_text), needs_spelling_check, needs_fidelity_check)
-        b64 = generate_primary_image(resolved_image_urls, prompt_text, pre_downloaded_blobs=ref_blobs, model=_img_model)
+                    len(prompt_text), needs_spelling_check, needs_fidelity_check)
+        b64 = generate_primary_image(resolved_image_urls, prompt_text, pre_downloaded_blobs=ref_blobs)
         final_b64 = b64
 
         # Last attempt — accept whatever we have, no point checking further.
@@ -4682,78 +4317,23 @@ def generate_with_fallback(
         _big_change = any(w in _lp_noop for w in ("iced", "ice out", "bust down", "bustdown", "flooded",
                                                   "fully covered", "full diamond", "all diamond", "cover the whole",
                                                   "cover the entire", "cover the pendant", "in diamonds", "all over"))
-        # (A "subtle-edit" threshold of 1 was tried here and REVERTED: TES-008 proved the model really
-        # was ignoring letter-style edits — distance=2 meant NO-OP, not "subtle edit applied" — so the
-        # loosened threshold let an unapplied edit ship. distance<=4 on an edit job = retry.)
         _noop_thresh = 14 if _big_change else 4
-        if (is_refine or needs_initial_edit_guard) and input_b64 and not _user_wants_metal_change(user_prompt) and _images_near_identical(input_b64, b64, max_distance=_noop_thresh):
-            logger.warning("[%s no-op guard attempt %d] output ~identical to reference (thresh=%d) — forcing escalated retry",
-                           "refine" if is_refine else "initial-edit", qa_attempt, _noop_thresh)
-            if expected_texts:
-                # TEXT-change no-op: a generic "redraw fully" note made attempt 3 redesign the piece AND
-                # keep the old first letter (TES-029: Tiera -> "Tanish" instead of "Manish"). Name the
-                # exact new lettering and pin the design instead.
-                correction_notes = (
-                    "The previous attempt returned an image almost IDENTICAL to the reference and did NOT apply "
-                    f"the text change. The lettering MUST read EXACTLY \"{', '.join(expected_texts)}\" — redraw "
-                    "EVERY character of the new name, INCLUDING THE FIRST LETTER; do NOT keep or reuse ANY letter "
-                    "from the old name on the reference. Keep the design itself identical: same lettering style, "
-                    "stone work, layers, border, bail, metal and proportions."
-                )
-            else:
-                correction_notes = (
-                    "The previous attempt returned an image almost IDENTICAL to the reference and did NOT visibly apply "
-                    "the requested change. Apply the requested change STRONGLY and OBVIOUSLY this time — redraw the target "
-                    "area fully if needed; preserve only the parts the user did not ask to change."
-                )
+        if is_refine and input_b64 and not _user_wants_metal_change(user_prompt) and _images_near_identical(input_b64, b64, max_distance=_noop_thresh):
+            logger.warning("[refine no-op guard attempt %d] output ~identical to reference (thresh=%d) — forcing escalated retry", qa_attempt, _noop_thresh)
+            correction_notes = (
+                "The previous attempt returned an image almost IDENTICAL to the reference and did NOT visibly apply "
+                "the requested change. Apply the requested change STRONGLY and OBVIOUSLY this time — redraw the target "
+                "area fully if needed; preserve only the parts the user did not ask to change."
+            )
             continue
 
         # 1) Spelling verification (highest priority — fixes missing/extra/wrong letters).
-        #    With a reference attached the old name anchors the render AND primes the OCR, so a
-        #    claimed pass gets the targeted double-check too (TES-029: 'Tanish' OCR'd as 'Manish').
         if needs_spelling_check:
-            spell = verify_text_spelling(b64, expected_texts, double_check_pass=bool(input_b64))
+            spell = verify_text_spelling(b64, expected_texts)
             logger.info("[spelling_qa attempt %d] %s", qa_attempt, spell)
             if not spell.get("passed"):
                 logger.warning("[spelling_qa] misspelling — expected %s, got '%s'; retrying",
                                expected_texts, spell.get("detected"))
-                # Feed the failure back into the retry prompt. A bare re-roll repeats the same mistake —
-                # the reference's OLD lettering dominates — so the retry must NAME the exact required text.
-                _det = (spell.get("detected") or "").strip()
-                correction_notes = (
-                    f"the previous attempt rendered the WRONG lettering{f' (it shows: {_det})' if _det else ''}. "
-                    f"The lettering on the piece MUST read EXACTLY: {', '.join(expected_texts)} — replace the old "
-                    "lettering COMPLETELY with correct, fully-formed letters; keep everything else identical."
-                )
-                continue
-
-        # 1b) EDIT-APPLIED check — runs on EVERY image-edit job, INCLUDING ones that also carry a text
-        #     change (a combined request like "change the text to cool AND add a red diamond near the
-        #     bail" was previously only spelling-checked, so the non-text half shipped unverified).
-        #     The checks run 1-by-1 per attempt: the spelling QA above retries first until the name is
-        #     right, then this verifies the remaining change(s) + preservation and retries on those.
-        if needs_initial_edit_guard and input_b64:
-            _req = original_request or user_prompt or ""
-            _ea = verify_edit_applied(input_b64, b64, _req)
-            logger.info("[edit_qa attempt %d] %s", qa_attempt, _ea)
-            if not _ea.get("applied"):
-                correction_notes = (
-                    f"the previous attempt did NOT apply the requested change — \"{_req[:300]}\" "
-                    f"({_ea.get('reason') or 'change not visible'}). Apply that change CLEARLY and VISIBLY this time; "
-                    "keep everything else about the piece identical to the reference."
-                )
-                continue
-            if not _ea.get("preserved", True):
-                # The change landed but the model REDESIGNED the rest (TES-009: the T restyled while the
-                # pavé thinned out and the relief flattened). Re-roll demanding a surgical edit instead.
-                correction_notes = (
-                    f"the previous attempt applied the requested change but REDESIGNED the rest of the piece "
-                    f"({_ea.get('reason') or 'unrequested changes'}). Apply ONLY \"{_req[:200]}\" and keep EVERY "
-                    "other detail EXACTLY as in the reference — the same stone count, size and density (do not "
-                    "thin out or enlarge the pavé), the same thickness and stroke weight, the same layers and "
-                    "relief depth, the same borders, bail, metal and proportions. Do NOT simplify or flatten "
-                    "anything the user did not ask to change."
-                )
                 continue
 
         # 2) Auto fidelity check — compare output vs input, retry once with fixes.
@@ -4800,60 +4380,6 @@ def generate_with_fallback(
 
         # All active checks passed → accept.
         break
-
-    # RELETTER FALLBACK — the ONE edit the image model reliably fails even with Pro + escalated
-    # retries is re-lettering dense pavé text while the reference is attached: the reference anchors
-    # the OLD letters and the output comes back unchanged or garbled ('cool' → 'Fool' → gibberish on
-    # TES-017; the SERGE finding). TEXT-ONLY generation letters correctly every time (PRIYA test). So
-    # if the final render STILL fails the spelling QA, describe the piece from the reference and
-    # rebuild it ONCE without the anchoring image — keep the rebuild only if its lettering verifies.
-    if final_b64 and needs_spelling_check and input_b64 and not is_refine:
-        _final_spell = verify_text_spelling(final_b64, expected_texts, double_check_pass=True)
-        if not _final_spell.get("passed"):
-            logger.warning("[reletter-fallback] lettering still wrong after %d image-anchored attempts "
-                           "(detected='%s', expected=%s) — rebuilding TEXT-ONLY from a described design",
-                           max_qa_attempts, _final_spell.get("detected"), expected_texts)
-            try:
-                _desc = _describe_reference_for_relettering(input_b64)
-                if _desc:
-                    _new_text = ", ".join(expected_texts)
-                    # Name the metal in plain words ("white gold") so the text-only assembler detects it
-                    # (otherwise it falls to the yellow-gold default), and demand the described stone work
-                    # explicitly (the first fallback test lost the pavé and came out plain).
-                    # The rebuild has NO image anchor, so the metal must come from the user's own words or
-                    # the REFERENCE — never from the pipeline's metal_tone default (TES-030: a misclassified
-                    # yellow_gold default rebuilt a white-gold "Tiera" piece in yellow gold).
-                    _metal_words = (metal_tone or "yellow gold").replace("_", " ")
-                    _named_m = _detected_metal_phrase(original_request or user_prompt or "")
-                    if _named_m:
-                        _metal_words = _named_m
-                    else:
-                        try:
-                            _ref_m = detect_metal_color(input_b64)
-                            _metal_words = {"gold": "yellow gold", "silver": "white gold",
-                                            "rose_gold": "rose gold"}.get(_ref_m, _metal_words)
-                            logger.info("[reletter-fallback] metal from reference: %s -> '%s'", _ref_m, _metal_words)
-                        except Exception as _mde:
-                            logger.warning("[reletter-fallback] reference metal detect failed: %s — using metal_tone '%s'",
-                                           _mde, _metal_words)
-                    _fb_prompt = _build_concise_initial_prompt(
-                        f"{_desc}\n\nBuild EXACTLY this piece in {_metal_words}, with the SAME stone work as "
-                        "described above (if it is pavé/iced, the rebuild must be fully pavé-set with the same "
-                        "dense small stones — not plain metal), the same layers, border and bail. The lettering "
-                        f"spelled out on it must read EXACTLY \"{_new_text}\" — correct, complete, fully-formed "
-                        "letters in the same lettering style described above. Also apply every OTHER (non-text) "
-                        f"change the user asked for in this note: \"{(original_request or user_prompt or '')[:300]}\".",
-                        parsed_data, metal_tone, False, 0)
-                    _fb64 = generate_primary_image([], _fb_prompt, model=_img_model)
-                    _fb_spell = verify_text_spelling(_fb64, expected_texts, double_check_pass=True)
-                    logger.info("[reletter-fallback] rebuild spelling=%s", _fb_spell)
-                    if _fb_spell.get("passed"):
-                        final_b64 = _fb64
-                        logger.info("[reletter-fallback] text-only rebuild ACCEPTED (correct lettering)")
-                    else:
-                        logger.warning("[reletter-fallback] rebuild also failed spelling — keeping the image-anchored render")
-            except Exception as _fe:
-                logger.warning("[reletter-fallback] failed: %s — keeping the image-anchored render", _fe)
 
     if not final_b64:
         raise ValueError("No image generated from OpenAI gpt-image-2")

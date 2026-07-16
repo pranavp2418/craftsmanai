@@ -140,25 +140,6 @@ WHITE_BG_CONTRACT = (
 )
 
 
-# Client requirement (2026-07): EVERY output must look like a jewellery-CAD approval render (the matte
-# 3D look Matrix / RhinoGold exports), NOT a product photograph. Appended to every create job by
-# build_lovable_create; refines / metal swatches / angles start from that hero so they inherit the look,
-# and MASTER_REFINE carries a short version of this line for older photo-style designs.
-CAD_STYLE_CONTRACT = (
-    "\n\nCAD RENDER STYLE (mandatory — this governs the FINISH only and must NEVER alter the design, "
-    "geometry, stone layout or metal colour): the image must look like a 3D approval render exported "
-    "straight from jewellery CAD software (Matrix / RhinoGold style), NOT a photograph of a real piece. "
-    "Metal surfaces: smooth, clean satin/semi-matte digital finish with soft even gradient shading — NO "
-    "photographic environment reflections (no window, room, or lightbox mirrored in the metal), no lens "
-    "flare, no glare hot-spots. Stones: idealized, uniform, crisply-faceted CAD stones with clean "
-    "consistent brilliance — not noisy photo sparkle. Geometry: razor-sharp edges everywhere; every "
-    "prong, bead, stone and cut-out individually and clearly defined. Lighting: perfectly even, diffuse, "
-    "shadowless studio illumination. Absolutely NO photographic artifacts: no depth-of-field blur, no "
-    "bokeh, no film grain, no vignette, no dust, scratches or fingerprints — the ENTIRE piece stays in "
-    "perfect sharp focus front to back, like a technical approval render a manufacturer works from."
-)
-
-
 # Lovable's STONE_RULES (verbatim) — was missing in our create path. Small-to-mid stones + staggered/
 # honeycomb paved arrangement following the surface curvature + clean edge taper + row-count respect +
 # uniform setting per region.
@@ -196,7 +177,7 @@ def build_lovable_create(directive: str, **fields) -> str:
     """Master (verbatim) + the selected Lovable generation directive + Lovable's white-background contract
     (WHITE_BG_CONTRACT) + STONE_RULES + PRIORITY_ORDER — i.e. our equivalent of Lovable's SHARED_RULES.
     Placeholders filled; missing ones resolve to '' (same as Lovable when the structured field is empty)."""
-    out = LOVABLE_MASTER + directive + WHITE_BG_CONTRACT + CAD_STYLE_CONTRACT + STONE_RULES + PRIORITY_ORDER
+    out = LOVABLE_MASTER + directive + WHITE_BG_CONTRACT + STONE_RULES + PRIORITY_ORDER
     for k in _FIELDS:
         out = out.replace("{" + k + "}", str(fields.get(k, "") or ""))
     return out
@@ -289,8 +270,6 @@ NEGATIVE_PROMPT = (
     "random diamonds, changed reference structure, distorted text, asymmetry, blurry setting, loose stones, "
     "unrealistic plastic metal, fantasy elements, changed subtype, lazy diamond-grid wallpaper background, "
     "off-center framing, dramatic camera angles by default, halos or decorative extras the user did not ask for, "
-    "a SECOND/duplicate copy of the piece in the same image, a mirrored or ghosted duplicate, a faded "
-    "reflection copy of the piece behind or above it (render the piece ONCE only), "
     "ANY engraved or stamped "
     "text/letters/numbers/logos/brand-marks/watermarks/signatures that the user did not explicitly request "
     "(no 'CraftsmanAI', no 'Craftsman', no 'AI', no tool/brand names, no placeholder names like 'NAME' or "

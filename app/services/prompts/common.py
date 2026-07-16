@@ -22,18 +22,6 @@ from typing import Optional
 #     preservation framing so it never returns the input unchanged.
 # Per-job/per-intent text is kept short in both builders so the model follows the user's intent.
 # ===========================================================================
-# Client requirement (2026-07): every output must have the jewellery-CAD-software look (Matrix /
-# RhinoGold approval render), never a product photo. Short version for the lean masters; the full
-# contract lives in lovable_create.CAD_STYLE_CONTRACT (appended to every create job). Finish only —
-# it must never change design, geometry, stones or metal colour.
-CAD_FINISH_LINE = (
-    "CAD RENDER FINISH (mandatory, finish only — never alters the design): the image must look like a "
-    "3D render from jewellery CAD software, NOT a photograph — smooth satin/semi-matte digital metal "
-    "with no photographic environment reflections, idealized crisply-faceted stones, razor-sharp edges, "
-    "even shadowless diffuse lighting, and NO photo artifacts (no depth-of-field blur, bokeh, grain, "
-    "vignette, dust or glare); the entire piece in perfect sharp focus."
-)
-
 MASTER_INITIAL = (
     # LEAN, workflow-first master (Lovable-style). Leads with the role + a positive "work out the piece"
     # step + the CAD render-style, with guardrails as a short trailing line — NOT an anti-hallucination
@@ -44,11 +32,10 @@ MASTER_INITIAL = (
     "structure, proportions and how it is worn, then render the structurally-correct, manufacturable "
     "form for that subtype.\n\n"
     "Produce ONE clean, premium CAD-style 3D render of a SINGLE piece of jewelry — front-facing hero "
-    "angle, centered, sharp focus everywhere (no blur or haze), even soft "
+    "angle, centered, sharp focus everywhere (no blur or haze), realistic metal and stones, even soft "
     "studio lighting, on a pure solid white (#FFFFFF) seamless background with no scene, props, hands, "
     "environment, reflections or cast shadows. It must look like a clean, approval-ready jeweler's CAD "
-    "render — not a lifestyle photo, a product photograph, a cartoon, or a flat illustration.\n\n"
-    + CAD_FINISH_LINE + "\n\n"
+    "render — not a lifestyle photo, a cartoon, or a flat illustration.\n\n"
     "The USER REQUEST is the authority — do exactly what it asks and add NOTHING it does not mention. "
     "When a reference image is provided it is the source of truth: preserve its design, proportions, "
     "every stone, metal colour, borders and lettering, except where the user explicitly asks to change it.\n\n"
@@ -64,8 +51,7 @@ MASTER_REFINE = (
     "silhouette, proportions, every other stone, metal colour, text/lettering, borders and camera "
     "angle. If unsure, change LESS rather than redesign. Add nothing the user did not ask for, never "
     "distort existing lettering or logos, and never turn a diamond/pavé surface into plain metal. "
-    "Output ONE clean CAD-style render on a pure solid white background (#FFFFFF). Never refuse. "
-    + CAD_FINISH_LINE
+    "Output ONE clean CAD-style render on a pure solid white background (#FFFFFF). Never refuse."
 )
 
 # Backward-compatible alias (initial builder + exports use this name; it now points to the full
@@ -81,8 +67,8 @@ LEAN_IMAGE_MASTER = (
     "the SOURCE OF TRUTH (highest priority). Reproduce that EXACT piece faithfully and apply ONLY what "
     "the user explicitly requests. Add NOTHING from your own side: no extra components, no default bail, "
     "no invented stones or ornaments, no style or proportion changes. If the user gave no request, "
-    "reproduce the piece EXACTLY as-is. Output ONE clean CAD-style render on a pure solid "
-    "white background (#FFFFFF), sharp focus, no scene / props / hands. " + CAD_FINISH_LINE
+    "reproduce the piece EXACTLY as-is. Output ONE clean, photorealistic CAD-style render on a pure solid "
+    "white background (#FFFFFF), sharp focus, no scene / props / hands."
 )
 
 
@@ -102,7 +88,7 @@ PRIORITY_HEADER = (
 # Minimal output contract shared by every render.
 OUTPUT_CONTRACT = (
     "Render a clean CAD-style 3D jewelry image on a pure solid white background (#FFFFFF), "
-    "sharp focus, no background scene. One image only. " + CAD_FINISH_LINE
+    "sharp focus, realistic metal and stones, no background scene. One image only."
 )
 
 

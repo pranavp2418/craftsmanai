@@ -167,16 +167,6 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                         _cls = classify_reference_image(_mb64)
                         if _cls.get("is_jewelry"):
                             _dm = _cls.get("metal")
-                            # classify's combined 2-question call is FLAKY on metal (TES-030: it said 'gold'
-                            # for a white-gold piece, so the reletter fallback rebuilt it YELLOW). The
-                            # metal-focused detect_metal_color reads the same piece consistently — trust it,
-                            # keeping classify's answer only for 'two_tone' (detect can't express that).
-                            if _dm != "two_tone":
-                                try:
-                                    from app.services.openai_service import detect_metal_color as _dmc
-                                    _dm = _dmc(_mb64) or _dm
-                                except Exception:
-                                    pass
                             if _dm and _dm != "gold":   # gold stays the yellow_gold default
                                 input_metal = _dm
                             logger.info("Classified jewelry metal=%s for design_id=%s (no metal named)", _dm, design_id)

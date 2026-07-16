@@ -177,34 +177,6 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
     mp = _lov_metal(True, user_named_metal, _named_metal, _i)
     _note = (user_prompt or "").strip()
     user_request = f"User note: {_note}{normalize_retailer_language(user_prompt)}" if _note else ""
-
-    # SURGICAL-EDIT CLAUSE — attached to the user's note itself, because the generic MANDATORY PRESERVE
-    # LIST lands ~1.5k characters later in the prompt and loses to the nearby "change this" instruction:
-    # asked to restyle ONE letter, the model re-imagined the WHOLE piece (TES-009 — the T did change, but
-    # the pavé density collapsed, the letters thinned and the layered relief was flattened). Naming the
-    # everything-else-is-frozen rule right where the change is requested keeps the edit local.
-    if _note and svc._user_wants_edit(user_prompt):
-        user_request += (
-            "\n\nSURGICAL EDIT — this is a TARGETED CHANGE to an EXISTING piece, NOT a redesign. "
-            "PRIORITY 1 — APPLY THE CHANGE: the user's requested change ALWAYS WINS and must be VISIBLY applied. "
-            "If the note targets an attribute that the preservation rules below would otherwise freeze (a stone's "
-            "SIZE or count, a letter, the pavé, a colour, a proportion…), then CHANGE exactly that attribute as "
-            "asked — preservation NEVER cancels or waters down the requested change; it applies ONLY to what the "
-            "note does NOT mention. Returning the reference unchanged is a FAILURE. "
-            "PRIORITY 2 — PRESERVE THE REST: everything the note does NOT target must come through "
-            "PIXEL-FOR-PIXEL as in the reference: the same stone COUNT, SIZE and DENSITY (do not thin out, "
-            "enlarge or reduce the pavé — if the reference is fully iced with hundreds of tiny stones, the "
-            "result must be too), the same letter thickness and stroke weight, the same number of layers and "
-            "the same raised/recessed relief depth, the same borders, the same bail, the same metal and finish, "
-            "the same proportions and spacing. Do NOT simplify, smooth, flatten, slim down or 'clean up' any "
-            "part of the design. The ONLY visible difference between the reference and your render must be the "
-            "requested change itself. "
-            "STRUCTURAL CONNECTIVITY: the piece must remain ONE physically connected, manufacturable object. "
-            "If the change swaps or restyles a LETTER, the new letter must stay FUSED / joined to its "
-            "neighbouring letters exactly like the original lettering (shared baseplate or touching strokes) — "
-            "never render it as a separate floating element with a gap; a disconnected letter cannot be "
-            "manufactured or worn as a pendant."
-        )
     design_subject = _note or "a jewelry piece"
     if _wants_stones(user_prompt):
         stone_phrase = "Stone setting: set the piece with the diamonds / stones described in the request."
@@ -349,9 +321,8 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
         metal_named = svc._detected_metal_phrase(user_prompt) or (effective_metal or "white gold")
         bail_line = " Add ONE simple loop bail at the top for a chain." if profile.bail_policy != "none" else ""
         return (
-            "You are CraftsmanAI, a precise CAD jewelry render engine. Produce ONE clean "
-            "CAD-style 3D render (jewellery-CAD software look, NOT a photograph) on a pure solid white "
-            "(#FFFFFF) background, sharp focus.\n\n"
+            "You are CraftsmanAI, a precise CAD jewelry render engine. Produce ONE clean, photorealistic "
+            "CAD-style 3D render on a pure solid white (#FFFFFF) background, sharp focus.\n\n"
             f"Create a fully ICED-OUT {item_type} in {metal_named}, built exactly from the design below."
             f"{bail_line}\n\n"
             "BUST-DOWN — 100% DIAMOND COVERAGE: every letter and every surface is a SOLID SHEET of small "
@@ -387,17 +358,8 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
     if _is_yellow_gold:
         out += f"\n\n{light_gold_note('yellow gold')}"
     if svc._user_wants_variations(user_prompt):
-        # Respect an explicit count ("6 different styles") and force SEPARATE pieces — without this the
-        # model satisfied "6 styles of the name Manish" by engraving the name 6 times on ONE tag
-        # (TES-020) instead of showing 6 pendant design options.
-        _vm = re.search(r"\b([2-9]|1[0-2])\b", lower)
-        _n_txt = f"exactly {_vm.group(1)}" if _vm else "several"
-        out += (f"\n\nMULTIPLE VARIATIONS: generate {_n_txt} DISTINCT design variations laid out as a clean, "
-                "evenly-spaced grid on ONE pure-white background. Each variation is its OWN COMPLETE, "
-                "SEPARATE piece (its own pendant/ring/bracelet with its own bail or band), clearly spaced "
-                "apart from the others. Do NOT merge them into a single object, and NEVER render one piece "
-                "with the name/text repeated multiple times on it — every variation must be a standalone "
-                "piece differing only by the requested variation (style/font/design), all spelling the "
-                "SAME text correctly.")
+        out += ("\n\nMULTIPLE VARIATIONS: lay out several variations of this design as a clean, evenly-spaced grid "
+                "on the same pure-white background, each clearly separated, sharing the same base design and "
+                "differing only by the requested variation.")
     out += "\n\n" + NEGATIVE_PROMPT
     return out
