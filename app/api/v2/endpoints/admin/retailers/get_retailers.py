@@ -5,6 +5,7 @@ from sqlalchemy import select, func, or_
 from app.api import deps
 from app.models.user import User
 from app.models.design import Design
+from app.models.subscription import SubscriptionPlan, UserSubscription, SubscriptionStatus
 
 router = APIRouter()
 
@@ -52,7 +53,24 @@ async def get_retailers(
         .scalar_subquery()
     )
 
-    query = select(User, request_count_subquery.label("total_requests")).where(User.is_superuser == False)
+    # Amount of the retailer's ACTIVE subscription = its plan's price (most recent active one).
+    active_sub_amount_subquery = (
+        select(SubscriptionPlan.price)
+        .join(UserSubscription, UserSubscription.plan_id == SubscriptionPlan.id)
+        .where(
+            UserSubscription.user_id == User.id,
+            UserSubscription.status == SubscriptionStatus.ACTIVE,
+        )
+        .order_by(UserSubscription.created_at.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+    query = select(
+        User,
+        request_count_subquery.label("total_requests"),
+        active_sub_amount_subquery.label("subscription_amount"),
+    ).where(User.is_superuser == False)
 
     # -------------------------
     # Status filter
@@ -134,10 +152,12 @@ async def get_retailers(
             "phone": retailer.whatsapp_number,
             "total_requests": total_requests or 0,
             "status": "ACTIVE" if retailer.is_active else "INACTIVE",
+            # Active-subscription amount (null when the retailer has no active paid plan).
+            "subscription_amount": float(subscription_amount) if subscription_amount is not None else None,
             "created_at": retailer.created_at,
             "last_active": retailer.updated_at
         }
-        for retailer, total_requests in rows
+        for retailer, total_requests, subscription_amount in rows
     ]
 
     total_pages = (total_retailers + limit - 1) // limit
