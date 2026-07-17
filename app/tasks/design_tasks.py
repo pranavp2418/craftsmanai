@@ -513,25 +513,41 @@ def refine_design_variant_image(
                     # Fallback: get the first key
                     parent_metal = list(parent_variant.metal_variations_json.keys())[0]
 
-        # ROUTE REFINES THROUGH THE CREATE-WITH-IMAGE PATH (mode="initial").
-        # WHY: the dedicated refine/edit path (MASTER_REFINE, preserve-first) made the model NO-OP — it kept
-        # the base render and DROPPED the requested change (validated across "make it fully iced" and a
-        # bail-swap). The create-with-image path instead REPRODUCES the base faithfully AND applies the
-        # requested change — which is exactly what a refine should be: keep the OLD piece identical, change
-        # ONLY what's asked. (Validated: bail-swap preserved the heart and swapped in the new bail; metal
-        # recolour and element edits apply.) We frame the change as a "reproduce + change only this" request
-        # so the first image is the source of truth and everything unmentioned stays identical.
-        _refine_change = (combined_prompt or "").strip()
-        # IMPORTANT: do NOT enumerate components to preserve (e.g. "keep the bail...") — if the change IS that
-        # component (a bail swap), listing it contradicts the edit and the model keeps the original. Just say
-        # "apply ONLY this change, keep EVERYTHING ELSE identical" and let the model infer what "else" is.
-        _create_prompt = (
-            "Reproduce the FIRST piece EXACTLY as it is and apply ONLY the following change — keep EVERYTHING "
-            f"ELSE about the piece identical (do not redesign anything that is not part of this change): {_refine_change}"
-            if _refine_change else combined_prompt
-        )
+        # ROUTE REFINES THROUGH THE CREATE-WITH-IMAGE PATH (mode="initial") — IDENTICAL to a create with a
+        # reference image + a change note. Pass the user's RAW change verbatim, exactly like create does.
+        # WHY (2026-07-17): the old code WRAPPED the change in "Reproduce the FIRST piece EXACTLY... keep
+        # EVERYTHING ELSE identical: {change}". That wrapper's heavy preserve-emphasis, PLUS the create
+        # path's own MANDATORY PRESERVE LIST + SURGICAL EDIT clause added downstream, double-stacked the
+        # "keep everything the same" signal so hard that the model NO-OP'd every refine (returned the input
+        # unchanged — the reported "refine 1% bhi nahi chal raha" bug). The create path already applies the
+        # change while preserving the rest (modify_existing directive + no-op guard + edit QA + reletter
+        # fallback), so the raw change is all it needs — same as create.
+        _create_prompt = (combined_prompt or "").strip()
+
+        # PRESERVE THE REFERENCE METAL. generate_base_image defaults metal_tone="yellow_gold"; the refine
+        # never passed one, so a WHITE-GOLD base drifted to yellow (TES-058 v275 "manish same design" came
+        # back yellow). The image-anchored attempt keeps the metal via "same_as_reference", but the reletter
+        # fallback rebuilds TEXT-ONLY with no image to read the metal from — it uses metal_tone, so a wrong
+        # default there is exactly what recolours the rebuild. Detect the reference's metal and pass it.
+        # (If the user's change names a metal, the create path's prompt-metal detection still overrides this.)
+        _ref_metal = "yellow_gold"
+        try:
+            from app.services.openai_service import detect_metal_color as _dmc
+            _first_ref = reference_image_source[0] if isinstance(reference_image_source, list) else reference_image_source
+            _rb64 = base64.b64encode(requests.get(_first_ref, timeout=20).content).decode("utf-8")
+            _ref_metal = {"gold": "yellow_gold", "silver": "white_gold", "rose_gold": "rose_gold"}.get(
+                _dmc(_rb64), "yellow_gold")
+            logger.info("Refine reference metal detected as '%s' for variant_id=%s", _ref_metal, variant_id)
+        except Exception as _me:
+            logger.warning("Refine metal-detect failed for variant_id=%s: %s — defaulting yellow_gold", variant_id, _me)
+
         generated_item = openai_service.generate_base_image(
-            reference_image_source, _create_prompt, jewellery_type=jewellery_type, mode="initial"
+            reference_image_source, _create_prompt, jewellery_type=jewellery_type, mode="initial",
+            metal_tone=_ref_metal,
+            # A refine is ALWAYS an edit — force the no-op guard + edit QA on regardless of how the change
+            # is worded, so a dropped change ("fill with diamond") is caught and retried, not shipped as a
+            # silent no-op (TES-056).
+            parsed_data={"item_type": jewellery_type or "", "force_edit": True},
         )
         image_bytes, content_type = _extract_generated_image_data(generated_item)
         _validate_image_bytes(image_bytes, content_type)
