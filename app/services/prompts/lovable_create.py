@@ -109,8 +109,69 @@ Metal tone: {metal_phrase}
 Generate ONE CAD-styled approval render of this {item_type} converted from the reference."""
 
 
+# (e) modify_existing (reference + a real change request) — Lovable routes image+note jobs here via its
+# parse intent; we route deterministically (any meaningful non-enhancement note). Verbatim from the
+# prototype's `intent === "modify_existing"` branch.
+MODIFY_EXISTING = """You are Craftsman.ai's jewelry render engine. Modify an existing jewelry piece.
+
+MODIFICATION RULES:
+- Start from the existing piece structure — preserve everything not explicitly changed
+- Apply ONLY the requested changes: {requested_changes}
+- Locked elements: none specified
+- Do NOT redesign unaffected regions
+
+Design subject: {design_subject}
+Item type: {item_type}
+Metal tone: {metal_phrase}
+{components}{stone_phrase}
+{user_request}
+Generate ONE CAD-styled approval render of the modified {item_type}."""
+
+
 _FIELDS = ("design_subject", "item_type", "metal_phrase", "stone_phrase",
-           "user_request", "components", "color_mapping", "sketch_annotations")
+           "user_request", "components", "color_mapping", "sketch_annotations", "requested_changes")
+
+
+# Lovable's SUPPORTED_TAXONOMY (verbatim) — first block of its SHARED_RULES, present in EVERY prompt.
+SUPPORTED_TAXONOMY = (
+    "\nSUPPORTED TYPES (map every job to one — never invent fantasy categories):\n"
+    "Rings (Band, Bust Down, Signet, Statement, Wedding, Engagement, Custom Shape) · Pendants "
+    "(Name/Initial, Picture, Religious, Logo/Brand, Symbol/Icon, Custom Shape) · Chains (Box, Cuban, "
+    "Figaro, Franco, Rope, Tennis, Link, Custom Shape) · Earrings (Hoop, Stud, Drop, Chandelier, Ear Cuff, "
+    "Custom Shape) · Bracelets (Bangle, Cuff, Charm, Cuban, Tennis, ID, Custom Shape) · Grillz (Single "
+    "Tooth, Top, Bottom, Full Set, Custom) · Watches (Skeleton, Iced Apple Watch, Diamond Dial, "
+    "Bezel-Iced, Fully Iced, Custom)."
+)
+
+# Lovable's ANTI_HALLUCINATION (verbatim) — the AVOID line + HARD NEGATIVE CONSTRAINTS list that its
+# SHARED_RULES appends to every full-piece prompt (the short "NEGATIVE:" one-liner belongs ONLY to its
+# concise render-family branch for components/accessories/sets).
+ANTI_HALLUCINATION = (
+    "\n\nAVOID: melted prongs, floating stones, fused metal blobs, warped stones, lazy diamond-grid "
+    "wallpaper, broken edge settings, random setting changes mid-region, halos or decorative extras the "
+    "user did not ask for, off-center framing, dramatic angles by default.\n\n"
+    "HARD NEGATIVE CONSTRAINTS (mandatory — never violate):\n"
+    "- Do NOT introduce hallucinated elements\n"
+    "- Do NOT change subtype\n"
+    "- Do NOT add extra stones, extra links, extra layers, extra motifs, or random decorative details\n"
+    "- Do NOT distort lettering, numbers, logos, monograms, or engraving\n"
+    "- Do NOT melt metal edges\n"
+    "- Do NOT create floating stones or impossible prong placements\n"
+    "- Do NOT break chain rhythm or clasp logic\n"
+    "- Do NOT produce asymmetrical layout unless intentionally required\n"
+    "- Do NOT create unrealistic proportions or non-manufacturable structures\n"
+    "- Do NOT alter unchanged parts during refinement\n"
+    "- Do NOT creatively reinterpret the piece beyond the prompt"
+)
+
+# Lovable's initial-mode systemPreamble (verbatim) — sits between the master and the generation body in
+# EVERY initial prompt ({angle_line} is its angleLineForPreamble). The refine preamble ("REFINEMENT
+# MODE. ...") already lives inside LOVABLE_REFINE_PROMPT.
+SYSTEM_PREAMBLE_INITIAL = (
+    "JEWELRY RENDER. If reference image(s) are attached, the FIRST is the master reference. Reproduce it "
+    "as faithfully as possible unless the note explicitly overrides. For text_only, the text is authority. "
+    "{angle_line} Preserve untouched structure exactly. If unsure, preserve rather than invent. Never refuse."
+)
 
 
 # Lovable's OUTPUT_CONTRACT + HOUSE_STYLE (its SHARED_RULES white-background block), verbatim + one
@@ -128,7 +189,11 @@ WHITE_BG_CONTRACT = (
     "plate, or cast/ground shadow under the piece. If the reference shows the jewellery on a mannequin / "
     "bust / neck / hand / table or any patterned or coloured backdrop, that backdrop is NOT part of the "
     "piece: render ONLY the jewellery itself and REPLACE the entire background with pure solid white "
-    "(#FFFFFF). Front-facing hero angle, centered, crisp edges, premium feel, manufacturable look. Realistic "
+    "(#FFFFFF). If the reference is a SCREENSHOT (a phone / app / browser / chat screen): every UI element "
+    "— status bar, clock, battery/wifi icons, notch, URL/address bar, buttons, menus, tabs, download "
+    "banners, captions, file names, watermarks, chat bubbles, rulers or measuring tape — is NOT part of "
+    "the piece. EXTRACT ONLY the jewellery shown inside the screenshot and render it alone, full-frame, on "
+    "pure white. NEVER reproduce any interface chrome, overlay text, or screen furniture in the output. Front-facing hero angle, centered, crisp edges, premium feel, manufacturable look. Realistic "
     "metal and stones. Soft uniform studio lighting only — no dramatic, contact, or drop shadows on the background."
     "\n\nBACKGROUND MUST BE 100% BLANK WHITE: the area around the piece must be completely EMPTY pure white "
     "(#FFFFFF) — absolutely NO faded, ghosted, translucent, blurred or half-erased remnants of the reference "
@@ -137,6 +202,25 @@ WHITE_BG_CONTRACT = (
     "backdrop as NON-existent and draw crisp blank white there. Every part of the JEWELLERY PIECE itself, "
     "however (including any ornate arch, throne-back, halo or relief panel that belongs to the design), must be "
     "rendered SOLID and fully-formed — never faded or ghosted."
+)
+
+
+# Client requirement (2026-07): EVERY output must look like a jewellery-CAD approval render (the matte
+# 3D look Matrix / RhinoGold exports), NOT a product photograph. Appended to every create job by
+# build_lovable_create; refines / metal swatches / angles start from that hero so they inherit the look,
+# and MASTER_REFINE carries a short version of this line for older photo-style designs.
+CAD_STYLE_CONTRACT = (
+    "\n\nCAD RENDER STYLE (mandatory — this governs the FINISH only and must NEVER alter the design, "
+    "geometry, stone layout or metal colour): the image must look like a 3D approval render exported "
+    "straight from jewellery CAD software (Matrix / RhinoGold style), NOT a photograph of a real piece. "
+    "Metal surfaces: smooth, clean satin/semi-matte digital finish with soft even gradient shading — NO "
+    "photographic environment reflections (no window, room, or lightbox mirrored in the metal), no lens "
+    "flare, no glare hot-spots. Stones: idealized, uniform, crisply-faceted CAD stones with clean "
+    "consistent brilliance — not noisy photo sparkle. Geometry: razor-sharp edges everywhere; every "
+    "prong, bead, stone and cut-out individually and clearly defined. Lighting: perfectly even, diffuse, "
+    "shadowless studio illumination. Absolutely NO photographic artifacts: no depth-of-field blur, no "
+    "bokeh, no film grain, no vignette, no dust, scratches or fingerprints — the ENTIRE piece stays in "
+    "perfect sharp focus front to back, like a technical approval render a manufacturer works from."
 )
 
 
@@ -173,11 +257,33 @@ MANDATORY_PRESERVE_LIST = (
 )
 
 
-def build_lovable_create(directive: str, **fields) -> str:
-    """Master (verbatim) + the selected Lovable generation directive + Lovable's white-background contract
-    (WHITE_BG_CONTRACT) + STONE_RULES + PRIORITY_ORDER — i.e. our equivalent of Lovable's SHARED_RULES.
+def build_lovable_create(directive: str, angle_line: str = "", authority_blocks: str = "", **fields) -> str:
+    """Assemble EXACTLY like the prototype's composePrompt for mode=initial:
+
+        CRAFTSMAN_MASTER + "\\n\\n" + systemPreamble + "\\n\\n" + body
+
+    where the body is the intent directive with (a) Lovable's referenceType/authority/attachment/
+    normalized/preserve blocks inserted right after its header line, and (b) Lovable's SHARED_RULES
+    (taxonomy + output/style contract + stones + anti-hallucination + priority order) inserted
+    immediately BEFORE the final "Generate ONE ..." line — the same positions the prototype uses.
     Placeholders filled; missing ones resolve to '' (same as Lovable when the structured field is empty)."""
-    out = LOVABLE_MASTER + directive + WHITE_BG_CONTRACT + STONE_RULES + PRIORITY_ORDER
+    # Merge resolution: Lovable-exact assembly (preamble + authority blocks + shared-rules position)
+    # WITH the client's CAD_STYLE_CONTRACT kept inside the shared rules (client requirement 2026-07:
+    # every output in the jewellery-CAD look; finish only, never the design).
+    shared_rules = (SUPPORTED_TAXONOMY + WHITE_BG_CONTRACT + CAD_STYLE_CONTRACT + STONE_RULES
+                    + ANTI_HALLUCINATION + PRIORITY_ORDER)
+    body = directive
+    if authority_blocks:
+        head, _, rest = body.partition("\n")
+        body = head + "\n\n" + authority_blocks.strip() + "\n" + rest
+    idx = body.rfind("\nGenerate ONE")
+    if idx != -1:
+        body = body[:idx] + "\n" + shared_rules + "\n" + body[idx:]
+    else:  # directive without the standard closing line — append the rules at the end
+        body = body + "\n" + shared_rules
+    preamble = SYSTEM_PREAMBLE_INITIAL.replace(
+        "{angle_line}", angle_line or "Front-facing, centered, on white/very light background.")
+    out = LOVABLE_MASTER.rstrip("\n") + "\n\n" + preamble + "\n\n" + body
     for k in _FIELDS:
         out = out.replace("{" + k + "}", str(fields.get(k, "") or ""))
     return out
@@ -270,6 +376,8 @@ NEGATIVE_PROMPT = (
     "random diamonds, changed reference structure, distorted text, asymmetry, blurry setting, loose stones, "
     "unrealistic plastic metal, fantasy elements, changed subtype, lazy diamond-grid wallpaper background, "
     "off-center framing, dramatic camera angles by default, halos or decorative extras the user did not ask for, "
+    "a SECOND/duplicate copy of the piece in the same image, a mirrored or ghosted duplicate, a faded "
+    "reflection copy of the piece behind or above it (render the piece ONCE only), "
     "ANY engraved or stamped "
     "text/letters/numbers/logos/brand-marks/watermarks/signatures that the user did not explicitly request "
     "(no 'CraftsmanAI', no 'Craftsman', no 'AI', no tool/brand names, no placeholder names like 'NAME' or "
