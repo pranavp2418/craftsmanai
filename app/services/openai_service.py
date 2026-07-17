@@ -1572,6 +1572,11 @@ _EDIT_WORDS = (
     # "make the emeralds MATCH THE rounds", "RESIZE", "LONGER/SHORTER") — the client's length-refine
     # slipped past the list because it said "make a …" (only "make it/the" were matched).
     "same as", "match the", "equal to", "resize", "shorter", "longer",
+    # Stone-coverage edits — very common and none of the words above match them (TES-056: "fill with
+    # diamond", "full fill of diamond", "square diamond" all read as NON-edits, so no no-op guard armed).
+    "fill", "iced", "ice out", "ice-out", "cover", "flood", "bust down", "bustdown", "full diamond",
+    "fully diamond", "all over", "everywhere", "empty space", "add diamond", "more diamond", "baguette",
+    "square diamond", "square stone", "emerald cut",
     # Hinglish edit markers (deliberately NARROW — "bana do" / "karo" alone are how users ask for a
     # plain reproduction, which must stay a single un-guarded shot):
     "badal", "badlo", "hatao", "hata do", "alag tarike", "alag style", "alag se",
@@ -1586,6 +1591,45 @@ def _user_wants_edit(user_prompt: str) -> bool:
     """
     p = (user_prompt or "").strip().lower()
     return bool(p) and any(w in p for w in _EDIT_WORDS)
+
+
+def _describe_reference_for_edit(image_b64: str) -> Optional[str]:
+    """Describe a jewelry piece's full DESIGN precisely enough to rebuild it text-only. Used by the
+    design-change rebuild fallback: the image-edit model reproduces the reference and REFUSES structural
+    changes (add/remove/count stones, change an arrangement — TES-051: "2 round diamonds between each
+    emerald" no-op'd every attempt). A text-only rebuild from this description CAN apply the change
+    (it is not anchored to the old arrangement). Returns None on any failure."""
+    if not image_b64:
+        return None
+    instruction = (
+        "Describe this jewelry piece's DESIGN in 4-6 precise sentences, detailed enough for a jeweler to "
+        "rebuild it. Cover: the piece TYPE (ring / pendant / tennis bracelet / chain …); EVERY gemstone — "
+        "type, cut/shape, colour, approximate size, and the exact ARRANGEMENT / PATTERN and COUNT (e.g. "
+        "'emerald-cut green emeralds alternating with SINGLE round white diamonds between each'); the metal "
+        "colour; the setting style (prong / bezel / pavé / channel); any border, halo or frame; the bail or "
+        "clasp; and the overall structure/proportions. Be exact about the stone pattern and counts. Respond "
+        "with the description only."
+    )
+    try:
+        resp = _analysis_post(
+            {
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": instruction},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_shrink_b64_for_vision(image_b64)}"}},
+                ]}],
+                "max_tokens": 700,
+                "temperature": 0,
+            },
+            timeout=40,
+        )
+        if not resp.ok:
+            return None
+        txt = (resp.json().get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+        return txt or None
+    except Exception as e:
+        logger.warning("[design-rebuild] describe failed: %s", e)
+        return None
 
 
 def _describe_reference_for_relettering(image_b64: str) -> Optional[str]:
@@ -4695,9 +4739,15 @@ def generate_with_fallback(
     # with zero checks the drop shipped silently. The live refine ALSO runs through this initial path, so
     # this guard covers both. Pure reproduce jobs (empty / "i need same" prompts, no change wording) keep
     # the single-shot behaviour — for them identical-to-reference IS the desired outcome.
+    # A REFINE is BY DEFINITION an edit — the user is changing an existing variant. The keyword-based
+    # _user_wants_edit misses many natural phrasings ("fill with diamond", "full fill", "square diamond" —
+    # TES-056 v279/v280 no-op'd because none of those are edit keywords, so the guard never armed and the
+    # model's no-op shipped unverified). The refine task sets parsed_data["force_edit"], so every refine
+    # arms the no-op guard + edit QA regardless of how the change is worded.
+    _force_edit = bool((parsed_data or {}).get("force_edit"))
     needs_initial_edit_guard = bool(
         (not is_refine) and has_reference_image
-        and (bool(expected_texts) or _user_wants_edit(user_prompt))
+        and (bool(expected_texts) or _user_wants_edit(user_prompt) or _force_edit)
         # A VARIATIONS job intentionally outputs a multi-design grid — comparing it against the single
         # reference would always read as "not preserved" and burn every retry fighting the grid.
         and not _user_wants_variations(user_prompt)
@@ -4785,10 +4835,18 @@ def generate_with_fallback(
                     "stone work, layers, border, bail, metal and proportions."
                 )
             else:
+                # RE-STATE the user's EXACT change. A generic "apply the change" note made the model keep
+                # reproducing the reference's existing arrangement (TES-051 v283: asked for "2 round diamonds
+                # between each emerald", the reference had 1, and both attempts shipped 1). Naming the exact
+                # request + "the reference does NOT have it yet, you MUST change it" pushes the structural edit.
+                _req_txt = (original_request or user_prompt or "").strip()[:300]
                 correction_notes = (
-                    "The previous attempt returned an image almost IDENTICAL to the reference and did NOT visibly apply "
-                    "the requested change. Apply the requested change STRONGLY and OBVIOUSLY this time — redraw the target "
-                    "area fully if needed; preserve only the parts the user did not ask to change."
+                    "The previous attempt returned an image almost IDENTICAL to the reference and did NOT apply the "
+                    f"requested change. The change to make is: \"{_req_txt}\". The reference does NOT show this yet — "
+                    "you MUST modify the piece so it is CLEARLY visible. Do NOT reproduce the reference's current "
+                    "arrangement/count/coverage; change it exactly as asked (if the request adds or changes the NUMBER "
+                    "of stones per section, the output must show that new count in EVERY section). Keep only the parts "
+                    "the user did not mention identical."
                 )
             continue
 
@@ -4923,24 +4981,97 @@ def generate_with_fallback(
                         except Exception as _mde:
                             logger.warning("[reletter-fallback] reference metal detect failed: %s — using metal_tone '%s'",
                                            _mde, _metal_words)
-                    _fb_prompt = _build_concise_initial_prompt(
-                        f"{_desc}\n\nBuild EXACTLY this piece in {_metal_words}, with the SAME stone work as "
-                        "described above (if it is pavé/iced, the rebuild must be fully pavé-set with the same "
-                        "dense small stones — not plain metal), the same layers, border and bail. The lettering "
-                        f"spelled out on it must read EXACTLY \"{_new_text}\" — correct, complete, fully-formed "
-                        "letters in the same lettering style described above. Also apply every OTHER (non-text) "
-                        f"change the user asked for in this note: \"{(original_request or user_prompt or '')[:300]}\".",
-                        parsed_data, metal_tone, False, 0)
-                    _fb64 = generate_primary_image([], _fb_prompt, model=_img_model)
-                    _fb_spell = verify_text_spelling(_fb64, expected_texts, double_check_pass=True)
-                    logger.info("[reletter-fallback] rebuild spelling=%s", _fb_spell)
-                    if _fb_spell.get("passed"):
+                    _other_changes = f" Also apply every OTHER (non-text) change the user asked for: \"{(original_request or user_prompt or '')[:200]}\"."
+                    _fb64 = None
+
+                    # REBUILD 1 — DESIGN-TEMPLATE (image-anchored, but framed as "COPY this design with a NEW
+                    # name", NOT "edit the letters"). A pure text-only rebuild reliably gets the NAME right but
+                    # DRIFTS the design (TES-058: lost the double-layer, the diamond borders became plain metal,
+                    # the bail changed). The reference image carries far more design detail than any text
+                    # description, so we hand it back as a STYLE TEMPLATE and force fresh letters — this keeps the
+                    # exact metal / layers / border / bail / lettering-STYLE while changing the name. If the model
+                    # still anchors the OLD letters (garbles the name), REBUILD 2 (text-only) is the safety net.
+                    _tmpl_prompt = (
+                        "You are CraftsmanAI. The attached image is a DESIGN TEMPLATE — reproduce its EXACT design "
+                        "language: the same metal colour, the SAME multi-layer construction (if the letters sit on a "
+                        "raised/stacked iced outline layer behind them, keep that), the SAME border/outline treatment "
+                        "(if the letters are edged with a row of diamonds/pavé, keep the diamond edge — do NOT replace "
+                        "it with plain metal), the SAME stone coverage and density (if it is fully iced, stay fully "
+                        "iced), the SAME lettering STYLE (script/block, stroke weight, 3D depth) and the SAME bail "
+                        "shape.\n\n"
+                        f"CHANGE ONLY THE NAME: the piece must spell EXACTLY \"{_new_text}\" — build brand-new letters "
+                        "spelling that, in the reference's lettering style. Do NOT reproduce, keep, or blend in the "
+                        "reference's CURRENT letters/name; only its DESIGN carries over, not its text."
+                        f"{_other_changes}\n\n"
+                        "Output ONE clean CAD-style render on a pure solid white (#FFFFFF) background. One image only."
+                    )
+                    try:
+                        _tb64 = generate_primary_image([], _tmpl_prompt, pre_downloaded_blobs=[base64.b64decode(input_b64)], model=_img_model)
+                        _tspell = verify_text_spelling(_tb64, expected_texts, double_check_pass=True)
+                        logger.info("[reletter-fallback] design-template rebuild spelling=%s", _tspell)
+                        if _tspell.get("passed"):
+                            _fb64 = _tb64
+                            logger.info("[reletter-fallback] design-template rebuild ACCEPTED (design preserved + correct name)")
+                    except Exception as _te:
+                        logger.warning("[reletter-fallback] design-template rebuild failed: %s", _te)
+
+                    # REBUILD 2 — TEXT-ONLY (name-safe fallback). Only if the design-template rebuild garbled the
+                    # name. Gets the lettering right but the exact design may drift.
+                    if not _fb64:
+                        _fb_prompt = _build_concise_initial_prompt(
+                            f"{_desc}\n\nBuild EXACTLY this piece in {_metal_words}, with the SAME stone work as "
+                            "described above (if it is pavé/iced, the rebuild must be fully pavé-set with the same "
+                            "dense small stones — not plain metal), the same layers, border and bail. The lettering "
+                            f"spelled out on it must read EXACTLY \"{_new_text}\" — correct, complete, fully-formed "
+                            "letters in the same lettering style described above." + _other_changes,
+                            parsed_data, metal_tone, False, 0)
+                        _tb2 = generate_primary_image([], _fb_prompt, model=_img_model)
+                        _fb_spell = verify_text_spelling(_tb2, expected_texts, double_check_pass=True)
+                        logger.info("[reletter-fallback] text-only rebuild spelling=%s", _fb_spell)
+                        if _fb_spell.get("passed"):
+                            _fb64 = _tb2
+                            logger.info("[reletter-fallback] text-only rebuild ACCEPTED (correct lettering)")
+
+                    if _fb64:
                         final_b64 = _fb64
-                        logger.info("[reletter-fallback] text-only rebuild ACCEPTED (correct lettering)")
                     else:
-                        logger.warning("[reletter-fallback] rebuild also failed spelling — keeping the image-anchored render")
+                        logger.warning("[reletter-fallback] both rebuilds failed spelling — keeping the image-anchored render")
             except Exception as _fe:
                 logger.warning("[reletter-fallback] failed: %s — keeping the image-anchored render", _fe)
+
+    # DESIGN-CHANGE REBUILD FALLBACK — mirrors the reletter fallback but for STRUCTURAL design edits
+    # (add/remove stones, change a count/pattern, ice a surface). The image-edit model reproduces the
+    # reference and REFUSES these — every retry ships the same no-op (TES-051: "2 round diamonds between
+    # each emerald" was phash≈2-4 on all 3 attempts). Only fires when the final render is STILL a
+    # near-identical no-op of the reference, so a change that DID apply is never touched. A TEXT-ONLY
+    # rebuild from a description + the change CAN apply it (not anchored to the old arrangement); the cost
+    # is slight design drift, so we keep it ONLY if it actually differs from the reference (change landed).
+    if (final_b64 and needs_initial_edit_guard and not needs_spelling_check and input_b64
+            and not _user_wants_variations(user_prompt)
+            and _images_near_identical(input_b64, final_b64, max_distance=6)):
+        logger.warning("[design-rebuild] design change did NOT apply (output ~identical to reference) — "
+                       "rebuilding TEXT-ONLY from a described design with the change")
+        try:
+            _ddesc = _describe_reference_for_edit(input_b64)
+            if _ddesc:
+                _dchange = (original_request or user_prompt or "").strip()[:300]
+                _dmetal = (metal_tone or "yellow gold").replace("_", " ")
+                _dr_prompt = _build_concise_initial_prompt(
+                    f"{_ddesc}\n\nRebuild this EXACT piece in {_dmetal} — keep every design detail (gemstone "
+                    "types, cuts, colours, sizes, metal, setting and structure) the SAME — BUT apply this ONE "
+                    f"change and make it clearly visible: {_dchange}. If the change is about the NUMBER or "
+                    "arrangement of stones, the rebuild MUST show the new count/arrangement in EVERY repeating "
+                    "section (do not reproduce the old count).",
+                    parsed_data, metal_tone, False, 0)
+                _dr64 = generate_primary_image([], _dr_prompt, model=_img_model)
+                # Keep it ONLY if the change actually landed (output now differs from the reference).
+                if _dr64 and not _images_near_identical(input_b64, _dr64, max_distance=6):
+                    final_b64 = _dr64
+                    logger.info("[design-rebuild] text-only rebuild ACCEPTED (change applied)")
+                else:
+                    logger.warning("[design-rebuild] rebuild still ~identical — keeping the image-anchored render")
+        except Exception as _de:
+            logger.warning("[design-rebuild] failed: %s — keeping the image-anchored render", _de)
 
     if not final_b64:
         raise ValueError("No image generated from OpenAI gpt-image-2")
