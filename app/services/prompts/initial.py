@@ -113,14 +113,15 @@ def build_initial_prompt(
     if font_template:
         return _assemble_font_template(svc, user_prompt, lower, item_type, profile, metal_tone, user_named_metal, font_template)
     if has_images:
-        return _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, user_named_metal, intent, source_kind)
+        return _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, user_named_metal, intent, source_kind,
+                               is_screenshot=bool(parsed.get("is_screenshot")))
     return _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone, user_named_metal, intent)
 
 
 # ---------------------------------------------------------------------------
 # IMAGE-INPUT branch — kept intentionally SHORT; user request is dominant.
 # ---------------------------------------------------------------------------
-def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, user_named_metal, intent="", source_kind="") -> str:
+def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, user_named_metal, intent="", source_kind="", is_screenshot=False) -> str:
     keep_ref_angle = not svc._user_wants_front(user_prompt)
     angle_phrase = (
         "keeping the SAME camera angle as the reference image" if keep_ref_angle
@@ -154,35 +155,122 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
             "ABSOLUTELY ZERO text, labels or captions anywhere.\n\nOne image only."
         )
 
-    # LOVABLE-EXACT create (WITH image) — Lovable's master + the intent-selected generation directive, filled
-    # from the design state. Replaces the old hand-rolled reproduce body. Intent defaults to render_as_is when
-    # unset (the common "i need same" case). VARIATIONS (above) and the butterfly->ring form clause (below) are
-    # kept as the only justified additions.
+    # LOVABLE-EXACT create (WITH image) — assembled exactly like the prototype's composePrompt: master +
+    # initial systemPreamble + intent directive carrying Lovable's referenceType / authority / attachment /
+    # normalized-directives / preserve blocks after the header and SHARED_RULES before the closing
+    # "Generate ONE ..." line. Intent routing is deterministic (we deliberately skip Lovable's
+    # parse-request LLM): enhancement -> image_enhancement_only, sketch -> sketch_to_render, non-jewelry ->
+    # convert_to_jewelry, a real note -> modify_existing (Lovable's parse marks image+note jobs that way),
+    # else render_as_is. VARIATIONS (above) and the butterfly->ring form clause (below) are kept as the
+    # only justified additions.
     from app.services.prompts.lovable_create import (
-        build_lovable_create, metal_phrase as _lov_metal,
-        RENDER_AS_IS, IMAGE_ENHANCEMENT, SKETCH_TO_RENDER, CONVERT_TO_JEWELRY,
+        build_lovable_create, metal_phrase as _lov_metal, MANDATORY_PRESERVE_LIST,
+        RENDER_AS_IS, IMAGE_ENHANCEMENT, SKETCH_TO_RENDER, CONVERT_TO_JEWELRY, MODIFY_EXISTING,
+        per_type_tail, resolve_canonical_type, LOVABLE_TAXONOMY,
     )
     _i = (intent or "").strip().lower()
     _sk = (source_kind or "").strip().lower()
+    _note = (user_prompt or "").strip()
     if _i == "image_enhancement_only":
         directive = IMAGE_ENHANCEMENT
     elif _i == "convert_to_jewelry" or _sk == "non_jewelry_reference":
         directive = CONVERT_TO_JEWELRY
     elif _i == "sketch_to_render" or _sk == "sketch":
         directive = SKETCH_TO_RENDER
+    elif _note:
+        directive = MODIFY_EXISTING
     else:
         directive = RENDER_AS_IS
 
+    # --- Lovable's per-job blocks (deterministic equivalents of classifyReferenceType /
+    #     determineAuthority / buildAttachmentAuthorityBlock / normalizeRetailerLanguage) ---
+    if directive is IMAGE_ENHANCEMENT:
+        _ref_type = "IMAGE_ENHANCEMENT_ONLY"
+    elif directive in (CONVERT_TO_JEWELRY, SKETCH_TO_RENDER):
+        _ref_type = "NON_JEWELRY_REFERENCE"
+    else:
+        _ref_type = "EXISTING_JEWELRY_REFERENCE"
+    reference_type_block = f"REFERENCE TYPE (auto-classified): {_ref_type}"
+
+    if directive in (CONVERT_TO_JEWELRY, SKETCH_TO_RENDER):
+        authority_block = (
+            "HYBRID AUTHORITY:\n"
+            "- Preserve the source silhouette, spacing, and negative space.\n"
+            "- Apply text instructions only where they explicitly modify material, stones, or construction.")
+    elif _note:
+        authority_block = (
+            "REFERENCE + TEXT AUTHORITY:\n"
+            "- The reference governs all unchanged regions.\n"
+            "- The note governs ONLY the explicitly requested changes.\n"
+            "- Preserve all unspecified geometry, material, and layout from the reference.")
+    else:
+        authority_block = (
+            "REFERENCE AUTHORITY:\n"
+            "- The uploaded reference is the primary authority for geometry, material, layout, and design identity.\n"
+            "- Reproduce the same piece exactly unless the user explicitly requests a change.")
+
+    if _ref_type in ("EXISTING_JEWELRY_REFERENCE", "IMAGE_ENHANCEMENT_ONLY"):
+        attachment_block = (
+            "IMAGE ATTACHMENT AUTHORITY:\n"
+            "- FIRST attached image = MASTER reference for geometry, layout, stones, metal placement, and silhouette\n"
+            + ("- Additional attached images = secondary support references only; use them only for details explicitly requested by the user.\n"
+               if image_count > 1 else "")
+            + "- Never average multiple images into a new hybrid design unless the user explicitly asks to combine them.\n"
+            "- If an attached support image conflicts with the master reference, the master reference wins.")
+    elif image_count > 1:
+        attachment_block = (
+            "IMAGE ATTACHMENT AUTHORITY:\n"
+            "- FIRST attached image is the base visual context.\n"
+            "- Additional attached images are support-only and must not override the first image unless the note explicitly asks for it.")
+    else:
+        attachment_block = ""
+
+    # Normalized technical directives (Lovable's normalizeRetailerLanguage + its PENDANT BAIL directive,
+    # which it pushes into the same list for every pendant job).
+    _norm = normalize_retailer_language(user_prompt)
+    _norm_items = _norm.split("\n- ")[1:] if _norm else []
+    _pendant_like = svc._is_pendant_like(item_type, user_prompt) or profile.bail_policy == BAIL_ADD_IF_MISSING
+    if _pendant_like:
+        if re.search(r"\b(v[-\s]?bail|rabbit\s*ear\s*bail|enhancer\s*bail|hinge\s*bail|hidden\s*bail|logo\s*bail|heart\s*bail|puffy\s*heart\s*bail|custom\s*bail)\b", lower):
+            _norm_items.append(
+                "PENDANT BAIL — custom bail requested: REPLACE the existing/default bail with the "
+                "user-specified bail. Do NOT stack two bails. Do NOT keep both.")
+        else:
+            _norm_items.append(
+                "PENDANT BAIL — preservation: if the reference shows any bail, reproduce it exactly. If NO "
+                "bail is visible and no custom bail was requested, add only a simple Standard Loop Bail — a "
+                "smooth polished bail with a gently flared, softly rounded top that tapers into a small round "
+                "loop / jump-ring at its base, in the same metal, fixed at the very top facing forward. Never "
+                "duplicate or stack bails.")
+    normalized_block = ("Normalized technical directives:\n- " + "\n- ".join(_norm_items)) if _norm_items else ""
+
+    # SCREENSHOT input (auto-classified by the task's single classify call): the UI chrome must be
+    # STRIPPED, never reproduced (TES-035: the render faithfully copied the whole iPhone Safari frame —
+    # status bar, URL bar and download banner — around a correctly edited pendant). Placed FIRST so it
+    # outranks the reproduce/preserve framing below.
+    screenshot_block = (
+        "SCREENSHOT INPUT (auto-classified): the reference image is a phone / app / browser SCREENSHOT. "
+        "The jewellery piece shown INSIDE it is the ONLY subject. Discard COMPLETELY every interface "
+        "element — status bar, clock, battery/wifi icons, notch, URL/address bar, buttons, menus, tabs, "
+        "download banners, file names, captions, watermarks, chat bubbles, rulers/measuring tape — and "
+        "render the piece ALONE, large and centered (full-frame), on the pure white background. The "
+        "preserve rules below apply ONLY to the jewellery piece itself, NEVER to the screenshot frame, "
+        "its layout or its composition.") if is_screenshot else ""
+
+    # Lovable adds MANDATORY_PRESERVE_LIST to EVERY job that is not text_only (convert/sketch included).
+    authority_blocks = "\n".join(b for b in (screenshot_block, reference_type_block, authority_block,
+                                             attachment_block, normalized_block) if b) + MANDATORY_PRESERVE_LIST
+
     _named_metal = svc._detected_metal_phrase(user_prompt) if user_named_metal else ""
     mp = _lov_metal(True, user_named_metal, _named_metal, _i)
-    _note = (user_prompt or "").strip()
-    user_request = f"User note: {_note}{normalize_retailer_language(user_prompt)}" if _note else ""
+    user_request = f"User note: {_note}" if _note else ""
 
     # SURGICAL-EDIT CLAUSE — attached to the user's note itself, because the generic MANDATORY PRESERVE
     # LIST lands ~1.5k characters later in the prompt and loses to the nearby "change this" instruction:
     # asked to restyle ONE letter, the model re-imagined the WHOLE piece (TES-009 — the T did change, but
     # the pavé density collapsed, the letters thinned and the layered relief was flattened). Naming the
     # everything-else-is-frozen rule right where the change is requested keeps the edit local.
+    # (normalize_retailer_language now lives in the normalized-directives authority block above.)
     if _note and svc._user_wants_edit(user_prompt):
         user_request += (
             "\n\nSURGICAL EDIT — this is a TARGETED CHANGE to an EXISTING piece, NOT a redesign. "
@@ -216,51 +304,30 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
     else:
         stone_phrase = ""
 
-    out = build_lovable_create(directive, design_subject=design_subject, item_type=item_type,
-                               metal_phrase=mp, stone_phrase=stone_phrase, user_request=user_request)
+    # A screenshot's "camera angle" is the phone frame — never preserve it; always go front-hero there.
+    angle_line = ("Preserve the reference image's camera angle." if (keep_ref_angle and not is_screenshot)
+                  else "Front-facing, centered, on white/very light background.")
 
-    # MANDATORY PRESERVE LIST (Lovable parity) — freeze the reference's exact identity (silhouette,
-    # proportions, stone coverage/arrangement, setting, borders, letter construction, relief/depth, negative
-    # space, centering, …) on pure-reproduce / enhancement jobs. NOT added for convert/sketch, which are meant
-    # to transform the input.
-    if directive in (RENDER_AS_IS, IMAGE_ENHANCEMENT):
-        from app.services.prompts.lovable_create import MANDATORY_PRESERVE_LIST
-        out += MANDATORY_PRESERVE_LIST
+    out = build_lovable_create(directive, angle_line=angle_line, authority_blocks=authority_blocks,
+                               design_subject=design_subject, item_type=item_type,
+                               metal_phrase=mp, stone_phrase=stone_phrase, user_request=user_request,
+                               requested_changes=_note or "as described")
 
-    # PER-TYPE LAYER (Lovable taxonomy): the type's verbatim default_output_behavior + render-family rule
-    # (standalone component for bail/clasp/buckle/body, matching-set layout, custom-object). The verbatim
-    # NEGATIVE is appended ONCE at the very end.
-    from app.services.prompts.lovable_create import per_type_tail, NEGATIVE_PROMPT
-    out += "\n\n" + per_type_tail(item_type, label=design_subject, image_count=image_count, include_negative=False)
+    # PER-TYPE LAYER (Lovable taxonomy): the type's verbatim default_output_behavior + render-family rule.
+    # The concise "NEGATIVE:" one-liner belongs ONLY to Lovable's concise render-family branch
+    # (components / accessories / sets / custom objects); full pieces get ANTI_HALLUCINATION inside
+    # SHARED_RULES instead — exactly like the prototype.
+    _fam = LOVABLE_TAXONOMY[resolve_canonical_type(item_type)]["render_family"]
+    out += "\n\n" + per_type_tail(item_type, label=design_subject, image_count=image_count,
+                                  include_negative=(_fam != "full_jewelry_piece"))
 
-    # MULTI-IMAGE authority (Lovable attachmentAuthorityBlock) — first image is the master, never blend.
-    if image_count > 1:
-        out += ("\n\nMULTIPLE IMAGES: treat the FIRST image as the MASTER reference; use any other ONLY for the "
-                "specific part it clearly shows; if they conflict, the FIRST image wins; do NOT blend them into a hybrid.")
-
-    # PER-TYPE FORM / BAIL (kept bug-fixes on top of the Lovable behaviour above):
-    #  - SPECIFIC non-pendant type (ring/cufflink/brooch...) -> thin form clause so a flat motif becomes that
-    #    type, NOT a default pendant (butterfly->ring fix).
-    #  - PENDANT-LIKE -> a custom bail requested (v-bail / rabbit-ear / heart...) REPLACES the bail; else keep
-    #    the reference's own bail, or add the client DEFAULT standard loop bail if it has none. ("Render pendant
-    #    alone (no chain)" + "avoid duplicate bail/chain" already come from the per-type tail + the NEGATIVE.)
+    # PER-TYPE FORM (kept bug-fix): a SPECIFIC non-pendant type (ring/cufflink/brooch...) gets a thin form
+    # clause so a flat motif becomes that type, NOT a default pendant (butterfly->ring fix).
     _ct = (item_type or "").strip().lower()
     _generic_type = (not _ct) or _ct in ("jewelry", "jewellery", "custom", "custom object", "other", "charm")
-    _pendant_like = svc._is_pendant_like(item_type, user_prompt) or profile.bail_policy == BAIL_ADD_IF_MISSING
     if not _generic_type and not _pendant_like:
         out += (f"\n\nForm: present the design as the requested {item_type}:{svc._type_form_clause(item_type, user_prompt)} "
                 f"It is a wearable {item_type} — NOT a pendant or charm: do NOT add any bail, hook, jump-ring or chain hole.")
-    elif _pendant_like:
-        if re.search(r"\b(v[-\s]?bail|rabbit\s*ear\s*bail|enhancer\s*bail|hinge\s*bail|hidden\s*bail|logo\s*bail|heart\s*bail|puffy\s*heart\s*bail|custom\s*bail)\b", lower):
-            out += ("\n\nPENDANT BAIL — custom bail requested: REPLACE the existing/default bail with the "
-                    "user-specified bail. Do NOT stack two bails. Do NOT keep both.")
-        else:
-            out += ("\n\nBail: keep the reference's OWN bail if it already has one (do NOT duplicate it). If it has "
-                    "NONE, add ONE classic STANDARD LOOP BAIL in the same metal — a smooth, polished bail with a "
-                    "gently FLARED, softly rounded top that TAPERS downward into a small round loop / jump-ring at "
-                    "its base for the chain — fixed at the very top of the pendant, facing forward.")
-
-    out += "\n\n" + NEGATIVE_PROMPT
     return out
 
 
@@ -377,11 +444,24 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
         stone_phrase = (f"Stones: NONE — render as PLAIN, solid, polished {metal_word} ONLY, with absolutely NO "
                         "diamonds, gemstones, pavé, crystals or 'iced' surfaces anywhere. Metal only.")
     body = user_prompt if user_prompt else f"a simple plain {item_type}"
-    out = build_lovable_create(TEXT_TO_RENDER, item_type=item_type, metal_phrase=mp, stone_phrase=stone_phrase,
-                               user_request=f"{body}{normalize_retailer_language(user_prompt)}")
-    # PER-TYPE LAYER (Lovable taxonomy) — the type's default_output_behavior + render-family rule; NEGATIVE last.
-    from app.services.prompts.lovable_create import per_type_tail, NEGATIVE_PROMPT
-    out += "\n\n" + per_type_tail(item_type, label=(user_prompt or item_type), include_negative=False)
+    # Lovable's TEXT AUTHORITY block + its normalized-directives block, placed after the directive header
+    # exactly like the prototype (text_only jobs get NO mandatory-preserve list there).
+    _norm = normalize_retailer_language(user_prompt)
+    _tx_auth = ("TEXT AUTHORITY:\n"
+                "- No usable jewelry reference governs structure.\n"
+                "- Use the note as the primary authority." + (_norm or ""))
+    out = build_lovable_create(TEXT_TO_RENDER,
+                               angle_line="Front-facing, centered, on white/very light background.",
+                               authority_blocks=_tx_auth,
+                               item_type=item_type, metal_phrase=mp, stone_phrase=stone_phrase,
+                               user_request=body)
+    # PER-TYPE LAYER (Lovable taxonomy) — the type's default_output_behavior + render-family rule. The
+    # concise NEGATIVE one-liner only for Lovable's concise render families; full pieces already carry
+    # ANTI_HALLUCINATION inside SHARED_RULES.
+    from app.services.prompts.lovable_create import per_type_tail, resolve_canonical_type, LOVABLE_TAXONOMY
+    _fam = LOVABLE_TAXONOMY[resolve_canonical_type(item_type)]["render_family"]
+    out += "\n\n" + per_type_tail(item_type, label=(user_prompt or item_type),
+                                  include_negative=(_fam != "full_jewelry_piece"))
     _is_yellow_gold = (("yellow gold" in lower) or ("gold" in lower and "white" not in lower and "rose" not in lower)
                        or (mp == "yellow_gold_default"))
     if _is_yellow_gold:
@@ -399,5 +479,4 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
                 "with the name/text repeated multiple times on it — every variation must be a standalone "
                 "piece differing only by the requested variation (style/font/design), all spelling the "
                 "SAME text correctly.")
-    out += "\n\n" + NEGATIVE_PROMPT
     return out

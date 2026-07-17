@@ -641,6 +641,51 @@ def _json_from_content(content: str) -> Dict[str, Any]:
     return {}
 
 
+def _llm_extract_new_text(prompt: str) -> Optional[str]:
+    """Extract the EXACT new lettering a text-change request wants, via LLM — the typo/phrasing-proof
+    complement to the regex `extract_text_replacements`. Called ONLY when the regex found nothing (so it
+    never adds a call to the common path), replacing the separate text-change gate in that branch (so the
+    regex-miss path stays at ONE LLM call, not two). Fixes fragile phrasings the regex drops: 'chand GFM
+    to leo' (typo for change), 'change GMF to LEO only not any change' (extra words pollute the capture).
+    Returns the new text, or None if the request names no specific replacement. Uses the fast flash
+    analysis model (~1-2s). Kept tight (≤24 chars, ≤3 words) so a sentence is never mistaken for a name."""
+    key = (prompt or "").strip()
+    if not key:
+        return None
+    api_key = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
+    if not api_key:
+        return None
+    try:
+        resp = _analysis_post(
+            {
+                "model": "gpt-4o-mini",
+                "temperature": 0,
+                "max_tokens": 20,
+                "response_format": {"type": "json_object"},
+                "messages": [
+                    {"role": "system", "content": (
+                        "Decide if a jewelry edit request changes the NAME / TEXT / LETTERING engraved on the "
+                        "piece to a NEW value, and if so what. Return ONLY the exact NEW characters the piece "
+                        "should read after the change (e.g. \"change GFM to leo\" -> \"leo\"; \"change GMF to "
+                        "LEO only not any change\" -> \"LEO\"; \"make it say SARA\" -> \"SARA\"). If the request "
+                        "is NOT a text change (stones, metal, bail, size, shape, etc.), return empty. "
+                        "Respond ONLY as JSON: {\"new_text\": \"<new text or empty>\"}.")},
+                    {"role": "user", "content": key},
+                ],
+            },
+            timeout=20,
+        )
+        if not resp.ok:
+            return None
+        parsed = _json_from_content(resp.json().get("choices", [{}])[0].get("message", {}).get("content") or "")
+        val = (parsed.get("new_text") or "").strip().strip("\"'“”‘’ ")
+        if val and len(val) <= 24 and len(val.split()) <= 3:
+            return val
+    except Exception as e:
+        logger.warning("[text-extract-llm] failed: %s", e)
+    return None
+
+
 def _llm_is_text_change(prompt: str) -> bool:
     """LLM intent gate: True ONLY if the refine changes the literal TEXT / LETTERING / NAME /
     NUMBERS written or engraved on the piece; False for any structural/design change (links,
@@ -1582,28 +1627,35 @@ def _describe_reference_for_relettering(image_b64: str) -> Optional[str]:
 
 
 def _confirm_lettering_matches(image_b64: str, expected: str) -> Optional[Dict[str, Any]]:
-    """SECOND-OPINION targeted lettering check.
+    """SECOND-OPINION lettering check — NEUTRAL transcription, then compare in code.
 
     Pavé / diamond-set letters routinely trip free OCR (adjacent I+Y read as one M, doubled
-    strokes read as doubled letters), which made a CORRECT render fail the spelling QA, burn
-    all its retries, and ship the LAST attempt instead of the good one (verified empirically:
-    a clean "PRIYA" render was OCR'd as "PRMYA"/"PRRIYA"). Framing the question as targeted
-    VERIFICATION of the expected word is far more reliable than blind OCR. The same misreads
-    also produce false PASSES (TES-029: 'Tanish' free-OCR'd as 'Manish'), so this is used to
-    double-check BOTH verdicts on text-change jobs.
+    strokes read as doubled letters), which made a CORRECT render fail the spelling QA. The
+    same misreads also produce false PASSES (TES-029: 'Tanish' free-OCR'd as 'Manish'), so
+    this double-checks BOTH verdicts on text-change jobs.
+
+    CRITICAL — do NOT tell the model the expected word. The old prompt asked "does this read
+    EXACTLY 'leo'?", and the vision model, PRIMED by 'leo', answered yes even when the pendant
+    still showed the OLD name 'GMF' (TES-049 variant 257: an unchanged pendant was confirmed as
+    'Leo', passing a no-op edit and skipping the reletter fallback). We instead ask it to blindly
+    TRANSCRIBE the letters it sees, then compare here — removing that confirmation bias.
     Returns {"matches": bool, "actual": str} or None when no provider could answer
     (caller keeps the OCR verdict). Retries once — a single flake used to return None."""
     if not image_b64 or not expected:
         return None
     instruction = (
-        f"This jewelry piece's lettering is INTENDED to read EXACTLY: \"{expected}\". "
-        "The letters are pavé/diamond-set metal letters that can visually touch or sparkle into each "
-        "other, so examine them CHARACTER BY CHARACTER and count the letters before answering. Pay "
-        "special attention to the FIRST character — decorative script capitals are easily mistaken "
-        "for each other (T vs M vs N). "
-        "Does the lettering read EXACTLY that (same letters, same count, ignore case/styling)? "
-        "Respond ONLY as JSON: {\"matches\": true|false, \"actual\": \"<the letters you actually see>\"}."
+        "Read the NAME / lettering that is actually spelled out on this jewelry piece. The letters are "
+        "pavé/diamond-set and can visually touch or sparkle into each other, so examine them CHARACTER "
+        "BY CHARACTER, left to right, and transcribe ONLY what you truly see — do NOT guess a common name, "
+        "do NOT autocorrect, do NOT invent letters. If a character is unclear, give your best single-letter "
+        "read. Report the letters exactly as written. "
+        "Respond ONLY as JSON: {\"actual\": \"<the exact letters you see, in order>\"}."
     )
+
+    def _norm(s: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+    _exp_norm = _norm(expected)
     shrunk = _shrink_b64_for_vision(image_b64)
     for _try in range(2):
         try:
@@ -1611,7 +1663,7 @@ def _confirm_lettering_matches(image_b64: str, expected: str) -> Optional[Dict[s
                 {
                     "model": "gpt-4o-mini",
                     "messages": [
-                        {"role": "system", "content": "You are a meticulous jewelry lettering QA inspector. Respond ONLY with the requested JSON."},
+                        {"role": "system", "content": "You are a meticulous jewelry lettering transcriber. Read only what is there. Respond ONLY with the requested JSON."},
                         {"role": "user", "content": [
                             {"type": "text", "text": instruction},
                             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{shrunk}"}},
@@ -1626,8 +1678,10 @@ def _confirm_lettering_matches(image_b64: str, expected: str) -> Optional[Dict[s
             if not resp.ok:
                 continue
             parsed = _json_from_content(resp.json().get("choices", [{}])[0].get("message", {}).get("content") or "")
-            if "matches" not in parsed:
+            if "actual" not in parsed:
                 continue
+            # Compare HERE (neutral) — the model never saw the expected word, so a match is real.
+            parsed["matches"] = (_norm(parsed.get("actual")) == _exp_norm)
             logger.info("[spelling-confirm] expected='%s' matches=%s actual='%s'", expected, parsed.get("matches"), parsed.get("actual"))
             return {"matches": bool(parsed.get("matches")), "actual": str(parsed.get("actual") or "")}
         except Exception as e:
@@ -1830,7 +1884,7 @@ def detect_metal_color(image_b64: str) -> str:
         {"role": "system", "content": "You are a precise jewelry metal-color classifier. Respond ONLY with the requested JSON."},
         {"role": "user", "content": [
             {"type": "text", "text": instruction},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_shrink_b64_for_vision(image_b64)}"}},
         ]},
     ]
     try:
@@ -1922,13 +1976,22 @@ def classify_reference_image(image_b64: str) -> Dict[str, Any]:
         "2) metal: if it IS jewelry, the dominant METAL colour as 'gold' (warm yellow gold), 'silver' (white gold, "
         "platinum or silver), 'rose_gold' (pink/copper), or 'two_tone' if the piece clearly combines multiple different metal colors "
         "(such as a white gold chain with rose gold charms or yellow gold borders with white gold components); if it is NOT jewelry, just use 'gold'. "
-        "Respond ONLY as JSON: {\"is_jewelry\": true|false, \"metal\": \"gold\"|\"silver\"|\"rose_gold\"|\"two_tone\"}."
+        "3) is_screenshot: true if the image is a SCREENSHOT of a phone / app / browser / chat screen "
+        "(status bar, clock, battery/wifi icons, URL bar, buttons, download banners, chat bubbles or other "
+        "UI visible around the content) rather than a direct photo — jewelry shown INSIDE a screenshot is "
+        "still is_jewelry=true AND is_screenshot=true. "
+        "4) subject_box: if is_screenshot is true, the tight bounding box of the JEWELRY CONTENT AREA inside "
+        "the screenshot (the photo region showing the piece, excluding ALL surrounding UI bars/banners), as "
+        "FRACTIONS of the image width/height: x0,y0 = top-left, x1,y1 = bottom-right, each 0.0-1.0 with "
+        "x0<x1 and y0<y1. If not a screenshot, use null. "
+        "Respond ONLY as JSON: {\"is_jewelry\": true|false, \"metal\": \"gold\"|\"silver\"|\"rose_gold\"|\"two_tone\", "
+        "\"is_screenshot\": true|false, \"subject_box\": {\"x0\":0.0,\"y0\":0.0,\"x1\":1.0,\"y1\":1.0}|null}."
     )
     messages = [
         {"role": "system", "content": "You classify jewelry reference images. Respond ONLY with the requested JSON."},
         {"role": "user", "content": [
             {"type": "text", "text": instruction},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_shrink_b64_for_vision(image_b64)}"}},
         ]},
     ]
     try:
@@ -1960,7 +2023,9 @@ def classify_reference_image(image_b64: str) -> Dict[str, Any]:
             metal = "two_tone"
         if metal not in ("gold", "silver", "rose_gold", "two_tone"):
             metal = "gold"
-        return {"is_jewelry": is_jewelry, "metal": metal}
+        box = data.get("subject_box") if isinstance(data.get("subject_box"), dict) else None
+        return {"is_jewelry": is_jewelry, "metal": metal,
+                "is_screenshot": bool(data.get("is_screenshot", False)), "subject_box": box}
     except Exception as e:
         logger.warning("[ref_classify] failed: %s", e)
         return {"is_jewelry": True, "metal": "gold"}
@@ -1990,7 +2055,7 @@ def detect_jewelry_piece_type(image_b64: str) -> str:
         {"role": "system", "content": "You classify the type of a jewelry piece from its image. Respond ONLY with the requested JSON."},
         {"role": "user", "content": [
             {"type": "text", "text": instruction},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_shrink_b64_for_vision(image_b64)}"}},
         ]},
     ]
     valid = {"ring", "pendant", "bracelet", "earring", "grill", "watch", "anklet"}
@@ -2056,7 +2121,7 @@ def extract_image_instructions(image_b64: str) -> Tuple[Optional[str], Optional[
         {"role": "system", "content": "You read written design briefs and font samples off jewelry reference images. Respond ONLY with the requested JSON."},
         {"role": "user", "content": [
             {"type": "text", "text": instruction},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_shrink_b64_for_vision(image_b64)}"}},
         ]},
     ]
     try:
@@ -4378,7 +4443,7 @@ def detect_jewelry_crop_box(image_b64: str) -> Optional[Dict[str, float]]:
                 "model": "gpt-4o-mini",
                 "messages": [{"role": "user", "content": [
                     {"type": "text", "text": instruction},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_shrink_b64_for_vision(image_b64)}"}},
                 ]}],
                 "response_format": {"type": "json_object"},
                 "max_tokens": 150,
@@ -4533,6 +4598,14 @@ def generate_with_fallback(
             expected_texts = [new for (_old, new) in extract_text_replacements(user_prompt) if new and new.strip()]
             if expected_texts and not _llm_is_text_change(user_prompt):
                 expected_texts = []
+            elif not expected_texts:
+                # Regex found nothing — try the LLM extractor (ONE call; only on this miss path, so the
+                # common regex-success path is unchanged and no double LLM call ever happens). Fixes fragile
+                # phrasings the regex drops (TES-049 v256 'chand ...', v258 '... only not any change').
+                _llm_new = _llm_extract_new_text(user_prompt)
+                if _llm_new:
+                    expected_texts = [_llm_new]
+                    logger.info("[text-extract-llm] regex missed — LLM extracted new text: %r", _llm_new)
     vision_available = bool(os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY)
     needs_spelling_check = bool(expected_texts) and vision_available
 
@@ -4630,11 +4703,22 @@ def generate_with_fallback(
         and not _user_wants_variations(user_prompt)
     )
     any_check = needs_spelling_check or needs_visual_qa or needs_initial_qa or needs_initial_edit_guard
-    # Refines (Gemini) are fast & cheap, and the model sometimes drops the edit (stochastic no-op).
-    # Allow up to 3 generations so a dropped edit gets escalated corrective re-rolls (driven by the no-op
-    # guard below) instead of a single un-verified shot. Text/name changes on an image-create get the same
-    # 3-attempt budget — they are the stubbornest case (the reference's old lettering dominates).
-    _refine_cap = 3 if ((is_refine and refinement_intent) or needs_initial_edit_guard) else 2
+    # Attempt budget (30-45s target — each generation is ~25s, so every extra doomed attempt is costly):
+    #   * REFINE with an interpreted intent -> 3 (fast Gemini refines, and a dropped edit is worth 2 re-rolls).
+    #   * CREATE-with-image edit (incl. name change) -> 2. The name-change is the model's stubbornest case
+    #     (the reference anchors the old lettering), so a 3rd image-anchored retry almost never succeeds where
+    #     the 2nd failed — it just burns ~25s. The TEXT-ONLY reletter fallback AFTER the loop is the method
+    #     that actually re-letters correctly, so we reach it one generation sooner instead of a 3rd doomed try.
+    #   * everything else -> 2.
+    _refine_cap = 3 if (is_refine and refinement_intent) else 2
+    # NAME / TEXT change on a create-with-image: the image-anchored retry almost NEVER fixes a dense-pavé
+    # re-letter (the reference anchors the old letters — TES-039 gave 'Love', TES-041 'Kayish' on attempt 2),
+    # while the TEXT-ONLY reletter fallback AFTER the loop reliably does. So take just ONE image attempt then
+    # go straight to the fallback — this cuts a ~55s doomed 2nd generation off the hard case (TES-041: 2:26)
+    # with no correctness loss. When attempt 1 already got the name right (TES-040), the fallback's spelling
+    # check passes and keeps it — no rebuild, still fast.
+    if needs_spelling_check and has_reference_image and not is_refine:
+        _refine_cap = 1
     max_qa_attempts = _refine_cap if any_check else 1
     previous_ref_url = resolved_image_urls[0] if (is_refine and resolved_image_urls) else None
     final_b64 = None
@@ -4827,7 +4911,10 @@ def generate_with_fallback(
                     _named_m = _detected_metal_phrase(original_request or user_prompt or "")
                     if _named_m:
                         _metal_words = _named_m
-                    else:
+                    elif not metal_tone:
+                        # metal_tone is normally already the metal the task classified upstream — trust it and
+                        # SKIP a redundant ~15s detect_metal_color call (a big chunk of the slow hard-case path,
+                        # TES-041). Only re-detect if we somehow have no metal at all.
                         try:
                             _ref_m = detect_metal_color(input_b64)
                             _metal_words = {"gold": "yellow gold", "silver": "white gold",

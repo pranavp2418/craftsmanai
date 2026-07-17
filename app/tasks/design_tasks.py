@@ -40,6 +40,87 @@ def _extract_generated_image_data(data_item: Any) -> tuple[bytes, str]:
     raise ValueError("OpenAI response did not contain image bytes or URL.")
 
 
+def _detect_and_crop_screenshot(raw: bytes):
+    """Deterministic (no-LLM) phone-screenshot detector + content cropper.
+
+    Returns cropped PNG bytes of the content region, or None when the image does not look like a
+    screenshot / no clear content band exists. Why pixels, not vision: the vision classifier is FLAKY
+    on is_screenshot (same image flipped True/False across calls) and prompt-level "strip the UI"
+    instructions alone were ignored by the image model (TES-036 reproduced the whole iPhone frame).
+    Signals used:
+      * phone screenshots are TALL (h/w >= 1.6) and contain uniform UI rows (pure-white/black bars,
+        empty page area) — real jewellery photos almost never do;
+      * the actual PHOTO inside the screenshot is the biggest contiguous band of rows with high
+        colour/brightness variance; UI chrome rows are near-uniform.
+    """
+    from io import BytesIO
+    import numpy as np
+    from PIL import Image as _PILImage
+
+    img = _PILImage.open(BytesIO(raw)).convert("RGB")
+    W, H = img.size
+    if W == 0 or H == 0 or (H / W) < 1.6:
+        return None
+
+    scale_w = 240
+    small = img.resize((scale_w, max(2, int(H * scale_w / W))))
+    a = np.asarray(small, dtype=np.float32)
+    row_std = a.std(axis=(1, 2))                                # per-row overall variation
+    row_mean = a.mean(axis=(1, 2))
+    uniform = (row_std < 6.0)                                   # flat UI / empty rows
+    white_uniform = uniform & (row_mean > 235)
+    # Screenshot signature: a meaningful share of perfectly flat rows (status bar, empty page, banners).
+    if not (uniform.mean() >= 0.12 or white_uniform.mean() >= 0.08):
+        return None
+
+    # Content band = longest contiguous run of clearly non-uniform rows (the embedded photo).
+    content = row_std > 18.0
+    best = (0, 0)
+    run_start = None
+    for i, v in enumerate(list(content) + [False]):             # sentinel closes a trailing run
+        if v and run_start is None:
+            run_start = i
+        elif not v and run_start is not None:
+            if i - run_start > best[1] - best[0]:
+                best = (run_start, i)
+            run_start = None
+    n = len(row_std)
+    if (best[1] - best[0]) / n < 0.12:                          # no real photo band found
+        return None
+    t_frac, b_frac = best[0] / n, best[1] / n
+
+    # Column trim inside the band (the photo may not span the full width).
+    band = a[best[0]:best[1], :, :]
+    col_std = band.std(axis=(0, 2))
+    cols = np.where(col_std > 12.0)[0]
+    l_frac = (cols.min() / band.shape[1]) if cols.size else 0.0
+    r_frac = ((cols.max() + 1) / band.shape[1]) if cols.size else 1.0
+
+    pad = 0.015
+    box = (max(0, int((l_frac - pad) * W)), max(0, int((t_frac - pad) * H)),
+           min(W, int((r_frac + pad) * W)), min(H, int((b_frac + pad) * H)))
+    if box[2] - box[0] < 32 or box[3] - box[1] < 32:
+        return None
+    return _center_on_square_canvas(img.crop(box))
+
+
+def _center_on_square_canvas(crop, margin_frac: float = 0.06):
+    """Paste a crop DEAD-CENTER on a square white canvas with equal margins on all sides.
+
+    The reference the image model sees must be symmetric — a lopsided crop reads as an intended
+    composition (the preserve rules tell the model to keep composition/centering), producing an
+    off-center render. Equal margins + square canvas => the model re-renders the piece centered."""
+    from io import BytesIO
+    from PIL import Image as _PILImage
+    w, h = crop.size
+    side = int(max(w, h) * (1 + 2 * margin_frac))
+    canvas = _PILImage.new("RGB", (side, side), (255, 255, 255))
+    canvas.paste(crop, ((side - w) // 2, (side - h) // 2))
+    buf = BytesIO()
+    canvas.save(buf, "PNG")
+    return buf.getvalue()
+
+
 def _resolve_reference_image_url(design: Design) -> str:
     if design.input_image_urls:
         if isinstance(design.input_image_urls, list) and design.input_image_urls:
@@ -158,6 +239,7 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             # mis-read the golfer photo as silver) and route to the convert directive (solid metal, no forced
             # diamonds) via parsed_data.
             _intent, _source_kind = "", ""
+            _is_screenshot = False
             if not _metal_named and reference_image_source:
                 try:
                     _refs2 = reference_image_source if isinstance(reference_image_source, list) else [reference_image_source]
@@ -165,6 +247,47 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                     if _u2:
                         _mb64 = base64.b64encode(requests.get(_u2, timeout=20).content).decode("utf-8")
                         _cls = classify_reference_image(_mb64)
+                        # Phone/app/browser screenshots must have their UI chrome stripped, not reproduced
+                        # (TES-035: the output faithfully re-rendered the whole iPhone Safari frame). Prompt
+                        # instructions alone were NOT enough (TES-036: the model still copied the frame), so
+                        # the reference is CROPPED to the classifier's jewellery box BEFORE it reaches the
+                        # image model — it never sees the UI at all. Prompt blocks stay as a second layer.
+                        _is_screenshot = bool(_cls.get("is_screenshot"))
+                        # DETERMINISTIC detector first (the vision flag is flaky — same image flipped
+                        # True/False across calls). If it yields a crop, the image model never sees the UI.
+                        _crop_bytes = None
+                        try:
+                            _crop_bytes = _detect_and_crop_screenshot(base64.b64decode(_mb64))
+                        except Exception as _de:
+                            logger.warning("screenshot pixel-detect failed for design_id=%s: %s", design_id, _de)
+                        if _crop_bytes is None and _is_screenshot:
+                            # Vision-box fallback (classifier says screenshot but pixel detector found no band).
+                            _box = _cls.get("subject_box") or {}
+                            try:
+                                from io import BytesIO as _BIO
+                                from PIL import Image as _PILImage
+                                _x0, _y0 = float(_box.get("x0", -1)), float(_box.get("y0", -1))
+                                _x1, _y1 = float(_box.get("x1", -1)), float(_box.get("y1", -1))
+                                if 0.0 <= _x0 < _x1 <= 1.0 and 0.0 <= _y0 < _y1 <= 1.0 and (_x1 - _x0) * (_y1 - _y0) >= 0.03:
+                                    _img = _PILImage.open(_BIO(base64.b64decode(_mb64))).convert("RGB")
+                                    _W, _H = _img.size
+                                    _l, _t = max(0, int((_x0 - 0.04) * _W)), max(0, int((_y0 - 0.04) * _H))
+                                    _r, _b = min(_W, int((_x1 + 0.04) * _W)), min(_H, int((_y1 + 0.04) * _H))
+                                    _crop_bytes = _center_on_square_canvas(_img.crop((_l, _t, _r, _b)))
+                            except Exception as _ce:
+                                logger.warning("screenshot vision-box crop failed for design_id=%s: %s", design_id, _ce)
+                        if _crop_bytes:
+                            _is_screenshot = True
+                            try:
+                                from app.services.storage_service import upload_image_to_supabase as _up
+                                _crop_url = _up(_crop_bytes, f"reference-images/user_{design.user_id}/screenshot_crop")
+                                reference_image_source = [_crop_url]
+                                logger.info("Screenshot reference CROPPED to content region -> %s for design_id=%s",
+                                            str(_crop_url)[:90], design_id)
+                            except Exception as _ue:
+                                logger.warning("screenshot crop upload failed for design_id=%s: %s — using original", design_id, _ue)
+                        elif _is_screenshot:
+                            logger.info("Classified reference as SCREENSHOT for design_id=%s — prompt-level strip only", design_id)
                         if _cls.get("is_jewelry"):
                             _dm = _cls.get("metal")
                             # classify's combined 2-question call is FLAKY on metal (TES-030: it said 'gold'
@@ -194,6 +317,8 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
             _pd = {"item_type": design.jewellery_type or ""}
             if _intent:
                 _pd["intent"], _pd["source_kind"] = _intent, _source_kind
+            if _is_screenshot:
+                _pd["is_screenshot"] = True
             generated_item = openai_service.generate_base_image(
                 image_source=reference_image_source,
                 user_prompt=gen_prompt,

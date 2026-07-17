@@ -109,11 +109,19 @@ class Settings(BaseSettings):
     GEMINI_IMAGE_MODEL_TEXT: str = ""
     # Output resolution for Gemini image gen ("1K" | "2K" | "4K"). Higher = better quality + more
     # tokens/time. Empty = model default. 2K = 2816x1536 (4x the default pixels).
-    GEMINI_IMAGE_SIZE: str = "2K"
+    # EMPTY to match Lovable like-for-like (its gateway call sends NO size => model default) — the 2K
+    # widescreen frame was a real generation difference vs the prototype's square-ish default renders.
+    # Put "2K" back here if the client prefers the higher-res output over exact Lovable parity.
+    GEMINI_IMAGE_SIZE: str = ""
     # Text / vision ANALYSIS calls (parse gate, OCR, metal detect, spelling, classify, enrich).
     # "gemini" -> GEMINI_TEXT_MODEL via its OpenAI-compatible endpoint; "openai" -> gpt-4o-mini.
     TEXT_LLM_PROVIDER: str = "gemini"
-    GEMINI_TEXT_MODEL: str = "gemini-3.1-pro-preview"
+    # FLASH, not pro-preview: these are simple vision reads (OCR / classify / metal / spelling), NOT
+    # reasoning tasks. The pro-preview is a THINKING model — it burns time reasoning before answering
+    # (~4s/call vs flash ~2.8s), and a create job fires 6-8 of these, so pro added ~40-60s per job for
+    # no accuracy gain on plain reads. Lovable uses gemini-2.5-flash for exactly these calls. (2026-07-16,
+    # for the 30-45s target.)
+    GEMINI_TEXT_MODEL: str = "gemini-2.5-flash"
     # Prompt FIDELITY: when False (default) the user's TEXT-ONLY prompt is sent VERBATIM to the image
     # model — never LLM-rewritten. Jewelry needs the client's exact words (named fonts like "Road Rage
     # Font", colours, "2 layer" etc.) preserved; the old enrich step paraphrased and dropped them.
