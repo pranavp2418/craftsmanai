@@ -11,8 +11,18 @@ as Lovable when those structured fields are empty. Edit the prototype, not parap
 
 from .lovable_prompts import LOVABLE_REFINE_PROMPT
 
-# Lovable's master, sliced verbatim (single source of truth; index verified: char 4264 == "REFINEMENT MODE.").
-LOVABLE_MASTER = LOVABLE_REFINE_PROMPT[:4264]
+# Lovable's master = everything in LOVABLE_REFINE_PROMPT BEFORE its "REFINEMENT MODE." section.
+# Split on that MARKER (not a hardcoded char count) so editing the master text can never silently
+# cut the wrong section — if the marker ever goes missing we fail loudly instead of shipping a
+# truncated/corrupted prompt. (Was a brittle `[:4264]` slice that broke on any master-text edit.)
+_MASTER_END_MARKER = "REFINEMENT MODE."
+_master_before, _master_marker, _ = LOVABLE_REFINE_PROMPT.partition(_MASTER_END_MARKER)
+if not _master_marker:
+    raise RuntimeError(
+        "LOVABLE_REFINE_PROMPT master marker 'REFINEMENT MODE.' not found — "
+        "refusing to build a corrupted create prompt."
+    )
+LOVABLE_MASTER = _master_before
 
 
 # (a) create WITH image — render_as_is (Lovable generate-render render_as_is block)
@@ -30,7 +40,7 @@ Item type: {item_type}
 Metal tone: {metal_phrase}
 {components}{stone_phrase}
 {user_request}
-Generate ONE CAD-styled approval render (preserve the reference image's camera angle unless the user explicitly asked for a new angle) that is a faithful CAD-styled reproduction of this {item_type}."""
+Generate ONE CAD-styled approval render (ALWAYS front-facing / straight-on, regardless of the angle the reference photo was taken from) that is a faithful CAD-styled reproduction of this {item_type}."""
 
 
 # (a') create WITH image — image_enhancement_only
@@ -47,7 +57,7 @@ ENHANCEMENT-ONLY RULES (mandatory):
 Item type: {item_type}
 Metal tone: {metal_phrase}
 {user_request}
-Generate ONE CAD-styled approval render (preserve the reference image's camera angle unless the user explicitly asked for a new angle) that is a faithful, sharper, production-ready CAD reproduction of this {item_type}."""
+Generate ONE CAD-styled approval render (ALWAYS front-facing / straight-on, regardless of the angle the reference photo was taken from) that is a faithful, sharper, production-ready CAD reproduction of this {item_type}."""
 
 
 # (b) create WITHOUT image — text_to_render
@@ -181,7 +191,8 @@ SYSTEM_PREAMBLE_INITIAL = (
 # "isolated or minimally distracting background" — so the model copied the whole reference photo, mannequin
 # and backdrop included. This restores parity with Lovable's render prompt.
 WHITE_BG_CONTRACT = (
-    "\n\nOUTPUT: Exactly ONE image. Front-facing hero angle. CAD-styled approval render on a PURE WHITE "
+    "\n\nOUTPUT: Exactly ONE image. FRONT-FACING hero angle (always render the piece straight-on / "
+    "front-facing regardless of the reference photo's angle). CAD-styled approval render on a PURE WHITE "
     "(#FFFFFF) seamless background. Centered piece, no environment, no cast shadow, no reflection plate, "
     "no gradient floor."
     "\n\nSTYLE: Clean CAD-styled jewelry approval render. Isolated piece on a PURE WHITE (#FFFFFF) seamless "
@@ -252,8 +263,9 @@ MANDATORY_PRESERVE_LIST = (
     "(prong / bezel / channel / pave / micro-pave); border / frame style (thickness, faceting, "
     "presence/absence); bail and clasp geometry; font / logo letter construction (stroke weight, serifs, "
     "joins); relief / depth hierarchy (which layer is raised, which is recessed); side details (engraving, "
-    "lettering, profile work); negative space (open windows, cutouts, gaps between letters); camera angle "
-    "(front-facing hero unless specifically requested); composition and centering."
+    "lettering, profile work); negative space (open windows, cutouts, gaps between letters); composition "
+    "and centering. NOTE: the camera angle is NOT preserved — always render the piece FRONT-FACING / "
+    "straight-on regardless of the reference photo's angle."
 )
 
 

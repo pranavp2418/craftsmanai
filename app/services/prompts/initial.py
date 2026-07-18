@@ -122,11 +122,10 @@ def build_initial_prompt(
 # IMAGE-INPUT branch — kept intentionally SHORT; user request is dominant.
 # ---------------------------------------------------------------------------
 def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, user_named_metal, intent="", source_kind="", is_screenshot=False) -> str:
-    keep_ref_angle = not svc._user_wants_front(user_prompt)
-    angle_phrase = (
-        "keeping the SAME camera angle as the reference image" if keep_ref_angle
-        else "in a straight FRONT-FACING view"
-    )
+    # Client policy: output is ALWAYS front-facing, whatever the input photo's angle and even with an
+    # empty prompt. (Other views are a separate multi-view feature, not this path.)
+    keep_ref_angle = False
+    angle_phrase = "in a straight FRONT-FACING view"
 
     # VARIATIONS request (e.g. "create 6 different variations in yellow gold"). The user wants MULTIPLE
     # DISTINCT designs based on the reference — NOT a 1:1 reproduction. This MUST override the reproduce-
@@ -304,9 +303,13 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
     else:
         stone_phrase = ""
 
-    # A screenshot's "camera angle" is the phone frame — never preserve it; always go front-hero there.
-    angle_line = ("Preserve the reference image's camera angle." if (keep_ref_angle and not is_screenshot)
-                  else "Front-facing, centered, on white/very light background.")
+    # SINGLE authoritative angle instruction — output is ALWAYS front-facing (client policy), whatever
+    # angle the reference photo was shot from and even with no prompt. The shared blocks reinforce this.
+    angle_line = (
+        "CAMERA ANGLE: render the piece FRONT-FACING and centered — no matter what angle the reference "
+        "photo was taken from (tilted, rotated, three-quarter, side, angled or skewed), rotate the "
+        "piece so it faces the camera perfectly straight-on. Front hero approval view."
+    )
 
     out = build_lovable_create(directive, angle_line=angle_line, authority_blocks=authority_blocks,
                                design_subject=design_subject, item_type=item_type,

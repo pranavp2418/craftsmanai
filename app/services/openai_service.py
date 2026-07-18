@@ -4045,9 +4045,11 @@ def _legacy_build_concise_initial_prompt(user_prompt: str, parsed_data: Optional
     # Two-step / two-layer stacked structure when the user asks for it.
     layered_block = f"\n\n{LAYERED_RULE}" if _user_wants_layered(user_prompt) else ""
 
-    # Camera angle — client-confirmed: for IMAGE inputs keep the reference angle; only force a
-    # straight front view when the user explicitly asks (text-only always defaults to front).
-    keep_ref_angle = has_images and not _user_wants_front(user_prompt)
+    # Camera angle — client-confirmed (2026-07): EVERY output is ALWAYS FRONT-FACING, no matter what
+    # angle the input photo was shot from and regardless of the prompt (even an empty prompt). The
+    # piece is rotated to face the camera straight-on. (Side/back/other views are a SEPARATE feature
+    # via the multi-view angle buttons, not this main render path.)
+    keep_ref_angle = False
     angle_rule = PRESERVE_ANGLE_RULE if keep_ref_angle else FRONT_FACING_RULE
     angle_phrase = "keeping the SAME camera angle as the reference image" if keep_ref_angle else "shown in a straight FRONT-FACING view"
     centering_phrase = "Centered" if keep_ref_angle else "Front-facing, upright, and centered"
@@ -4333,10 +4335,10 @@ def _legacy_build_concise_refine_prompt(user_prompt: str, refinement_intent: Opt
         elif attempt >= 3:
             intensity = " This is the final attempt — the change MUST be clearly visible."
 
-    # Camera angle — a refine always operates on a prior render, so KEEP that image's angle
-    # unless the user explicitly asks for a front view.
-    refine_angle_rule = FRONT_FACING_RULE if _user_wants_front(user_prompt) else PRESERVE_ANGLE_RULE
-    refine_centering = "Front-facing, upright, and centered." if _user_wants_front(user_prompt) else "Keep the reference's camera angle; centered."
+    # Camera angle — every output is ALWAYS front-facing (client policy), and the prior render is
+    # front-facing too, so a refine always keeps a straight front view.
+    refine_angle_rule = FRONT_FACING_RULE
+    refine_centering = "Front-facing, upright, and centered."
 
     # Metal-colour lock — refines drift the metal (e.g. rose gold -> yellow gold) even when the
     # user only asked for a stone/shape change. Naming the DETECTED metal explicitly holds it far

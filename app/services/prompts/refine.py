@@ -150,9 +150,10 @@ def build_refine_prompt(
     _metal_named = svc._detected_metal_phrase(user_prompt)
     metal_convert = metal_conversion_clause(_metal_named) if (_metal_named and svc._user_wants_metal_change(user_prompt)) else ""
 
-    wants_front = svc._user_wants_front(user_prompt)
-    angle_rule = svc.FRONT_FACING_RULE if wants_front else svc.PRESERVE_ANGLE_RULE
-    centering = "Front-facing, upright, and centered." if wants_front else "Keep the reference's camera angle; centered."
+    # Client policy: output is ALWAYS front-facing. The prior render is front-facing too, so a refine
+    # keeps a straight front view.
+    angle_rule = svc.FRONT_FACING_RULE
+    centering = "Front-facing, upright, and centered."
     layered_block = f"\n\n{svc.LAYERED_RULE}" if svc._user_wants_layered(user_prompt) else ""
 
     # MULTI-IMAGE refine (combine / component swap): the user attached an EXTRA image showing a component
