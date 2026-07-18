@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Push Notification Test</title>
+    <style>
+        * { font-family: Arial, sans-serif; }
+        body { max-width: 800px; margin: 0 auto; padding: 20px; }
+        h1 { color: #333; }
+        .step { background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 10px 0; }
+        .step-num { font-weight: bold; color: #0066cc; }
+        input { width: 100%; padding: 8px; margin: 5px 0 10px; box-sizing: border-box; }
+        button { padding: 10px 20px; margin: 5px 0; cursor: pointer; border: none; border-radius: 5px; font-size: 14px; font-weight: bold; background: #0066cc; color: white; }
+        button.danger { background: #dc3545; }
+        button.success { background: #28a745; }
+        .ok { padding: 10px; margin: 10px 0; background: #d4edda; color: #155724; border-radius: 5px; white-space: pre-wrap; word-break: break-all; }
+        .err { padding: 10px; margin: 10px 0; background: #f8d7da; color: #721c24; border-radius: 5px; white-space: pre-wrap; }
+        .warn { padding: 10px; margin: 10px 0; background: #fff3cd; color: #856404; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Push Notification Test</h1>
+    <div id="originWarn" class="warn" style="display:none;">
+        You opened this as a file! Use: <a href="http://localhost:8000/static/push-test.html">http://localhost:8000/static/push-test.html</a>
+    </div>
+    <div class="step">
+        <span class="step-num">Step 1:</span> Backend URL & Auth Token<br>
+        <label>Backend URL:</label>
+        <input type="text" id="baseUrl" value="http://localhost:8000"><br>
+        <label>Auth Token:</label>
+        <input type="text" id="token" placeholder="Paste JWT access token here">
+    </div>
+    <div class="step">
+        <span class="step-num">Step 2:</span> Register Service Worker & Enable Notifications<br>
+        <button onclick="doRegSW()">Register Service Worker</button>
+        <button class="danger" onclick="forceUnregister()">Force Unregister All SW</button>
+        <div id="r1"></div>
+    </div>
+    <div class="step">
+        <span class="step-num">Step 3:</span> Subscribe to Push<br>
+        <button onclick="doSubscribe()">Subscribe to Push</button>
+        <div id="r2"></div>
+    </div>
+    <div class="step">
+        <span class="step-num">Step 4:</span> Register with Backend<br>
+        <button onclick="doRegister()">Register with Backend</button>
+        <div id="r3"></div>
+    </div>
+    <div class="step">
+        <span class="step-num">Step 5:</span> Send Test Push<br>
+        <button onclick="doSend()">Send 1 Test Push</button>
+        <button class="success" onclick="sendMultiple()">Send 3 Rapid Test</button>
+        <div id="r4"></div>
+    </div>
+    <div class="step">
+        <span class="step-num">Get VAPID Key:</span><br>
+        <button onclick="doGetKey()">Get VAPID Key</button>
+        <div id="r5"></div>
+    </div>
+    <script>
+    var subData = null;
+    var swReg = null;
+    if (window.location.protocol === 'file:') {
+        document.getElementById('originWarn').style.display = 'block';
+    }
+    function ok(id, msg) { document.getElementById(id).innerHTML = '<div class="ok">' + msg + '</div>'; }
+    function err(id, msg) { document.getElementById(id).innerHTML = '<div class="err">' + msg + '</div>'; }
+    function b64urlToUint8Array(b64) {
+        var p = '='.repeat((4 - b64.length % 4) % 4);
+        var b = (b64 + p).replace(/-/g, '+').replace(/_/g, '/');
+        var raw = atob(b);
+        var arr = new Uint8Array(raw.length);
+        for (var i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+        return arr;
+    }
+    function doGetKey() {
+        fetch(document.getElementById('baseUrl').value + '/api/v2/push-subscriptions/vapid-public-key')
+            .then(function(r) { return r.json(); })
+            .then(function(d) { ok('r5', JSON.stringify(d, null, 2)); })
+            .catch(function(e) { err('r5', 'Error: ' + e.message); });
+    }
+    function forceUnregister() {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+            for (var i = 0; i < registrations.length; i++) {
+                registrations[i].unregister();
+            }
+            ok('r1', 'Unregistered ' + registrations.length + ' service worker(s). Now refresh the page and click Step 2 again.');
+        }).catch(function(e) {
+            err('r1', 'Error: ' + e.message);
+        });
+    }
+    function doRegSW() {
+        if (!('serviceWorker' in navigator)) { err('r1', 'Service Worker not supported'); return; }
+        // Step 0: Check notification permission
+        if (!("Notification" in window)) { err('r1', 'Notification API not supported'); return; }
+        if (Notification.permission === 'denied') {
+            err('r1', 'Notifications are BLOCKED. Go to Chrome Settings > Privacy > Site Settings > Notifications > Allow localhost and refresh.');
+            return;
+        }
+        if (Notification.permission === 'default' || Notification.permission === 'granted') {
+            Notification.requestPermission().then(function(permission) {
+                if (permission === 'granted') {
+                    // Now register the service worker
+                    _doRegisterSW();
+                } else {
+                    err('r1', 'You clicked BLOCK. Please allow notifications, then refresh and try again.');
+                }
+            });
+        } else {
+            _doRegisterSW();
+        }
+    }
+    function _doRegisterSW() {
+        // Unregister all existing SW first
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+            var promises = [];
+            for (var i = 0; i < registrations.length; i++) {
+                promises.push(registrations[i].unregister());
+            }
+            return Promise.all(promises);
+        }).then(function() {
+            // Register WITHOUT cache-busting params (critical for push to work)
+            return navigator.serviceWorker.register('/static/sw.js', {scope: '/static/'});
+        }).then(function(r) {
+            swReg = r;
+            ok('r1', '✓ Service Worker registered!<br>' +
+                'Scope: ' + r.scope + '<br>' +
+                'Active: ' + (r.active ? 'YES - ' + r.active.state : 'NO') + '<br><br>' +
+                'Now go to Step 3 and click Subscribe to Push.');
+        }).catch(function(e) {
+            err('r1', 'Error: ' + e.message);
+        });
+    }
+    function doSubscribe() {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+            err('r2', 'Push not supported'); return;
+        }
+        var url = document.getElementById('baseUrl').value + '/api/v2/push-subscriptions/vapid-public-key';
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var pk = data.public_key;
+                if (!pk) { err('r2', 'No public_key in response: ' + JSON.stringify(data)); return; }
+                var reg = swReg || navigator.serviceWorker.controller;
+                if (!reg) { err('r2', 'Service Worker not registered yet. Click Step 2 first.'); return; }
+                return reg.pushManager.getSubscription().then(function(existingSub) {
+                    if (existingSub) {
+                        return existingSub.unsubscribe().then(function() {
+                            return reg.pushManager.subscribe({
+                                userVisibleOnly: true,
+                                applicationServerKey: b64urlToUint8Array(pk)
+                            });
+                        });
+                    }
+                    return reg.pushManager.subscribe({
+                        userVisibleOnly: true,
+                        applicationServerKey: b64urlToUint8Array(pk)
+                    });
+                });
+            })
+            .then(function(sub) {
+                if (!sub) return;
+                subData = sub.toJSON();
+                ok('r2', '✓ Subscribed!<br>Endpoint: ' + subData.endpoint.substring(0, 80) + '...<br>Now go to Step 4.');
+            })
+            .catch(function(e) { err('r2', 'Error: ' + e.message + '\n' + e.stack); });
+    }
+    function doRegister() {
+        if (!subData) { err('r3', 'Subscribe to push first (Step 3)'); return; }
+        var payload = {
+            endpoint: subData.endpoint,
+            p256dh: subData.keys.p256dh,
+            auth: subData.keys.auth,
+            device_type: 'chrome'
+        };
+        var opts = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + document.getElementById('token').value },
+            body: JSON.stringify(payload)
+        };
+        fetch(document.getElementById('baseUrl').value + '/api/v2/push-subscriptions/', opts)
+            .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, d: d}; }); })
+            .then(function(res) {
+                if (res.ok) ok('r3', '✓ Registered! ID: ' + res.d.id + '<br>Now go to Step 5 and click Send Test Push.');
+                else err('r3', 'Error: ' + JSON.stringify(res.d));
+            })
+            .catch(function(e) { err('r3', 'Error: ' + e.message); });
+    }
+    function doSend() {
+        var ts = Date.now();
+        var time = new Date().toLocaleTimeString();
+        var opts = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + document.getElementById('token').value },
+            body: JSON.stringify({ title: 'Test #' + ts, body: 'Sent at ' + time, url: '/designs/1' })
+        };
+        fetch(document.getElementById('baseUrl').value + '/api/v2/push-subscriptions/test-send', opts)
+            .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, d: d}; }); })
+            .then(function(res) {
+                if (res.ok) ok('r4', '✓ Sent! ' + JSON.stringify(res.d) + '<br>Check if notification appeared.');
+                else err('r4', 'Error: ' + JSON.stringify(res.d));
+            })
+            .catch(function(e) { err('r4', 'Error: ' + e.message); });
+    }
+    function sendMultiple() {
+        // Send 3 rapid push notifications with different titles
+        var promises = [];
+        for (var i = 1; i <= 3; i++) {
+            var ts = Date.now() + i;
+            var time = new Date().toLocaleTimeString();
+            promises.push(
+                fetch(document.getElementById('baseUrl').value + '/api/v2/push-subscriptions/test-send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + document.getElementById('token').value },
+                    body: JSON.stringify({ title: 'Rapid Test #' + i + ' (' + ts + ')', body: 'Sent at ' + time + ' - Notification #' + i, url: '/designs/1' })
+                }).then(function(r) { return r.json(); })
+            );
+        }
+        Promise.all(promises).then(function(results) {
+            ok('r4', '✓ Sent 3 notifications! Results: ' + JSON.stringify(results) + '<br>Check if 3 SEPARATE notifications appeared in Windows notification center.');
+        }).catch(function(e) {
+            err('r4', 'Error: ' + e.message);
+        });
+    }
+    </script>
+</body>
+</html>
