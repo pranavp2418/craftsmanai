@@ -1,0 +1,12 @@
+# Root-level tooling and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# Deployment secrets and state
+deploy/*.env
+deploy/backups/
+
+# Source-package ignores live in frontend/.gitignore and backend/.gitignore.
