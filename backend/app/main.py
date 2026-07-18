@@ -30,6 +30,9 @@ from .core.sse_manager import sse_manager
 # ---------------------------------------------------------------------------
 from .core import websocket_events  # noqa: F401
 
+# Ensure a fresh checkout can start before the log directory exists.
+Path(settings.LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
+
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper()),
