@@ -5039,39 +5039,13 @@ def generate_with_fallback(
             except Exception as _fe:
                 logger.warning("[reletter-fallback] failed: %s — keeping the image-anchored render", _fe)
 
-    # DESIGN-CHANGE REBUILD FALLBACK — mirrors the reletter fallback but for STRUCTURAL design edits
-    # (add/remove stones, change a count/pattern, ice a surface). The image-edit model reproduces the
-    # reference and REFUSES these — every retry ships the same no-op (TES-051: "2 round diamonds between
-    # each emerald" was phash≈2-4 on all 3 attempts). Only fires when the final render is STILL a
-    # near-identical no-op of the reference, so a change that DID apply is never touched. A TEXT-ONLY
-    # rebuild from a description + the change CAN apply it (not anchored to the old arrangement); the cost
-    # is slight design drift, so we keep it ONLY if it actually differs from the reference (change landed).
-    if (final_b64 and needs_initial_edit_guard and not needs_spelling_check and input_b64
-            and not _user_wants_variations(user_prompt)
-            and _images_near_identical(input_b64, final_b64, max_distance=6)):
-        logger.warning("[design-rebuild] design change did NOT apply (output ~identical to reference) — "
-                       "rebuilding TEXT-ONLY from a described design with the change")
-        try:
-            _ddesc = _describe_reference_for_edit(input_b64)
-            if _ddesc:
-                _dchange = (original_request or user_prompt or "").strip()[:300]
-                _dmetal = (metal_tone or "yellow gold").replace("_", " ")
-                _dr_prompt = _build_concise_initial_prompt(
-                    f"{_ddesc}\n\nRebuild this EXACT piece in {_dmetal} — keep every design detail (gemstone "
-                    "types, cuts, colours, sizes, metal, setting and structure) the SAME — BUT apply this ONE "
-                    f"change and make it clearly visible: {_dchange}. If the change is about the NUMBER or "
-                    "arrangement of stones, the rebuild MUST show the new count/arrangement in EVERY repeating "
-                    "section (do not reproduce the old count).",
-                    parsed_data, metal_tone, False, 0)
-                _dr64 = generate_primary_image([], _dr_prompt, model=_img_model)
-                # Keep it ONLY if the change actually landed (output now differs from the reference).
-                if _dr64 and not _images_near_identical(input_b64, _dr64, max_distance=6):
-                    final_b64 = _dr64
-                    logger.info("[design-rebuild] text-only rebuild ACCEPTED (change applied)")
-                else:
-                    logger.warning("[design-rebuild] rebuild still ~identical — keeping the image-anchored render")
-        except Exception as _de:
-            logger.warning("[design-rebuild] failed: %s — keeping the image-anchored render", _de)
+    # NOTE: a "design-rebuild" fallback (text-only rebuild when the output looked near-identical to the
+    # reference) was REMOVED on 2026-07-18. It over-fired on legitimate SUBTLE edits — "make setting mosaic,
+    # big & small stones mix" (TES-062) applied correctly and passed edit_qa (applied+preserved), but its
+    # output was naturally near-identical (phash=0), so the phash gate wrongly declared "no change" and a
+    # text-only rebuild REPLACED the good render with a drifted one. The image-anchored attempts + edit_qa
+    # already verify the change; the model simply can't force some hard STRUCTURAL edits, and a lossy
+    # full rebuild is worse than an honest "change not fully applied".
 
     if not final_b64:
         raise ValueError("No image generated from OpenAI gpt-image-2")
