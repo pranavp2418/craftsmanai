@@ -454,7 +454,7 @@ def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone,
                 "- No usable jewelry reference governs structure.\n"
                 "- Use the note as the primary authority." + (_norm or ""))
     out = build_lovable_create(TEXT_TO_RENDER,
-                               angle_line="Front-facing, centered, on white/very light background.",
+                               angle_line="Front-facing, centered, on a pure solid white (#FFFFFF) background.",
                                authority_blocks=_tx_auth,
                                item_type=item_type, metal_phrase=mp, stone_phrase=stone_phrase,
                                user_request=body)

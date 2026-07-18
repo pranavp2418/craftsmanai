@@ -294,7 +294,7 @@ def build_lovable_create(directive: str, angle_line: str = "", authority_blocks:
     else:  # directive without the standard closing line — append the rules at the end
         body = body + "\n" + shared_rules
     preamble = SYSTEM_PREAMBLE_INITIAL.replace(
-        "{angle_line}", angle_line or "Front-facing, centered, on white/very light background.")
+        "{angle_line}", angle_line or "Front-facing, centered, on a pure solid white (#FFFFFF) background.")
     out = LOVABLE_MASTER.rstrip("\n") + "\n\n" + preamble + "\n\n" + body
     for k in _FIELDS:
         out = out.replace("{" + k + "}", str(fields.get(k, "") or ""))
