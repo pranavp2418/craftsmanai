@@ -1,0 +1,193 @@
+from __future__ import annotations
+
+from enum import Enum
+from typing import Optional
+from datetime import datetime
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Enum as SqlEnum,
+    Float,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
+from app.core.database import Base
+from app.core.timezone import CST_TZ
+
+
+class DesignStatus(str, Enum):
+    DRAFT = "DRAFT"
+    GENERATING = "GENERATING"
+    GENERATED = "GENERATED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    SHARED = "SHARED"
+    QUOTES_REQUESTED = "QUOTES_REQUESTED"
+    QUOTE_RECEIVED = "QUOTE_RECEIVED"
+    REFINEMENT_REQUESTED = "REFINEMENT_REQUESTED"
+    APPROVED = "APPROVED"
+    DESIGN_REJECTED = "DESIGN_REJECTED"
+    MANUFACTURER_APPROVED = "MANUFACTURER_APPROVED"
+    REJECTED = "REJECTED"
+    IN_PRODUCTION = "IN_PRODUCTION"
+    COMPLETED = "COMPLETED"
+    SENT_TO_MANUFACTURER = "SENT_TO_MANUFACTURER"
+
+
+class Design(Base):
+    __tablename__ = "designs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "sequence_number", name="uq_design_user_sequence"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True, doc="The actual creator (team member) if different from user_id (team owner)")
+    design_code = Column(String(32), nullable=False, index=True)
+    sequence_number = Column(Integer, nullable=False)
+    name = Column(String(255), nullable=True)
+    jewellery_type = Column(String(100), nullable=True)
+    user_prompt = Column(Text, nullable=True)
+    input_image_url = Column(String(500), nullable=True)
+    input_image_urls = Column(JSON, nullable=True)
+    status = Column(SqlEnum(DesignStatus, native_enum=False, length=32), nullable=False, default=DesignStatus.DRAFT)
+    is_archived = Column(Boolean, nullable=False, default=False)
+    is_deleted = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), onupdate=lambda: datetime.now(CST_TZ))
+
+    variants = relationship("DesignVariant", back_populates="design", cascade="all, delete-orphan")
+    activity_logs = relationship("DesignActivityLog", back_populates="design", cascade="all, delete-orphan")
+    orders = relationship("Order", back_populates="design")
+
+
+class   DesignVariant(Base):
+    __tablename__ = "design_variants"
+    __table_args__ = (
+        UniqueConstraint("design_id", "version_number", name="uq_variant_design_version"),
+        UniqueConstraint("design_id", "variant_name", name="uq_variant_design_name"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    design_id = Column(Integer, ForeignKey("designs.id"), nullable=False, index=True)
+    parent_variant_id = Column(Integer, ForeignKey("design_variants.id"), nullable=True)
+    variant_name = Column(String(255), nullable=False)
+    version_number = Column(Integer, nullable=False, default=0)
+    base_design_image_url = Column(String(500), nullable=True)
+    angles_json = Column(JSON, nullable=True)
+    metal_variations_json = Column(JSON, nullable=True)
+    prompt_used = Column(Text, nullable=True)
+    model_used = Column(String(255), nullable=True)
+    is_selected = Column(Boolean, default=False, nullable=False)
+    is_archived = Column(Boolean, nullable=False, default=False)
+    is_deleted = Column(Boolean, nullable=False, default=False)
+    design_focus = Column(String(100), nullable=True)
+    style_tags = Column(String(255), nullable=True)
+    reference_images_json = Column(JSON, nullable=True, doc="List of reference image URLs used as input for refinement")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), nullable=False)
+
+    design = relationship("Design", back_populates="variants")
+    parent_variant = relationship("DesignVariant", remote_side=[id], backref="child_variants")
+    shares = relationship("DesignShare", back_populates="design_variant", cascade="all, delete-orphan")
+    manufacturer_shares = relationship("DesignVariantManufacturerShare", back_populates="design_variant", cascade="all, delete-orphan")
+
+
+class DesignShareStatus(str, Enum):
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+    NEEDS_REFINEMENT = "NEEDS_REFINEMENT"
+    Customer_Approved = "CUSTOMER_APPROVED"
+    Quoted = "QUOTED"
+
+
+class DesignShare(Base):
+    __tablename__ = "design_shares"
+
+    id = Column(Integer, primary_key=True, index=True)
+    design_variant_id = Column(Integer, ForeignKey("design_variants.id"), nullable=False, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True, index=True)
+    public_token = Column(String(64), unique=True, nullable=False, index=True)
+    status = Column(SqlEnum(DesignShareStatus, native_enum=False, length=32), nullable=False, default=DesignShareStatus.PENDING)
+    comment = Column(Text, nullable=True)
+    # The specific metal shared with the customer (e.g. "gold", "rose_gold", "silver")
+    # When set, further manufacturer shares of this variant will use the same metal.
+    shared_metal = Column(String(50), nullable=True, index=True)
+    shared_angles = Column(JSON, nullable=True)
+    allow_feedback = Column(Boolean, nullable=False, default=True)
+    allow_review_request = Column(Boolean, nullable=False, default=True)
+    require_approval = Column(Boolean, nullable=False, default=False)
+    
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), nullable=False)
+
+    design_variant = relationship("DesignVariant", back_populates="shares")
+    customer = relationship("Customer", back_populates="design_shares")
+    order = relationship("Order", back_populates="share", uselist=False)
+
+
+class ManufacturerShareStatus(str, Enum):
+    PENDING = "PENDING"
+    QUOTED = "QUOTED"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+
+
+class DesignVariantManufacturerShare(Base):
+    """Links an approved design variant to a manufacturer for quoting."""
+
+    __tablename__ = "design_variant_manufacturer_shares"
+
+    id = Column(Integer, primary_key=True, index=True)
+    design_variant_id = Column(Integer, ForeignKey("design_variants.id"), nullable=False, index=True)
+    manufacturer_id = Column(Integer, ForeignKey("manufacturers.id"), nullable=False, index=True)
+    public_token = Column(String(64), unique=True, nullable=False, index=True)
+    status = Column(SqlEnum(ManufacturerShareStatus, native_enum=False, length=32), nullable=False, default=ManufacturerShareStatus.PENDING)
+    cost_price = Column(Float, nullable=True)
+    delivery_time_days = Column(Integer, nullable=True)
+    notes = Column(Text, nullable=True)
+    # The specific metal shared with the manufacturer (e.g. "gold", "rose_gold", "silver")
+    # When set, the manufacturer view will only show images for this metal.
+    shared_metal = Column(String(50), nullable=True, index=True)
+    shared_angles = Column(JSON, nullable=True)
+    # The primary email address used for this share (first email from the emails array)
+    sent_to_email = Column(String(255), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(CST_TZ), nullable=False)
+
+    design_variant = relationship("DesignVariant", back_populates="manufacturer_shares")
+    manufacturer = relationship("Manufacturer", back_populates="variant_shares")
+
+
+class DesignActivityLog(Base):
+    __tablename__ = "design_activity_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    design_id = Column(Integer, ForeignKey("designs.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    action_type = Column(String(64), nullable=False)
+    message = Column(String(500), nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    design = relationship("Design", back_populates="activity_logs")
+    user = relationship("User")
+
+
+__all__ = [
+    "Design",
+    "DesignVariant",
+    "DesignShare",
+    "DesignVariantManufacturerShare",
+    "DesignActivityLog",
+    "DesignStatus",
+    "DesignShareStatus",
+    "ManufacturerShareStatus",
+]

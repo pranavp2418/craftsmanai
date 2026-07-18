@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plan Upgraded</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0b0c10; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #ffffff;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #0b0c10; padding: 40px 20px;">
+        <tr>
+            <td align="center">
+                <!-- Main Card -->
+                <table role="presentation" width="100%" max-width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #15161e; border-radius: 12px; border-top: 2px solid #8b5cf6; max-width: 500px; width: 100%; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                    <tr>
+                        <td align="center" style="padding: 40px 30px;">
+                            <!-- Logo Inside Card -->
+                            <img src="https://craftsmanai.app/dark%20mode%20logo.png" alt="CraftsmanAI Logo" width="150" style="display: block; max-width: 150px; height: auto; margin-bottom: 30px;">
+
+                            <!-- Icon -->
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-bottom: 20px;">
+                                <tr>
+                                    <td align="center" valign="middle" style="width: 48px; height: 48px; border-radius: 50%; border: 2px solid #8b5cf6;">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: block; margin: 0 auto;"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Title -->
+                            <h1 style="margin: 0 0 10px 0; font-size: 22px; font-weight: 600; color: #ffffff;">Plan upgraded</h1>
+                            
+                            <!-- Subtitle -->
+                            <p style="margin: 0 0 10px 0; font-size: 14px; color: #9ca3af;">Your plan has been upgraded successfully.</p>
+
+                            <p style="margin: 0 0 30px 0; font-size: 14px; color: #d1d5db; line-height: 1.6;">Hi {{user_name}}, your CraftsmanAI plan has been upgraded to {{new_plan}}. Your new plan access is now active, and any prorated charge will appear on your billing details.</p>
+
+                            <!-- Details Table -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-bottom: 30px;">
+                                <tr>
+                                    <td style="padding: 12px 0; border-bottom: 1px solid #2a2b3d; font-size: 14px; color: #9ca3af;">New plan</td>
+                                    <td align="right" style="padding: 12px 0; border-bottom: 1px solid #2a2b3d; font-size: 14px; color: #ffffff; font-weight: 500;">{{new_plan}}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 12px 0; border-bottom: 1px solid #2a2b3d; font-size: 14px; color: #9ca3af;">Prorated charge</td>
+                                    <td align="right" style="padding: 12px 0; border-bottom: 1px solid #2a2b3d; font-size: 14px; color: #ffffff; font-weight: 500;">{{amount}}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 12px 0; border-bottom: 1px solid #2a2b3d; font-size: 14px; color: #9ca3af;">Next invoice</td>
+                                    <td align="right" style="padding: 12px 0; border-bottom: 1px solid #2a2b3d; font-size: 14px; color: #ffffff; font-weight: 500;">{{next_invoice_date}}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 12px 0; font-size: 14px; color: #9ca3af;">Status</td>
+                                    <td align="right" style="padding: 12px 0; font-size: 14px; color: #8b5cf6; font-weight: 600;">Updated</td>
+                                </tr>
+                            </table>
+
+                            <!-- Button -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td align="center">
+                                        <a href="{{plan_url}}" style="display: inline-block; width: 100%; padding: 14px 0; background-color: #d946ef; background-image: linear-gradient(to right, #8b5cf6, #d946ef); border-radius: 25px; color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 600; text-align: center;">View Plan</a>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Footer Inside Card -->
+                            <div style="margin-top: 40px; font-size: 12px; color: #6b7280; border-top: 1px solid #2a2b3d; padding-top: 20px;">
+                                &copy; 2026 CraftsmanAI. All rights reserved. &bull; <a href="mailto:support@craftsmanai.app" style="color: #3b82f6; text-decoration: none;">support@craftsmanai.app</a>
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

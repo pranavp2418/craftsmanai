@@ -1,0 +1,564 @@
+/* Craftsman AI Email/SMS Template — Responsive Styles */
+/* Design tokens & resets */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #06060c;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #f4f4f5;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow-x: hidden;
+}
+
+/* Page container that centers the phone */
+.preview-page {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 40px 20px;
+  background: radial-gradient(circle at top left, #0e0e26 0%, #050508 100%);
+}
+
+.phone-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  max-width: 420px;
+}
+
+/* Realistic iPhone Bezel */
+.phone-frame {
+  width: 100%;
+  max-width: 390px; /* Standard iPhone 14/15/16 width */
+  aspect-ratio: 9 / 19.5; /* iPhone aspect ratio */
+  background-color: #1c1c1e;
+  border-radius: 50px;
+  padding: 12px; /* Thick bezel outer */
+  box-shadow: 
+    0px 25px 50px -12px rgba(0, 0, 0, 0.7),
+    0px 0px 0px 4px #2c2c2e, /* Bezel ring */
+    0px 0px 0px 8px #09090b; /* Outer phone body */
+  position: relative;
+  overflow: visible;
+}
+
+.phone-bezel {
+  width: 100%;
+  height: 100%;
+  border-radius: 38px;
+  overflow: hidden;
+  background-color: #000;
+  position: relative;
+  box-shadow: inset 0 0 4px rgba(0, 0, 0, 0.8);
+}
+
+.phone-screen {
+  width: 100%;
+  height: 100%;
+  background-color: #0c0c0e; /* Deep black screen color */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding-top: 48px; /* For status bar */
+  padding-bottom: 24px; /* For home indicator */
+}
+
+/* Dynamic Island */
+.dynamic-island {
+  position: absolute;
+  top: 11px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 110px;
+  height: 30px;
+  background-color: #000000;
+  border-radius: 20px;
+  z-index: 1000;
+  box-shadow: inset 0 0 1px 1px rgba(255,255,255,0.05);
+}
+
+/* Status Bar */
+.status-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 24px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+  z-index: 999;
+  user-select: none;
+}
+
+.status-time {
+  letter-spacing: -0.1px;
+  font-family: inherit;
+}
+
+.status-icons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-lte {
+  font-size: 11px;
+  font-weight: 700;
+  margin-right: 2px;
+}
+
+.battery-container {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.battery-percent {
+  position: absolute;
+  font-size: 8px;
+  font-weight: 700;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #000;
+  z-index: 2;
+}
+
+.icon-battery {
+  color: #ffffff;
+  display: block;
+}
+
+.icon-signal {
+  color: #ffffff;
+}
+
+/* Chat Header */
+.chat-header {
+  height: 52px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 16px;
+  background-color: #0f0f12;
+}
+
+.chat-header-left {
+  display: flex;
+  align-items: center;
+}
+
+.btn-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-right: 12px;
+  color: #0a84ff;
+  transition: opacity 0.2s;
+}
+
+.btn-back:hover {
+  opacity: 0.7;
+}
+
+.chat-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #2a2a40 0%, #151525 100%);
+  border: 1px solid rgba(255,255,255,0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.chat-avatar img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.chat-sender {
+  padding-left: 10px;
+}
+
+.sender-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.2;
+}
+
+.sender-label {
+  font-size: 10px;
+  color: #8e8e93;
+  margin-top: 1px;
+}
+
+.chat-header-right {
+  display: flex;
+  align-items: center;
+}
+
+.btn-video {
+  color: #0a84ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  transition: opacity 0.2s;
+}
+
+.btn-video:hover {
+  opacity: 0.7;
+}
+
+/* Chat Content Area */
+.chat-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  scrollbar-width: none; /* Hide scrollbars */
+}
+
+.chat-content::-webkit-scrollbar {
+  display: none;
+}
+
+/* SMS Bubble styling */
+.sms-bubble-wrapper {
+  max-width: 85%;
+  align-self: flex-start;
+}
+
+.sms-bubble {
+  background-color: #262629; /* Dark gray iOS SMS bubble */
+  border-radius: 18px;
+  padding: 12px 16px;
+  position: relative;
+}
+
+.sms-text {
+  font-size: 14px;
+  line-height: 1.45;
+  color: #ffffff;
+  word-break: break-word;
+}
+
+.sms-link {
+  color: #2f80ed;
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.sms-optout {
+  font-size: 10px;
+  color: #8e8e93;
+  margin-top: 6px;
+  margin-left: 12px;
+}
+
+/* Rich Preview Card */
+.rich-preview-card {
+  width: 100%;
+  background-color: #1c1c1e;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.rich-preview-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* Card Brand Header */
+.card-header {
+  background-color: #0b0b0b;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-monogram {
+  position: relative;
+  width: 32px;
+  height: 40px;
+  user-select: none;
+}
+
+.logo-monogram .j-left {
+  font-family: 'Cinzel', serif;
+  font-size: 34px;
+  font-weight: 400;
+  color: #dfba89; /* Pale Gold */
+  position: absolute;
+  left: 0;
+  top: -4px;
+  line-height: 1;
+}
+
+.logo-monogram .j-right {
+  font-family: 'Cinzel', serif;
+  font-size: 22px;
+  font-weight: 400;
+  color: #c5a880; /* Muted Gold */
+  position: absolute;
+  left: 11px;
+  top: 10px;
+  line-height: 1;
+  opacity: 0.75;
+}
+
+.logo-monogram .pearl {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0%, #e5e5e5 100%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  left: 7px;
+  top: -1px;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.brand-title {
+  font-family: 'Cinzel', serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #dfba89; /* Gold */
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+/* Card Image Box */
+.card-image-box {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background-color: #ffffff; /* Contrast white for the render */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.card-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Card Metadata */
+.card-meta {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #18181b 0%, #0f0f12 100%);
+}
+
+.badge-row {
+  margin-bottom: 8px;
+}
+
+.badge-approval {
+  display: inline-block;
+  padding: 4px 10px;
+  font-size: 9px;
+  font-weight: 800;
+  color: #bfdbfe;
+  background-color: rgba(99, 102, 241, 0.2);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 20px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+
+.card-description {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #a1a1aa;
+  margin-bottom: 16px;
+}
+
+/* Gradient Action Button */
+.card-action {
+  width: 100%;
+}
+
+.btn-action {
+  display: block;
+  width: 100%;
+  padding: 12px 24px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #c7d2fe;
+  text-decoration: none;
+  background: rgba(99, 102, 241, 0.2);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 25px;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.1);
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-action:hover {
+  background: rgba(99, 102, 241, 0.35);
+  border-color: rgba(99, 102, 241, 0.6);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.2);
+}
+
+.btn-action:active {
+  transform: translateY(0);
+}
+
+/* Card Footer (Contact info) */
+.card-footer {
+  background-color: #0b0b0d;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  padding: 10px 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.footer-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  color: #71717a;
+  white-space: nowrap;
+}
+
+.footer-item svg {
+  color: #52525b;
+  flex-shrink: 0;
+}
+
+.footer-item span {
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.footer-sep {
+  font-size: 9px;
+  color: #3f3f46;
+}
+
+/* Powered By Branding below */
+.powered-by {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: auto;
+  padding: 10px 0;
+  font-size: 10px;
+  color: #52525b;
+}
+
+.powered-logo {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  mix-blend-mode: lighten;
+}
+
+.powered-name {
+  font-weight: 600;
+  color: #71717a;
+}
+
+/* iOS Home Swipe Indicator */
+.home-indicator {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 135px;
+  height: 5px;
+  background-color: #ffffff;
+  border-radius: 10px;
+  z-index: 1000;
+  opacity: 0.8;
+}
+
+/* Responsive Overrides */
+@media only screen and (max-width: 480px) {
+  .preview-page {
+    padding: 0;
+    background: #000;
+  }
+  
+  .phone-frame {
+    max-width: 100%;
+    height: 100vh;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+  
+  .phone-bezel {
+    border-radius: 0;
+  }
+  
+  .phone-screen {
+    padding-top: 48px;
+    padding-bottom: 24px;
+  }
+  
+  .dynamic-island {
+    display: block; /* keep it visible for aesthetics */
+  }
+}

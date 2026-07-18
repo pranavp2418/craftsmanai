@@ -1,0 +1,519 @@
+"""Initial-generation prompt assembler (parse-first, intent-routed — Lovable-style).
+
+`build_initial_prompt(...)` has the SAME signature as the old
+`openai_service._build_concise_initial_prompt`, so it is a drop-in replacement.
+
+Structure:
+  * COMMON_SYSTEM_PROMPT  -> the shared, adjustable "system" layer.
+  * INTENT-DRIVEN focused directive -> chosen from parsedData.intent / source_kind
+    (render_as_is, image_enhancement_only, convert_to_jewelry, sketch_to_render, modify_existing,
+    text_to_render). This is the "router → one focused template per job" idea from the Lovable
+    prototype: build from the parsed structured state, not raw user language.
+  * a short type/form line -> only what the jewellery type structurally needs (e.g. pendant bail).
+  * USER REQUEST           -> the client's OWN prompt, dominant; plus normalized retailer directives.
+  * opt-in modules         -> attached only for text-only renders, gated by the type's profile.
+
+All rule TEXT and detection helpers are read lazily from openai_service (single source of truth);
+this module imports nothing from it at import time (no circular imports).
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Dict, Optional
+
+from .profiles import (
+    resolve_profile,
+    MODULE_TEXT, MODULE_STONE, MODULE_SKETCH,
+    BAIL_ADD_IF_MISSING, BAIL_PRESERVE,
+    TEXT_PRIMARY, TEXT_IF_DETECTED,
+)
+from .common import (
+    COMMON_SYSTEM_PROMPT, LEAN_IMAGE_MASTER, light_gold_note, diamond_cut_clause, metal_conversion_clause,
+    normalize_retailer_language, diamond_size_clause,
+)
+
+
+_USER_METAL_WORDS = ["white gold", "rose gold", "yellow gold", "platinum", "silver", "10k", "14k", "18k"]
+_SKETCH_WORDS = ["sketch", "drawing", "draw", "hand drawn", "hand-drawn", "pencil", "doodle"]
+_TEXT_WORDS = ["name", "initial", "letter", "number", "word", "text", "monogram", "spell", "says", "reads", "font"]
+# Stone intent — only add stones (and stone-priming modules) when the user ACTUALLY asks for them.
+_STONE_WORDS = [
+    "diamond", "stone", "gem", "gemstone", "iced", "ice out", "iced out", "ice-out", "icy",
+    "pave", "pavé", "crystal", " cz", "cubic zirconia", "zirconia", "moissanite", "vvs",
+    "bust down", "bustdown", "flooded", "baguette", "emerald", "ruby", "sapphire", "birthstone",
+    "encrusted", "studded", "bling", "brilliant cut", "set with stone", "stone set", "frozen",
+]
+
+
+def _wants_stones(user_prompt: str) -> bool:
+    """True only if the request actually calls for diamonds / gemstones. 'diamond cut' / 'diamond-cut'
+    is a metal FINISH (not stones) so it is stripped before the check."""
+    p = re.sub(r"diamond[\s-]*cut", "", (user_prompt or "").lower())
+    return any(w in p for w in _STONE_WORDS)
+
+
+def _has_text_intent(user_prompt: str) -> bool:
+    p = (user_prompt or "").lower()
+    return bool(re.search(r"[0-9]", user_prompt or "")) or any(w in p for w in _TEXT_WORDS)
+
+
+def _intent_directive(intent: str, source_kind: str, item_type: str, has_user_prompt: bool) -> str:
+    """A single focused instruction chosen from the parsed intent (Lovable-style job routing)."""
+    if intent == "render_as_is" or (source_kind == "jewelry_reference" and not has_user_prompt):
+        return (" Reproduce ONLY the EXACT jewelry PIECE as a clean CAD render — do NOT redesign, 'improve', "
+                "enlarge stones, simplify, or add anything. Same shape, same every stone, same metal, same "
+                "lettering ON the piece. Do NOT reproduce any surrounding notes, captions, dimensions, or text "
+                "that appear around the piece in the reference — only the piece itself.")
+    if intent == "image_enhancement_only":
+        return (" ENHANCEMENT ONLY (this is NOT a redesign): keep the design 100% identical and only make it a "
+                "cleaner, sharper, more premium CAD render.")
+    if intent == "convert_to_jewelry" or source_kind == "non_jewelry_reference":
+        return (f" CONVERT THIS IMAGE INTO A WEARABLE {item_type.upper()}: keep the subject's overall shape, outline, "
+                "proportions and negative space, but render it as REAL 3D metal jewelry (not a flat graphic). Map any "
+                "coloured regions to appropriate metal / enamel / gemstone equivalents.")
+    if intent == "sketch_to_render" or source_kind == "sketch":
+        return (" This is a hand-drawn SKETCH — treat the drawn lines as the intended design and produce a clean, "
+                "realistic, manufacturable CAD render of that design. Do NOT copy pencil strokes, shading or paper.")
+    return ""  # modify_existing / default -> handled by the normal USER REQUEST
+
+
+def build_initial_prompt(
+    user_prompt: str,
+    parsed_data: Optional[Dict[str, Any]],
+    metal_tone: str,
+    has_images: bool,
+    image_count: int = 0,
+    font_template: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Build the initial-generation prompt. Drop-in for _build_concise_initial_prompt.
+
+    When ``font_template`` is provided (a glyph reference for a named font), a dedicated
+    letterform-tracing prompt is built so the model copies the EXACT font from the attached template.
+    """
+    # Lazy import — guarantees no circular import and a single source of truth for rule text.
+    from app.services import openai_service as svc
+
+    parsed = parsed_data or {}
+    item_type = parsed.get("item_type")
+    if not item_type:
+        inferred = svc.infer_item_type_from_prompt(user_prompt)
+        # infer's catch-all default is 'pendant'; do NOT auto-bail an UNKNOWN piece — only treat it as
+        # a pendant when the prompt actually names a hanging type, else stay neutral ('custom', no bail).
+        if inferred == "pendant" and not re.search(r"\b(pendant|necklace|charm|chain|bail)\b", (user_prompt or "").lower()):
+            item_type = "custom"
+        else:
+            item_type = inferred
+    profile = resolve_profile(item_type)
+    lower = (user_prompt or "").lower()
+    user_named_metal = any(m in lower for m in _USER_METAL_WORDS)
+    intent = (parsed.get("intent") or "").strip().lower()
+    source_kind = (parsed.get("source_kind") or "").strip().lower()
+
+    if font_template:
+        return _assemble_font_template(svc, user_prompt, lower, item_type, profile, metal_tone, user_named_metal, font_template)
+    if has_images:
+        return _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, user_named_metal, intent, source_kind,
+                               is_screenshot=bool(parsed.get("is_screenshot")))
+    return _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone, user_named_metal, intent)
+
+
+# ---------------------------------------------------------------------------
+# IMAGE-INPUT branch — kept intentionally SHORT; user request is dominant.
+# ---------------------------------------------------------------------------
+def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, user_named_metal, intent="", source_kind="", is_screenshot=False) -> str:
+    # Client policy: output is ALWAYS front-facing, whatever the input photo's angle and even with an
+    # empty prompt. (Other views are a separate multi-view feature, not this path.)
+    keep_ref_angle = False
+    angle_phrase = "in a straight FRONT-FACING view"
+
+    # VARIATIONS request (e.g. "create 6 different variations in yellow gold"). The user wants MULTIPLE
+    # DISTINCT designs based on the reference — NOT a 1:1 reproduction. This MUST override the reproduce-
+    # as-truth framing below, which otherwise dominates (the image is a strong signal) and returns one
+    # identical copy — exactly the TJX-138 bug. Mirrors the text-only variations behaviour: ONE image,
+    # a clean grid of N visibly-DIFFERENT variations of the reference, in the requested metal.
+    if svc._user_wants_variations(user_prompt):
+        _vm = re.search(r"\b([2-9]|1[0-2])\b\s*(?:different\s+|new\s+|design\s+)?(?:variation|version|design|option)", lower)
+        n_txt = f"{_vm.group(1)} DISTINCT" if _vm else "several DISTINCT"
+        _vmetal = svc._detected_metal_phrase(user_prompt) if user_named_metal else None
+        metal_clause = f" Render ALL of them in {_vmetal}." if _vmetal else ""
+        # NOTE: deliberately NOT prepending LEAN_IMAGE_MASTER here — its "reproduce that EXACT piece /
+        # no proportion changes / reproduce as-is" wording directly contradicts "generate variations" and
+        # would dilute the intent back into a 1:1 copy. Lead with the variation intent instead.
+        return (
+            "You are CraftsmanAI, a precise CAD jewelry render engine. A REFERENCE IMAGE is attached. This "
+            "is a DESIGN-VARIATION task — the user wants several DISTINCT variations inspired by the "
+            "reference, NOT a 1:1 copy.\n\n"
+            f"Generate {n_txt} DESIGN VARIATIONS of the attached piece, laid out as a clean, evenly-spaced "
+            "GRID on ONE pure solid white background (#FFFFFF), each variation clearly separated with space "
+            "around it. Every variation must stay recognisably the SAME TYPE of piece and keep the "
+            "reference's core identity (its overall subject / silhouette), but each must DIFFER MEANINGFULLY "
+            "from the others — vary the proportions, stone layout / coverage, border or frame style, accents "
+            "and detailing. Do NOT just repeat the same piece; they must be visibly DIFFERENT designs."
+            f"{metal_clause} CAD-style realistic jewelry render, crisp, even studio lighting, with "
+            "ABSOLUTELY ZERO text, labels or captions anywhere.\n\nOne image only."
+        )
+
+    # LOVABLE-EXACT create (WITH image) — assembled exactly like the prototype's composePrompt: master +
+    # initial systemPreamble + intent directive carrying Lovable's referenceType / authority / attachment /
+    # normalized-directives / preserve blocks after the header and SHARED_RULES before the closing
+    # "Generate ONE ..." line. Intent routing is deterministic (we deliberately skip Lovable's
+    # parse-request LLM): enhancement -> image_enhancement_only, sketch -> sketch_to_render, non-jewelry ->
+    # convert_to_jewelry, a real note -> modify_existing (Lovable's parse marks image+note jobs that way),
+    # else render_as_is. VARIATIONS (above) and the butterfly->ring form clause (below) are kept as the
+    # only justified additions.
+    from app.services.prompts.lovable_create import (
+        build_lovable_create, metal_phrase as _lov_metal, MANDATORY_PRESERVE_LIST,
+        RENDER_AS_IS, IMAGE_ENHANCEMENT, SKETCH_TO_RENDER, CONVERT_TO_JEWELRY, MODIFY_EXISTING,
+        per_type_tail, resolve_canonical_type, LOVABLE_TAXONOMY,
+    )
+    _i = (intent or "").strip().lower()
+    _sk = (source_kind or "").strip().lower()
+    _note = (user_prompt or "").strip()
+    if _i == "image_enhancement_only":
+        directive = IMAGE_ENHANCEMENT
+    elif _i == "convert_to_jewelry" or _sk == "non_jewelry_reference":
+        directive = CONVERT_TO_JEWELRY
+    elif _i == "sketch_to_render" or _sk == "sketch":
+        directive = SKETCH_TO_RENDER
+    elif _note:
+        directive = MODIFY_EXISTING
+    else:
+        directive = RENDER_AS_IS
+
+    # --- Lovable's per-job blocks (deterministic equivalents of classifyReferenceType /
+    #     determineAuthority / buildAttachmentAuthorityBlock / normalizeRetailerLanguage) ---
+    if directive is IMAGE_ENHANCEMENT:
+        _ref_type = "IMAGE_ENHANCEMENT_ONLY"
+    elif directive in (CONVERT_TO_JEWELRY, SKETCH_TO_RENDER):
+        _ref_type = "NON_JEWELRY_REFERENCE"
+    else:
+        _ref_type = "EXISTING_JEWELRY_REFERENCE"
+    reference_type_block = f"REFERENCE TYPE (auto-classified): {_ref_type}"
+
+    if directive in (CONVERT_TO_JEWELRY, SKETCH_TO_RENDER):
+        authority_block = (
+            "HYBRID AUTHORITY:\n"
+            "- Preserve the source silhouette, spacing, and negative space.\n"
+            "- Apply text instructions only where they explicitly modify material, stones, or construction.")
+    elif _note:
+        authority_block = (
+            "REFERENCE + TEXT AUTHORITY:\n"
+            "- The reference governs all unchanged regions.\n"
+            "- The note governs ONLY the explicitly requested changes.\n"
+            "- Preserve all unspecified geometry, material, and layout from the reference.")
+    else:
+        authority_block = (
+            "REFERENCE AUTHORITY:\n"
+            "- The uploaded reference is the primary authority for geometry, material, layout, and design identity.\n"
+            "- Reproduce the same piece exactly unless the user explicitly requests a change.")
+
+    if image_count > 1:
+        # Multi-image create = combine: the instruction governs HOW to blend; each reference contributes
+        # ONLY its role (shape OR finish), so don't tell the model to preserve one whole reference.
+        authority_block = (
+            "MULTI-REFERENCE + TEXT AUTHORITY:\n"
+            "- The user's instruction is the authority for HOW to combine the references.\n"
+            "- Each reference contributes only its ROLE (the shape/letter OR the finish/style), not its whole self.\n"
+            "- Keep the shape/letter and proportions from the shape reference; take the stone coverage, ice "
+            "level, stone size, metal colour and setting from the style reference.")
+
+    if image_count > 1:
+        # CREATE with MULTIPLE references = a COMBINE ("make X in the style of Y"). Image ORDER must NOT
+        # imply priority. The old "FIRST = master, additional = support-only, master wins" wording made the
+        # model IGNORE the 2nd reference (TES-067: a plain/black letter first + a fully-iced letter second
+        # rendered plain because the iced reference was treated as ignorable support; merely SWAPPING the
+        # upload order "fixed" it in TES-068 — proof the order, not the intent, was driving the result, and
+        # end-users cannot be told which image to upload first). So for a multi-image create the model must
+        # read the instruction, assign each image a ROLE, and use them ALL regardless of order.
+        attachment_block = (
+            "IMAGE ATTACHMENT AUTHORITY (multiple references — COMBINE):\n"
+            "- Several reference images are attached. Do NOT assume the FIRST image is the master; the "
+            "order of the images does NOT imply priority or importance.\n"
+            "- Read the user's instruction to work out the ROLE of each reference: usually one image gives "
+            "the SHAPE / STRUCTURE / letter of the piece to build, and another gives the STYLE / FINISH to "
+            "copy onto it — stone & diamond coverage (fully iced vs partial vs plain), stone size, metal "
+            "colour and setting style.\n"
+            "- Build exactly the piece the instruction describes: take the shape from the shape reference "
+            "and the finish/style from the style reference, and USE EVERY attached image. NEVER ignore a "
+            "reference just because it is not first.\n"
+            "- Only reproduce a single reference as-is if the instruction clearly refers to just one piece.")
+    elif _ref_type in ("EXISTING_JEWELRY_REFERENCE", "IMAGE_ENHANCEMENT_ONLY"):
+        attachment_block = (
+            "IMAGE ATTACHMENT AUTHORITY:\n"
+            "- FIRST attached image = MASTER reference for geometry, layout, stones, metal placement, and silhouette\n"
+            "- Never average multiple images into a new hybrid design unless the user explicitly asks to combine them.\n"
+            "- If an attached support image conflicts with the master reference, the master reference wins.")
+    else:
+        attachment_block = ""
+
+    # Normalized technical directives (Lovable's normalizeRetailerLanguage + its PENDANT BAIL directive,
+    # which it pushes into the same list for every pendant job).
+    _norm = normalize_retailer_language(user_prompt)
+    _norm_items = _norm.split("\n- ")[1:] if _norm else []
+    _pendant_like = svc._is_pendant_like(item_type, user_prompt) or profile.bail_policy == BAIL_ADD_IF_MISSING
+    if _pendant_like:
+        if re.search(r"\b(v[-\s]?bail|rabbit\s*ear\s*bail|enhancer\s*bail|hinge\s*bail|hidden\s*bail|logo\s*bail|heart\s*bail|puffy\s*heart\s*bail|custom\s*bail)\b", lower):
+            _norm_items.append(
+                "PENDANT BAIL — custom bail requested: REPLACE the existing/default bail with the "
+                "user-specified bail. Do NOT stack two bails. Do NOT keep both.")
+        else:
+            _norm_items.append(
+                "PENDANT BAIL — preservation: if the reference shows any bail, reproduce it exactly. If NO "
+                "bail is visible and no custom bail was requested, add only a simple Standard Loop Bail — a "
+                "smooth polished bail with a gently flared, softly rounded top that tapers into a small round "
+                "loop / jump-ring at its base, in the same metal, fixed at the very top facing forward. Never "
+                "duplicate or stack bails.")
+    normalized_block = ("Normalized technical directives:\n- " + "\n- ".join(_norm_items)) if _norm_items else ""
+
+    # SCREENSHOT input (auto-classified by the task's single classify call): the UI chrome must be
+    # STRIPPED, never reproduced (TES-035: the render faithfully copied the whole iPhone Safari frame —
+    # status bar, URL bar and download banner — around a correctly edited pendant). Placed FIRST so it
+    # outranks the reproduce/preserve framing below.
+    screenshot_block = (
+        "SCREENSHOT INPUT (auto-classified): the reference image is a phone / app / browser SCREENSHOT. "
+        "The jewellery piece shown INSIDE it is the ONLY subject. Discard COMPLETELY every interface "
+        "element — status bar, clock, battery/wifi icons, notch, URL/address bar, buttons, menus, tabs, "
+        "download banners, file names, captions, watermarks, chat bubbles, rulers/measuring tape — and "
+        "render the piece ALONE, large and centered (full-frame), on the pure white background. The "
+        "preserve rules below apply ONLY to the jewellery piece itself, NEVER to the screenshot frame, "
+        "its layout or its composition.") if is_screenshot else ""
+
+    # Lovable adds MANDATORY_PRESERVE_LIST to EVERY job that is not text_only (convert/sketch included).
+    # EXCEPT a multi-image COMBINE: freezing one whole reference fights the blend (it re-froze the plain
+    # shape reference's finish in TES-067), so combines get a role-based preserve note instead.
+    if image_count > 1:
+        _preserve_block = (
+            "\n\nCOMBINE — PRESERVE BY ROLE (multiple references): do NOT freeze a single reference "
+            "wholesale. Preserve the LETTER / SHAPE, proportions and silhouette from the shape reference, "
+            "and take the stone coverage / ice level, stone size, metal colour and setting from the style "
+            "reference. Do NOT carry the shape reference's finish (e.g. plain or black/enamel faces) or the "
+            "style reference's letter/shape across.")
+    else:
+        _preserve_block = MANDATORY_PRESERVE_LIST
+    authority_blocks = "\n".join(b for b in (screenshot_block, reference_type_block, authority_block,
+                                             attachment_block, normalized_block) if b) + _preserve_block
+
+    _named_metal = svc._detected_metal_phrase(user_prompt) if user_named_metal else ""
+    mp = _lov_metal(True, user_named_metal, _named_metal, _i)
+    user_request = f"User note: {_note}" if _note else ""
+
+    # SURGICAL-EDIT CLAUSE — attached to the user's note itself, because the generic MANDATORY PRESERVE
+    # LIST lands ~1.5k characters later in the prompt and loses to the nearby "change this" instruction:
+    # asked to restyle ONE letter, the model re-imagined the WHOLE piece (TES-009 — the T did change, but
+    # the pavé density collapsed, the letters thinned and the layered relief was flattened). Naming the
+    # everything-else-is-frozen rule right where the change is requested keeps the edit local.
+    # (normalize_retailer_language now lives in the normalized-directives authority block above.)
+    if _note and svc._user_wants_edit(user_prompt):
+        user_request += (
+            "\n\nSURGICAL EDIT — this is a TARGETED CHANGE to an EXISTING piece, NOT a redesign. "
+            "PRIORITY 1 — APPLY THE CHANGE: the user's requested change ALWAYS WINS and must be VISIBLY applied. "
+            "If the note targets an attribute that the preservation rules below would otherwise freeze (a stone's "
+            "SIZE or count, a letter, the pavé, a colour, a proportion…), then CHANGE exactly that attribute as "
+            "asked — preservation NEVER cancels or waters down the requested change; it applies ONLY to what the "
+            "note does NOT mention. Returning the reference unchanged is a FAILURE. "
+            "PRIORITY 2 — PRESERVE THE REST: everything the note does NOT target must come through "
+            "PIXEL-FOR-PIXEL as in the reference: the same stone COUNT, SIZE and DENSITY (do not thin out, "
+            "enlarge or reduce the pavé — if the reference is fully iced with hundreds of tiny stones, the "
+            "result must be too), the same letter thickness and stroke weight, the same number of layers and "
+            "the same raised/recessed relief depth, the same borders, the same bail, the same metal and finish, "
+            "the same proportions and spacing. Do NOT simplify, smooth, flatten, slim down or 'clean up' any "
+            "part of the design. The ONLY visible difference between the reference and your render must be the "
+            "requested change itself. "
+            "STRUCTURAL CONNECTIVITY: the piece must remain ONE physically connected, manufacturable object. "
+            "If the change swaps or restyles a LETTER, the new letter must stay FUSED / joined to its "
+            "neighbouring letters exactly like the original lettering (shared baseplate or touching strokes) — "
+            "never render it as a separate floating element with a gap; a disconnected letter cannot be "
+            "manufactured or worn as a pendant."
+        )
+    design_subject = _note or "a jewelry piece"
+    if _wants_stones(user_prompt):
+        stone_phrase = "Stone setting: set the piece with the diamonds / stones described in the request."
+    elif directive is CONVERT_TO_JEWELRY:
+        # Converting a non-jewelry image (logo / photo of a person/object): default to SOLID metal, NO stones
+        # unless asked — the model otherwise ices the whole figure with pavé diamonds (the golfer-pendant bug).
+        stone_phrase = ("Stones: NONE unless explicitly requested — render the converted subject in SOLID plain "
+                        "polished metal (a clean 3D metal relief / sculpted figure); do NOT add diamonds, pavé or gemstones.")
+    else:
+        stone_phrase = ""
+
+    # SINGLE authoritative angle instruction — output is ALWAYS front-facing (client policy), whatever
+    # angle the reference photo was shot from and even with no prompt. The shared blocks reinforce this.
+    angle_line = (
+        "CAMERA ANGLE: render the piece FRONT-FACING and centered — no matter what angle the reference "
+        "photo was taken from (tilted, rotated, three-quarter, side, angled or skewed), rotate the "
+        "piece so it faces the camera perfectly straight-on. Front hero approval view."
+    )
+
+    out = build_lovable_create(directive, angle_line=angle_line, authority_blocks=authority_blocks,
+                               design_subject=design_subject, item_type=item_type,
+                               metal_phrase=mp, stone_phrase=stone_phrase, user_request=user_request,
+                               requested_changes=_note or "as described")
+
+    # PER-TYPE LAYER (Lovable taxonomy): the type's verbatim default_output_behavior + render-family rule.
+    # The concise "NEGATIVE:" one-liner belongs ONLY to Lovable's concise render-family branch
+    # (components / accessories / sets / custom objects); full pieces get ANTI_HALLUCINATION inside
+    # SHARED_RULES instead — exactly like the prototype.
+    _fam = LOVABLE_TAXONOMY[resolve_canonical_type(item_type)]["render_family"]
+    out += "\n\n" + per_type_tail(item_type, label=design_subject, image_count=image_count,
+                                  include_negative=(_fam != "full_jewelry_piece"))
+
+    # PER-TYPE FORM (kept bug-fix): a SPECIFIC non-pendant type (ring/cufflink/brooch...) gets a thin form
+    # clause so a flat motif becomes that type, NOT a default pendant (butterfly->ring fix).
+    _ct = (item_type or "").strip().lower()
+    _generic_type = (not _ct) or _ct in ("jewelry", "jewellery", "custom", "custom object", "other", "charm")
+    if not _generic_type and not _pendant_like:
+        out += (f"\n\nForm: present the design as the requested {item_type}:{svc._type_form_clause(item_type, user_prompt)} "
+                f"It is a wearable {item_type} — NOT a pendant or charm: do NOT add any bail, hook, jump-ring or chain hole.")
+    return out
+
+
+# ---------------------------------------------------------------------------
+# FONT-TEMPLATE branch — a glyph reference image guarantees the EXACT named font.
+# ---------------------------------------------------------------------------
+def _assemble_font_template(svc, user_prompt, lower, item_type, profile, metal_tone, user_named_metal, font_template) -> str:
+    """Prompt for the glyph-template case: an attached black-on-white image shows the EXACT font;
+    the model must TRACE those letterforms and build them as a 3D piece per the user's design."""
+    text = (font_template or {}).get("text") or ""
+    font = (font_template or {}).get("font") or ""
+    effective_metal = "" if user_named_metal else profile.default_metal
+    metal_word = effective_metal or "the requested metal"
+    wants_stones = _wants_stones(user_prompt)
+
+    is_pendant = profile.bail_policy in (BAIL_ADD_IF_MISSING, BAIL_PRESERVE) and svc._is_pendant_like(item_type, user_prompt)
+    if is_pendant:
+        form_line = ("Build the templated lettering as a wearable PENDANT with EXACTLY ONE flared, fan-shaped "
+                     "bail at the top-centre for a chain (no chain/cord shown).")
+    else:
+        form_line = f"Build the templated lettering as a {item_type}.{svc._type_form_clause(item_type, user_prompt)}"
+
+    layered_block = f"\n\n{svc.LAYERED_RULE}" if svc._user_wants_layered(user_prompt) else ""
+    if wants_stones:
+        stone_note = f"\n\n{svc.SETTING_QUALITY}\n\n{svc.STONE_ARRANGEMENT_DEFAULT}{diamond_size_clause(user_prompt)}"
+    else:
+        stone_note = (f" Render it as PLAIN, solid, polished {metal_word} — NO diamonds, NO gemstones, NO pavé "
+                      "and NO stone settings (none were requested).")
+    # Apply the gold-colour guidance whenever the piece is YELLOW gold — whether the USER named it
+    # ("yellow gold"/"gold") OR it's the profile default. (Previously, a user-named metal blanked
+    # effective_metal, so explicit "yellow gold" requests got NO gold-colour note -> copper/glossy look.)
+    _is_yellow_gold = (("yellow gold" in lower) or ("gold" in lower and "white" not in lower and "rose" not in lower)
+                       or ("gold" in (effective_metal or "") and "white" not in (effective_metal or "") and "rose" not in (effective_metal or "")))
+    gold_note = light_gold_note("yellow gold") if _is_yellow_gold else ""
+    dcut = diamond_cut_clause(user_prompt)
+    retail = normalize_retailer_language(user_prompt)
+
+    template_instruction = (
+        f"LETTERING TEMPLATE (the attached image): it is a FLAT BLACK-ON-WHITE FONT TEMPLATE showing the "
+        f"EXACT letters and the EXACT font/letterform style to use — it is ONLY a font reference, NOT a "
+        f"finished piece and NOT artwork to copy as-is. Reproduce these EXACT letter shapes (the \"{font}\" "
+        f"font: same proportions, stroke style, spacing and character forms) and build them as a real 3D "
+        f"{metal_word} {item_type}. The lettering reads EXACTLY \"{text}\". The template's flat BLACK fill and "
+        f"white background are NOT the design — they only convey the letter shapes; render the actual piece in "
+        f"{metal_word}. Do NOT change the font, do NOT substitute another style, and do NOT add, drop, mirror, "
+        f"or reorder any character."
+    )
+
+    return f"""{COMMON_SYSTEM_PROMPT}
+
+{template_instruction}
+
+{form_line}{stone_note}
+
+USER REQUEST (apply these design details to the templated lettering; keep the font EXACTLY as the template): {user_prompt}{retail}{layered_block}{gold_note}{dcut}
+
+One image only."""
+
+
+# ---------------------------------------------------------------------------
+# TEXT-ONLY branch — fuller, but capability modules are profile-gated.
+# ---------------------------------------------------------------------------
+def _assemble_text_only(svc, user_prompt, lower, item_type, profile, metal_tone, user_named_metal, intent="") -> str:
+    effective_metal = "" if user_named_metal else profile.default_metal
+    metal_phrase = f" in {effective_metal}" if effective_metal else ""
+    wants_stones = _wants_stones(user_prompt)
+    metal_word = effective_metal or "metal"
+
+    # FULLY-ICED NAME / TEXT pendant -> a LEAN, ICE-DOMINANT prompt. Validated empirically: the full builder
+    # stack (master + bail + font + note + modules, ~2800 chars) drowned the "fully iced" signal and the
+    # model reverted to its default OUTLINED-cursive look (diamond border + polished letter faces); a short
+    # prompt where the solid-diamond surface is the dominant theme fully-paves the letter faces, matching the
+    # Lovable output. So for iced name/text pieces we bypass the heavy stack entirely.
+    # FULL-COVERAGE detection — the image model has a strong prior for the "outlined letters" look (a diamond
+    # BORDER + plain-gold faces). A request to FULLY COVER / cover-with-diamonds / fully-diamond must route to
+    # the strong BUST-DOWN branch so the letter FACES are fully paved (not just outlined). "fully cover" (no d),
+    # "cover it with diamonds", "fully diamond", etc. were all missed before — hence ours only bordered the
+    # letters while Lovable fully iced them.
+    _iced = (any(w in lower for w in ("fully iced", "iced out", "ice out", "iced-out", "bust down", "bustdown",
+                                      "flooded", "frozen", "fully covered", "all iced", "full diamond",
+                                      "all diamond", "completely iced", "fully diamond", "covered in diamond",
+                                      "covered with diamond", "covered in stone"))
+             or ("cover" in lower and ("diamond" in lower or "stone" in lower or "ice" in lower))
+             or ("fully" in lower and ("diamond" in lower or "iced" in lower or "stone" in lower)))
+    if _iced and _has_text_intent(user_prompt):
+        metal_named = svc._detected_metal_phrase(user_prompt) or (effective_metal or "white gold")
+        bail_line = " Add ONE simple loop bail at the top for a chain." if profile.bail_policy != "none" else ""
+        return (
+            "You are CraftsmanAI, a precise CAD jewelry render engine. Produce ONE clean "
+            "CAD-style 3D render (jewellery-CAD software look, NOT a photograph) on a pure solid white "
+            "(#FFFFFF) background, sharp focus.\n\n"
+            f"Create a fully ICED-OUT {item_type} in {metal_named}, built exactly from the design below."
+            f"{bail_line}\n\n"
+            "BUST-DOWN — 100% DIAMOND COVERAGE: every letter and every surface is a SOLID SHEET of small "
+            "micro-pavé diamonds. The diamonds fill the FULL WIDTH of every stroke, so each letter FACE is "
+            "entirely diamonds edge to edge; metal shows ONLY as the thin prong walls between touching "
+            "stones. If a two-layer / step-up is mentioned, that is for DEPTH only — BOTH layers are equally "
+            "fully iced. Render the lettering in the exact font/style the design describes.\n\n"
+            f"DESIGN: {user_prompt}\n\n"
+            "One clean image only."
+        )
+    # LOVABLE-EXACT create (WITHOUT image) — master + the text_to_render directive. The iced bust-down branch
+    # (above) and the variations grid (below) are kept as the only additions; the no-stones forbid is folded
+    # into Lovable's {stone_phrase} placeholder, and a thin yellow-gold colour note is appended (validated:
+    # explicit yellow gold otherwise renders copper/glossy).
+    from app.services.prompts.lovable_create import build_lovable_create, metal_phrase as _lov_metal, TEXT_TO_RENDER
+    _named_metal = svc._detected_metal_phrase(user_prompt) if user_named_metal else ""
+    mp = _lov_metal(False, user_named_metal, _named_metal, "text_to_render")
+    if wants_stones:
+        stone_phrase = "Stones: set the piece with the diamonds / stones described in the request."
+    else:
+        # No stones requested — Lovable's {stone_phrase} carries the explicit plain-metal instruction (the
+        # image model otherwise ices name pendants by default; this is the validated no-stones point).
+        stone_phrase = (f"Stones: NONE — render as PLAIN, solid, polished {metal_word} ONLY, with absolutely NO "
+                        "diamonds, gemstones, pavé, crystals or 'iced' surfaces anywhere. Metal only.")
+    body = user_prompt if user_prompt else f"a simple plain {item_type}"
+    # Lovable's TEXT AUTHORITY block + its normalized-directives block, placed after the directive header
+    # exactly like the prototype (text_only jobs get NO mandatory-preserve list there).
+    _norm = normalize_retailer_language(user_prompt)
+    _tx_auth = ("TEXT AUTHORITY:\n"
+                "- No usable jewelry reference governs structure.\n"
+                "- Use the note as the primary authority." + (_norm or ""))
+    out = build_lovable_create(TEXT_TO_RENDER,
+                               angle_line="Front-facing, centered, on a pure solid white (#FFFFFF) background.",
+                               authority_blocks=_tx_auth,
+                               item_type=item_type, metal_phrase=mp, stone_phrase=stone_phrase,
+                               user_request=body)
+    # PER-TYPE LAYER (Lovable taxonomy) — the type's default_output_behavior + render-family rule. The
+    # concise NEGATIVE one-liner only for Lovable's concise render families; full pieces already carry
+    # ANTI_HALLUCINATION inside SHARED_RULES.
+    from app.services.prompts.lovable_create import per_type_tail, resolve_canonical_type, LOVABLE_TAXONOMY
+    _fam = LOVABLE_TAXONOMY[resolve_canonical_type(item_type)]["render_family"]
+    out += "\n\n" + per_type_tail(item_type, label=(user_prompt or item_type),
+                                  include_negative=(_fam != "full_jewelry_piece"))
+    _is_yellow_gold = (("yellow gold" in lower) or ("gold" in lower and "white" not in lower and "rose" not in lower)
+                       or (mp == "yellow_gold_default"))
+    if _is_yellow_gold:
+        out += f"\n\n{light_gold_note('yellow gold')}"
+    if svc._user_wants_variations(user_prompt):
+        # Respect an explicit count ("6 different styles") and force SEPARATE pieces — without this the
+        # model satisfied "6 styles of the name Manish" by engraving the name 6 times on ONE tag
+        # (TES-020) instead of showing 6 pendant design options.
+        _vm = re.search(r"\b([2-9]|1[0-2])\b", lower)
+        _n_txt = f"exactly {_vm.group(1)}" if _vm else "several"
+        out += (f"\n\nMULTIPLE VARIATIONS: generate {_n_txt} DISTINCT design variations laid out as a clean, "
+                "evenly-spaced grid on ONE pure-white background. Each variation is its OWN COMPLETE, "
+                "SEPARATE piece (its own pendant/ring/bracelet with its own bail or band), clearly spaced "
+                "apart from the others. Do NOT merge them into a single object, and NEVER render one piece "
+                "with the name/text repeated multiple times on it — every variation must be a standalone "
+                "piece differing only by the requested variation (style/font/design), all spelling the "
+                "SAME text correctly.")
+    return out

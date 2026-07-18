@@ -1,0 +1,197 @@
+/* Craftsman AI Email/SMS Template — Responsive Styles */
+/* Inline styles handle base rendering; this CSS adds responsive breakpoints */
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #08081a;
+  font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+img {
+  border: 0;
+  outline: none;
+  text-decoration: none;
+  -ms-interpolation-mode: bicubic;
+  max-width: 100%;
+  height: auto;
+}
+
+a {
+  text-decoration: none;
+}
+
+table {
+  border-collapse: collapse;
+  mso-table-lspace: 0pt;
+  mso-table-rspace: 0pt;
+}
+
+td {
+  border-collapse: collapse;
+}
+
+/* ─── Tablet ─── */
+@media only screen and (max-width: 620px) {
+  .card-table {
+    width: 100% !important;
+    min-width: 100% !important;
+  }
+
+  .card-padding {
+    padding-left: 28px !important;
+    padding-right: 28px !important;
+  }
+
+  .heading-text {
+    font-size: 22px !important;
+  }
+
+  .two-col-table {
+    width: 100% !important;
+  }
+
+  .two-col-left,
+  .two-col-right {
+    display: block !important;
+    width: 100% !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  .two-col-right {
+    padding-top: 12px !important;
+  }
+
+  .phone-frame {
+    width: 100% !important;
+    max-width: 375px !important;
+  }
+
+  .invoice-two-col-left,
+  .invoice-two-col-right {
+    display: block !important;
+    width: 100% !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  .invoice-two-col-right {
+    padding-top: 20px !important;
+  }
+}
+
+/* ─── Mobile ─── */
+@media only screen and (max-width: 480px) {
+  .card-table {
+    width: 100% !important;
+    min-width: 100% !important;
+  }
+
+  .card-padding {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+
+  .heading-text {
+    font-size: 20px !important;
+  }
+
+  .subheading-text {
+    font-size: 13px !important;
+  }
+
+  .body-text {
+    font-size: 13px !important;
+  }
+
+  .code-text {
+    font-size: 22px !important;
+    letter-spacing: 4px !important;
+  }
+
+  .cta-button {
+    padding: 13px 24px !important;
+    font-size: 14px !important;
+  }
+
+  .detail-label,
+  .detail-value {
+    font-size: 12px !important;
+  }
+
+  .footer-col {
+    display: block !important;
+    width: 100% !important;
+    text-align: center !important;
+    padding: 6px 0 !important;
+  }
+
+  .receipt-card {
+    margin-left: -4px !important;
+    margin-right: -4px !important;
+  }
+
+  .receipt-total-amount {
+    font-size: 20px !important;
+  }
+
+  .phone-frame {
+    border-radius: 28px !important;
+    width: 100% !important;
+  }
+
+  .sms-bubble {
+    padding: 12px 14px !important;
+  }
+
+  .preview-card-content {
+    padding: 12px 14px !important;
+  }
+
+  .outer-padding {
+    padding: 16px 8px !important;
+  }
+
+  .action-item-text {
+    font-size: 12px !important;
+  }
+
+  .next-step-text {
+    font-size: 12px !important;
+  }
+}
+
+/* ─── Small Mobile ─── */
+@media only screen and (max-width: 360px) {
+  .card-padding {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  .heading-text {
+    font-size: 18px !important;
+  }
+
+  .code-text {
+    font-size: 20px !important;
+    letter-spacing: 3px !important;
+    padding: 14px 24px !important;
+  }
+
+  .cta-button {
+    padding: 12px 16px !important;
+    font-size: 13px !important;
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: #08081a !important;
+  }
+}

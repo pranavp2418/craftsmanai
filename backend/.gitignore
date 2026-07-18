@@ -1,0 +1,137 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+.env.example
+
+uploads/
+# Virtual environments
+.venv
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+*.cover
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+
+# Test files
+tests/
+
+# Alembic migrations (local environment-specific)
+alembic/
+!alembic/env.py
+!alembic/script.py.mako
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+local.db
+
+# Logs
+logs/
+*.log
+*.logs
+
+# Celery
+celerybeat-schedule
+celery.log
+
+# Redis
+*.rdb
+
+# OS
+Thumbs.db
+.Thumbs.db
+
+# Security sensitive files
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets.json
+credentials.json
+
+# IDE config
+.settings/
+.classpath
+.project
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.~*
+
+# Node (if using frontend)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Docker
+.dockerignore
+
+# Debug and development files
+debug_*.py
+# test_*.py
+test_import_check.py
+test_minimal.py
+test_one_by_one.py
+test_password.py
+test_specific.py
+create_tables.py
+run_tests.py
+
+# Development rules
+DEVELOPMENT_RULES.md
+.env.bak*
+.env.*.bak
+*.bak
