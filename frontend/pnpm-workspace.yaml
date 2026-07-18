@@ -1,0 +1,27 @@
+# =============================================================================
+# pnpm configuration
+# =============================================================================
+# This file is read by pnpm 11+ even for single-package repos.
+#
+# `allowBuilds` is an EXPLICIT ALLOWLIST of packages whose install / postinstall
+# scripts are allowed to execute. Anything not listed here has its scripts
+# blocked by pnpm. This is a supply-chain-security feature — it limits the
+# blast radius of a malicious update to a transitive dependency.
+#
+# To add a new package: run `pnpm approve-builds <pkg-name>` and pnpm will
+# update this file for you, then verify the package is actually trustworthy
+# before committing.
+#
+# Currently allowed:
+#   - sharp:        Next.js's image-optimisation native library
+#   - unrs-resolver: Native resolver used by oxc / next-lint
+# =============================================================================
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+
+# Force-resolve transitive postcss to a version >= 8.5.10 (GHSA-qx2v-qp2m-jg93).
+# Next.js bundles an older postcss internally; this override patches it.
+overrides:
+  postcss: '8.5.14'
