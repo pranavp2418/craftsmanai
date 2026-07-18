@@ -208,19 +208,42 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
             "- The uploaded reference is the primary authority for geometry, material, layout, and design identity.\n"
             "- Reproduce the same piece exactly unless the user explicitly requests a change.")
 
-    if _ref_type in ("EXISTING_JEWELRY_REFERENCE", "IMAGE_ENHANCEMENT_ONLY"):
+    if image_count > 1:
+        # Multi-image create = combine: the instruction governs HOW to blend; each reference contributes
+        # ONLY its role (shape OR finish), so don't tell the model to preserve one whole reference.
+        authority_block = (
+            "MULTI-REFERENCE + TEXT AUTHORITY:\n"
+            "- The user's instruction is the authority for HOW to combine the references.\n"
+            "- Each reference contributes only its ROLE (the shape/letter OR the finish/style), not its whole self.\n"
+            "- Keep the shape/letter and proportions from the shape reference; take the stone coverage, ice "
+            "level, stone size, metal colour and setting from the style reference.")
+
+    if image_count > 1:
+        # CREATE with MULTIPLE references = a COMBINE ("make X in the style of Y"). Image ORDER must NOT
+        # imply priority. The old "FIRST = master, additional = support-only, master wins" wording made the
+        # model IGNORE the 2nd reference (TES-067: a plain/black letter first + a fully-iced letter second
+        # rendered plain because the iced reference was treated as ignorable support; merely SWAPPING the
+        # upload order "fixed" it in TES-068 — proof the order, not the intent, was driving the result, and
+        # end-users cannot be told which image to upload first). So for a multi-image create the model must
+        # read the instruction, assign each image a ROLE, and use them ALL regardless of order.
+        attachment_block = (
+            "IMAGE ATTACHMENT AUTHORITY (multiple references — COMBINE):\n"
+            "- Several reference images are attached. Do NOT assume the FIRST image is the master; the "
+            "order of the images does NOT imply priority or importance.\n"
+            "- Read the user's instruction to work out the ROLE of each reference: usually one image gives "
+            "the SHAPE / STRUCTURE / letter of the piece to build, and another gives the STYLE / FINISH to "
+            "copy onto it — stone & diamond coverage (fully iced vs partial vs plain), stone size, metal "
+            "colour and setting style.\n"
+            "- Build exactly the piece the instruction describes: take the shape from the shape reference "
+            "and the finish/style from the style reference, and USE EVERY attached image. NEVER ignore a "
+            "reference just because it is not first.\n"
+            "- Only reproduce a single reference as-is if the instruction clearly refers to just one piece.")
+    elif _ref_type in ("EXISTING_JEWELRY_REFERENCE", "IMAGE_ENHANCEMENT_ONLY"):
         attachment_block = (
             "IMAGE ATTACHMENT AUTHORITY:\n"
             "- FIRST attached image = MASTER reference for geometry, layout, stones, metal placement, and silhouette\n"
-            + ("- Additional attached images = secondary support references only; use them only for details explicitly requested by the user.\n"
-               if image_count > 1 else "")
-            + "- Never average multiple images into a new hybrid design unless the user explicitly asks to combine them.\n"
+            "- Never average multiple images into a new hybrid design unless the user explicitly asks to combine them.\n"
             "- If an attached support image conflicts with the master reference, the master reference wins.")
-    elif image_count > 1:
-        attachment_block = (
-            "IMAGE ATTACHMENT AUTHORITY:\n"
-            "- FIRST attached image is the base visual context.\n"
-            "- Additional attached images are support-only and must not override the first image unless the note explicitly asks for it.")
     else:
         attachment_block = ""
 
@@ -257,8 +280,19 @@ def _assemble_image(svc, user_prompt, lower, item_type, profile, image_count, us
         "its layout or its composition.") if is_screenshot else ""
 
     # Lovable adds MANDATORY_PRESERVE_LIST to EVERY job that is not text_only (convert/sketch included).
+    # EXCEPT a multi-image COMBINE: freezing one whole reference fights the blend (it re-froze the plain
+    # shape reference's finish in TES-067), so combines get a role-based preserve note instead.
+    if image_count > 1:
+        _preserve_block = (
+            "\n\nCOMBINE — PRESERVE BY ROLE (multiple references): do NOT freeze a single reference "
+            "wholesale. Preserve the LETTER / SHAPE, proportions and silhouette from the shape reference, "
+            "and take the stone coverage / ice level, stone size, metal colour and setting from the style "
+            "reference. Do NOT carry the shape reference's finish (e.g. plain or black/enamel faces) or the "
+            "style reference's letter/shape across.")
+    else:
+        _preserve_block = MANDATORY_PRESERVE_LIST
     authority_blocks = "\n".join(b for b in (screenshot_block, reference_type_block, authority_block,
-                                             attachment_block, normalized_block) if b) + MANDATORY_PRESERVE_LIST
+                                             attachment_block, normalized_block) if b) + _preserve_block
 
     _named_metal = svc._detected_metal_phrase(user_prompt) if user_named_metal else ""
     mp = _lov_metal(True, user_named_metal, _named_metal, _i)

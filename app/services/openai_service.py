@@ -4652,6 +4652,16 @@ def generate_with_fallback(
                 if _llm_new:
                     expected_texts = [_llm_new]
                     logger.info("[text-extract-llm] regex missed — LLM extracted new text: %r", _llm_new)
+    # MULTI-IMAGE CREATE = a COMBINE ("make X in the style of Y"): the letter/shape comes from a
+    # reference IMAGE, not typed text. Extracting an "expected text" here is unreliable — it read 'J'
+    # out of "...the letter pendant J" when the user wanted the 'I' shape (TES-070) — and chasing it
+    # fired the reletter fallback, whose TEXT-ONLY rebuild DISCARDED the reference shapes and produced a
+    # melted letter. So drop expected text for multi-image creates: the shape reference is the truth,
+    # and the spelling QA + reletter fallback (both gated on needs_spelling_check) stay off.
+    if (not is_refine) and len(resolved_image_urls or []) > 1:
+        if expected_texts:
+            logger.info("[multi-image-create] dropping expected_texts %s — shape comes from the reference, not text", expected_texts)
+        expected_texts = []
     vision_available = bool(os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY)
     needs_spelling_check = bool(expected_texts) and vision_available
 

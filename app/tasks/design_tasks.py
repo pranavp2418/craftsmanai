@@ -288,8 +288,28 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                                 logger.warning("screenshot crop upload failed for design_id=%s: %s — using original", design_id, _ue)
                         elif _is_screenshot:
                             logger.info("Classified reference as SCREENSHOT for design_id=%s — prompt-level strip only", design_id)
-                        if _cls.get("is_jewelry"):
-                            _dm = _cls.get("metal")
+                        # Decide jewelry-ness + metal. In a MULTI-image COMBINE the FIRST image may be a bare
+                        # letter/shape (reads as NON-jewelry) while ANOTHER image is the real jewelry whose
+                        # metal we should copy. Only classifying image #1 defaulted the whole job to
+                        # yellow-gold + convert and ignored the actual piece (TES-070: b/w letter first +
+                        # white iced pendant second → came out YELLOW). So if #1 is not jewelry, scan the
+                        # other references for one that IS, and take the metal from it. Only when NO reference
+                        # is jewelry do we fall back to convert + gold default.
+                        _jewelry_cls, _jewelry_b64 = ((_cls, _mb64) if _cls.get("is_jewelry") else (None, None))
+                        if _jewelry_cls is None and len(_refs2) > 1:
+                            for _uk in _refs2:
+                                if not _uk or _uk == _u2:
+                                    continue
+                                try:
+                                    _kb64 = base64.b64encode(requests.get(_uk, timeout=20).content).decode("utf-8")
+                                    _kcls = classify_reference_image(_kb64)
+                                    if _kcls.get("is_jewelry"):
+                                        _jewelry_cls, _jewelry_b64 = _kcls, _kb64
+                                        break
+                                except Exception:
+                                    continue
+                        if _jewelry_cls is not None:
+                            _dm = _jewelry_cls.get("metal")
                             # classify's combined 2-question call is FLAKY on metal (TES-030: it said 'gold'
                             # for a white-gold piece, so the reletter fallback rebuilt it YELLOW). The
                             # metal-focused detect_metal_color reads the same piece consistently — trust it,
@@ -297,7 +317,7 @@ def generate_design_base_image(self, design_id: int, prompt: str, channel: str):
                             if _dm != "two_tone":
                                 try:
                                     from app.services.openai_service import detect_metal_color as _dmc
-                                    _dm = _dmc(_mb64) or _dm
+                                    _dm = _dmc(_jewelry_b64) or _dm
                                 except Exception:
                                     pass
                             if _dm and _dm != "gold":   # gold stays the yellow_gold default
